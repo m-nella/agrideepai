@@ -1,194 +1,1009 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>🌾 AgriDeepAI</title>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    >
+
+    <title>AgriDeepAI</title>
+
+    <link rel="icon" href="logo.png" type="image/png">
+
+
     <style>
-        /* Reset and base */
-        html,
-        body {
-            background: #1e1e1f !important;
-            height: 100vh;
-            overflow: hidden;
+
+        /* =========================================================
+           GLOBAL RESET
+           ========================================================= */
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
 
-        body {
-            display: flex;
-            background: #1e1e1f !important;
-            margin: 0;
-            padding: 0;
+
+        /* =========================================================
+           THEME VARIABLES
+           ========================================================= */
+
+        :root {
+
+            /* Main page background */
+            --outer-theme: #1e1e1f;
+
+
+            /* -----------------------------------------------------
+               DESKTOP
+               ----------------------------------------------------- */
+
+            --desktop-chat-width: 672px;
+
+            --desktop-chat-top: 40px;
+
+            --desktop-panel-bottom: 40px;
+
+            --desktop-powered-cover-height: 34px;
+
+            --desktop-footer-height: 72px;
+
+
+            /* -----------------------------------------------------
+               MOBILE
+               ----------------------------------------------------- */
+
+            --mobile-side-space: 24px;
+
+            --mobile-top-space: 24px;
+
+
+            /*
+             * Universal Powered-by protection.
+             *
+             * This is intentionally larger than the original
+             * mobile 44px value because the Taskade iframe can
+             * position its footer differently depending on:
+             *
+             * - browser
+             * - viewport
+             * - device
+             * - browser zoom
+             * - responsive layout
+             * - orientation
+             * - interface scaling
+             *
+             * The cover remains outside the iframe and therefore
+             * cannot be bypassed by the Taskade link.
+             */
+            --universal-powered-cover-height: 72px;
+
         }
 
-        .agent-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            width: 100%;
-            background: #1e1e1f !important;
-            position: relative;
-            margin: 0;
-            padding: 0;
-        }
 
-        .agent-container iframe {
-            display: block;
+        /* =========================================================
+           HTML
+           ========================================================= */
+
+        html {
+
             width: 100%;
             height: 100%;
-            flex: 1;
-            border: none;
-            background: #1e1e1f !important;
+
             margin: 0;
             padding: 0;
-            border: none;
-            outline: none;
+
+            background: var(--outer-theme);
+
+            overflow: hidden;
         }
 
-        /* ===== LOADING OVERLAY ===== */
-        .loading-overlay {
+
+        /* =========================================================
+           BODY
+           ========================================================= */
+
+        body {
+
+            width: 100%;
+            height: 100%;
+
+            margin: 0;
+            padding: 0;
+
+            position: relative;
+
+            overflow: hidden;
+
+            background: var(--outer-theme) !important;
+
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Roboto,
+                Helvetica,
+                Arial,
+                sans-serif;
+
+            color: #ececf1;
+
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+
+        /* =========================================================
+           PAGE BACKGROUND
+           ========================================================= */
+
+        .page-background {
+
+            position: fixed;
+
+            inset: 0;
+
+            width: 100%;
+            height: 100%;
+
+            background: var(--outer-theme);
+
+            z-index: 0;
+
+            pointer-events: none;
+        }
+
+
+        /* =========================================================
+           TASKADE CONTAINER
+           ========================================================= */
+
+        .agent-container {
+
+            position: fixed;
+
+            inset: 0;
+
+            width: 100%;
+            height: 100%;
+
+            margin: 0;
+            padding: 0;
+
+            background: var(--outer-theme) !important;
+
+            border: 0;
+            outline: 0;
+
+            z-index: 1;
+
+            overflow: hidden;
+        }
+
+
+        /* =========================================================
+           TASKADE IFRAME
+           ========================================================= */
+
+        .agent-container iframe {
+
             position: absolute;
+
+            inset: 0;
+
+            display: block;
+
+            width: 100%;
+            height: 100%;
+
+            margin: 0;
+            padding: 0;
+
+            border: 0;
+            outline: 0;
+
+            background: transparent !important;
+
+            z-index: 1;
+        }
+
+
+        /* =========================================================
+           DESKTOP OUTER MASK — TOP
+           ========================================================= */
+
+        .outer-top {
+
+            position: fixed;
+
             top: 0;
             left: 0;
             right: 0;
-            bottom: 0;
-            background: #1e1e1f !important;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 20;
-            gap: 16px;
-            transition: opacity 0.5s ease;
-        }
 
-        .loading-overlay.hidden {
-            opacity: 0;
+            height: var(--desktop-chat-top);
+
+            background: var(--outer-theme);
+
+            z-index: 10;
+
             pointer-events: none;
         }
 
-        .loading-spinner {
-            width: 44px;
-            height: 44px;
-            border: 3px solid #2d2d30;
-            border-top-color: #ececf1;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+
+        /* =========================================================
+           DESKTOP OUTER MASK — LEFT
+           ========================================================= */
+
+        .outer-left {
+
+            position: fixed;
+
+            top: var(--desktop-chat-top);
+
+            bottom: var(--desktop-panel-bottom);
+
+            left: 0;
+
+            width:
+                max(
+                    0px,
+                    calc(
+                        (100vw - var(--desktop-chat-width)) / 2
+                    )
+                );
+
+            background: var(--outer-theme);
+
+            z-index: 10;
+
+            pointer-events: none;
         }
 
-        .loading-text {
-            color: #6e6e72;
-            font-size: 14px;
-            font-family: Arial, sans-serif;
+
+        /* =========================================================
+           DESKTOP OUTER MASK — RIGHT
+           ========================================================= */
+
+        .outer-right {
+
+            position: fixed;
+
+            top: var(--desktop-chat-top);
+
+            bottom: var(--desktop-panel-bottom);
+
+            right: 0;
+
+            width:
+                max(
+                    0px,
+                    calc(
+                        (100vw - var(--desktop-chat-width)) / 2
+                    )
+                );
+
+            background: var(--outer-theme);
+
+            z-index: 10;
+
+            pointer-events: none;
         }
 
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
 
-        /* ===== FOOTER COVER (Hides Taskade Watermark) ===== */
+        /* =========================================================
+           DESKTOP BOTTOM COVER
+           ========================================================= */
+
         .footer-cover {
-            position: absolute;
-            bottom: 0;
+
+            position: fixed;
+
             left: 0;
             right: 0;
-            height: 72px;
-            background: #1e1e1f !important;
-            z-index: 30;
+            bottom: 0;
+
+            height: var(--desktop-footer-height);
+
+            background: var(--outer-theme) !important;
+
+            z-index: 20;
+
             pointer-events: none;
+
             user-select: none;
+
             -webkit-user-select: none;
             -moz-user-select: none;
             -ms-user-select: none;
-            cursor: default;
-            touch-action: none;
-            -webkit-touch-callout: none;
-            opacity: 1;
+
+            border: 0;
+            outline: 0;
+
             box-shadow: none;
-            border: none;
         }
+
+
+        /* =========================================================
+           DESKTOP FOOTER BLOCKER
+           ========================================================= */
 
         .footer-blocker {
-            position: absolute;
-            bottom: 0;
+
+            position: fixed;
+
             left: 0;
             right: 0;
-            height: 72px;
-            z-index: 31;
+            bottom: 0;
+
+            height: var(--desktop-footer-height);
+
             background: transparent;
+
+            z-index: 21;
+
             pointer-events: auto;
+
             cursor: default;
+
+            user-select: none;
+
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
         }
+
+
+        /* =========================================================
+           UNIVERSAL POWERED-BY TASKADE COVER
+           
+           IMPORTANT:
+           
+           This is now active on ALL screen sizes.
+           
+           It is deliberately NOT restricted to:
+           
+           - mobile
+           - tablet
+           - desktop
+           - touch devices
+           - landscape
+           - portrait
+           
+           Therefore browser/device classification cannot cause
+           the Taskade branding to become visible.
+           ========================================================= */
+
+        .powered-by-cover {
+
+            position: fixed;
+
+            left: 0;
+            right: 0;
+            bottom: 0;
+
+            width: 100%;
+
+            height:
+                calc(
+                    var(--universal-powered-cover-height)
+                    + env(safe-area-inset-bottom)
+                );
+
+            background:
+                var(--outer-theme) !important;
+
+            border: 0;
+            outline: 0;
+
+            box-shadow: none;
+
+            /*
+             * Must be above the iframe.
+             */
+            z-index: 100;
+
+            /*
+             * The layer itself captures pointer/touch input.
+             * Therefore a hidden Taskade link underneath cannot
+             * be clicked or tapped.
+             */
+            pointer-events: auto;
+
+            cursor: default;
+
+            /*
+             * Prevent selection.
+             */
+            user-select: none;
+
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+
+            /*
+             * Prevent touch gestures from reaching the iframe.
+             */
+            touch-action: none;
+
+            /*
+             * Always visible.
+             */
+            display: block;
+
+            /*
+             * Make the layer completely opaque.
+             */
+            opacity: 1;
+
+            /*
+             * Prevent accidental text/content rendering.
+             */
+            font-size: 0;
+            line-height: 0;
+
+            /*
+             * Do not allow browser compositing to place the
+             * iframe above this layer.
+             */
+            isolation: isolate;
+        }
+
+
+        /* =========================================================
+           UNIVERSAL POWERED-BY INNER SHIELD
+           
+           A second shield gives additional protection against
+           small variations in iframe/footer positioning.
+           ========================================================= */
+
+        .powered-by-cover::before {
+
+            content: "";
+
+            position: absolute;
+
+            left: 0;
+            right: 0;
+            bottom: 0;
+
+            width: 100%;
+            height: 100%;
+
+            background:
+                var(--outer-theme) !important;
+
+            border: 0;
+            outline: 0;
+
+            pointer-events: auto;
+
+            user-select: none;
+
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+
+            touch-action: none;
+        }
+
+
+        /* =========================================================
+           LOADING OVERLAY
+           ========================================================= */
+
+        .loading-overlay {
+
+            position: fixed;
+
+            inset: 0;
+
+            display: flex;
+
+            flex-direction: column;
+
+            align-items: center;
+
+            justify-content: center;
+
+            gap: 16px;
+
+            background: var(--outer-theme) !important;
+
+            z-index: 150;
+
+            opacity: 1;
+
+            transition:
+                opacity 0.5s ease;
+        }
+
+
+        .loading-overlay.hidden {
+
+            opacity: 0;
+
+            pointer-events: none;
+        }
+
+
+        /* =========================================================
+           LOADING SPINNER
+           ========================================================= */
+
+        .loading-spinner {
+
+            width: 44px;
+            height: 44px;
+
+            border: 3px solid #2d2d30;
+
+            border-top-color: #ececf1;
+
+            border-radius: 50%;
+
+            animation:
+                spin 0.8s linear infinite;
+        }
+
+
+        .loading-text {
+
+            color: #6e6e72;
+
+            font-size: 14px;
+        }
+
+
+        @keyframes spin {
+
+            to {
+                transform: rotate(360deg);
+            }
+
+        }
+
+
+        /* =========================================================
+           TABLET
+           ========================================================= */
+
+        @media (min-width: 769px) and (max-width: 1100px) {
+
+            :root {
+
+                --desktop-chat-top: 32px;
+
+                --desktop-chat-width:
+                    min(
+                        672px,
+                        calc(100vw - 32px)
+                    );
+
+                --desktop-panel-bottom: 32px;
+
+                --desktop-powered-cover-height: 36px;
+
+                --desktop-footer-height: 48px;
+            }
+
+        }
+
+
+        /* =========================================================
+           MOBILE
+           
+           IMPORTANT:
+           
+           The old mobile-only Powered-by cover is no longer
+           necessary because the universal cover above is active
+           on every device.
+           ========================================================= */
+
+        @media (max-width: 768px) {
+
+            html,
+            body {
+
+                width: 100%;
+                height: 100%;
+
+                overflow: hidden;
+
+                background:
+                    var(--outer-theme) !important;
+            }
+
+
+            /* -----------------------------------------------------
+               Disable desktop geometry masks.
+               ----------------------------------------------------- */
+
+            .outer-top,
+            .outer-left,
+            .outer-right {
+
+                display: none;
+            }
+
+
+            /* -----------------------------------------------------
+               Disable desktop footer system on mobile.
+               ----------------------------------------------------- */
+
+            .footer-cover,
+            .footer-blocker {
+
+                display: none;
+            }
+
+
+            /* -----------------------------------------------------
+               Taskade container
+               ----------------------------------------------------- */
+
+            .agent-container {
+
+                position: fixed;
+
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+
+                width: 100%;
+                height: 100%;
+
+                overflow: hidden;
+
+                background:
+                    var(--outer-theme) !important;
+            }
+
+
+            /* -----------------------------------------------------
+               Mobile iframe
+               ----------------------------------------------------- */
+
+            .agent-container iframe {
+
+                position: absolute;
+
+                top: 0;
+                left: 0;
+
+                width: 100%;
+                height: 100%;
+
+                border: 0;
+
+                background:
+                    transparent !important;
+            }
+
+        }
+
+
+        /* =========================================================
+           VERY SMALL PHONES
+           
+           Do NOT change the universal cover based on width.
+           
+           This prevents a particular phone width from accidentally
+           exposing the Taskade branding.
+           ========================================================= */
+
+        @media (max-width: 480px) {
+
+            .agent-container,
+            .agent-container iframe {
+
+                width: 100%;
+                height: 100%;
+            }
+
+        }
+
+
+        /* =========================================================
+           LANDSCAPE PHONES
+           ========================================================= */
+
+        @media (max-width: 900px) and (orientation: landscape) {
+
+            .outer-top,
+            .outer-left,
+            .outer-right {
+
+                display: none;
+            }
+
+
+            .footer-cover,
+            .footer-blocker {
+
+                display: none;
+            }
+
+
+            .agent-container,
+            .agent-container iframe {
+
+                width: 100%;
+                height: 100%;
+            }
+
+        }
+
+
+        /* =========================================================
+           TOUCH DEVICES
+           
+           No special Powered-by behavior is needed here anymore.
+           
+           The universal cover already intercepts touch.
+           ========================================================= */
+
+        @media (hover: none) and (pointer: coarse) {
+
+            .powered-by-cover {
+
+                display: block;
+
+                pointer-events: auto;
+
+                touch-action: none;
+
+                cursor: default;
+            }
+
+        }
+
+
+        /* =========================================================
+           HIDE SCROLLBARS
+           ========================================================= */
 
         ::-webkit-scrollbar {
+
             display: none;
         }
+
     </style>
+
 </head>
+
+
 <body>
-    <div class="agent-container" id="agentContainer">
-        <!-- Loading Overlay -->
-        <div class="loading-overlay" id="loadingOverlay">
-            <div class="loading-spinner"></div>
-            <div class="loading-text">Loading AgriDeepAI...</div>
-        </div>
 
-        <!-- Footer covers (Hides watermark and bottom UI) -->
-        <div class="footer-cover"></div>
-        <div class="footer-blocker"></div>
 
-        <!-- The AgriDeepAI Agent Iframe -->
-        <iframe
-            id="agentFrame"
-            src="https://www.taskade.com/a/01M1HASACJHWBH5VQ8WZ8B1PH9"
-            allow="clipboard-read; clipboard-write"
-        ></iframe>
+    <!-- =========================================================
+         PAGE BACKGROUND
+         ========================================================= -->
+
+    <div
+        class="page-background"
+        aria-hidden="true">
     </div>
 
+
+    <!-- =========================================================
+         TASKADE AGENT
+         ========================================================= -->
+
+    <div
+        class="agent-container"
+        id="agentContainer"
+    >
+
+
+        <!-- =====================================================
+             LOADING OVERLAY
+             ===================================================== -->
+
+        <div
+            class="loading-overlay"
+            id="loadingOverlay"
+        >
+
+            <div class="loading-spinner"></div>
+
+            <div class="loading-text">
+                Loading AgriDeepAI...
+            </div>
+
+        </div>
+
+
+        <!-- =====================================================
+             TASKADE IFRAME
+             ===================================================== -->
+
+        <iframe
+            id="agentFrame"
+            src="https://www.taskade.com/a/agri-deep-ai-01M1HDQ1MDKJSW2936J4F3QY88"
+            allow="clipboard-read; clipboard-write"
+            title="AgriDeepAI AI Assistant">
+        </iframe>
+
+    </div>
+
+
+    <!-- =========================================================
+         DESKTOP OUTER THEME
+         ========================================================= -->
+
+    <div
+        class="outer-top"
+        aria-hidden="true">
+    </div>
+
+
+    <div
+        class="outer-left"
+        aria-hidden="true">
+    </div>
+
+
+    <div
+        class="outer-right"
+        aria-hidden="true">
+    </div>
+
+
+    <!-- =========================================================
+         DESKTOP BOTTOM THEME
+         ========================================================= -->
+
+    <div
+        class="footer-cover"
+        aria-hidden="true">
+    </div>
+
+
+    <!-- =========================================================
+         DESKTOP FOOTER BLOCKER
+         ========================================================= -->
+
+    <div
+        class="footer-blocker"
+        aria-hidden="true">
+    </div>
+
+
+    <!-- =========================================================
+         UNIVERSAL TASKADE BRANDING COVER
+         
+         This layer is intentionally outside the Taskade iframe.
+         
+         It is active on:
+         
+         - desktop
+         - laptop
+         - tablet
+         - iPad
+         - Android
+         - iPhone
+         - portrait
+         - landscape
+         - touch browsers
+         - mouse browsers
+         - Chrome
+         - Safari
+         - Firefox
+         - Edge
+         - responsive/emulated browser dimensions
+         
+         It also intercepts pointer/touch input so the covered
+         Taskade branding cannot be clicked.
+         ========================================================= -->
+
+    <div
+        class="powered-by-cover"
+        aria-hidden="true">
+    </div>
+
+
     <script>
-        const AGENT_URL = "https://www.taskade.com/a/01M1HASACJHWBH5VQ8WZ8B1PH9";
+
+
+        /* =========================================================
+           TASKADE URL
+           ========================================================= */
+
+        const AGENT_URL =
+            "https://www.taskade.com/a/agri-deep-ai-01M1HDQ1MDKJSW2936J4F3QY88";
+
+
+        /* =========================================================
+           LOADING HANDLER
+           ========================================================= */
 
         function handleLoading() {
-            const overlay = document.getElementById('loadingOverlay');
-            const iframe = document.getElementById('agentFrame');
 
-            overlay.classList.remove('hidden');
+            const overlay =
+                document.getElementById("loadingOverlay");
 
-            iframe.addEventListener('load', function () {
-                setTimeout(() => {
-                    overlay.classList.add('hidden');
-                }, 500);
-                // Try to force iframe background (optional, may not work due to CORS)
-                try {
-                    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-                    if (doc && doc.body) {
-                        doc.body.style.background = '#1e1e1f';
-                        doc.documentElement.style.background = '#1e1e1f';
-                    }
-                } catch (e) {
-                    // Cross-origin error is expected, ignore it
+            const iframe =
+                document.getElementById("agentFrame");
+
+
+            if (!overlay || !iframe) {
+                return;
+            }
+
+
+            /*
+             * Show loading screen initially.
+             */
+
+            overlay.classList.remove("hidden");
+
+
+            /*
+             * Remove loading screen after iframe loads.
+             */
+
+            iframe.addEventListener(
+                "load",
+                function () {
+
+                    setTimeout(
+                        function () {
+
+                            overlay.classList.add("hidden");
+
+                        },
+                        500
+                    );
+
+                },
+                {
+                    once: true
                 }
-            });
+            );
 
-            // Safety fallback: hide overlay after 3 seconds even if iframe load doesn't fire
-            setTimeout(() => {
-                overlay.classList.add('hidden');
-            }, 3000);
+
+            /*
+             * Safety fallback.
+             *
+             * This prevents a slow iframe from leaving the
+             * loading screen permanently visible.
+             */
+
+            setTimeout(
+                function () {
+
+                    overlay.classList.add("hidden");
+
+                },
+                3500
+            );
+
         }
 
-        document.addEventListener('DOMContentLoaded', function () {
-            handleLoading();
-        });
 
-        window.addEventListener('load', function () {
-            setTimeout(() => {
-                document.getElementById('loadingOverlay').classList.add('hidden');
-            }, 1000);
-        });
+        /* =========================================================
+           INITIALIZE
+           ========================================================= */
+
+        document.addEventListener(
+            "DOMContentLoaded",
+            function () {
+
+                handleLoading();
+
+            }
+        );
+
+
     </script>
+
+
 </body>
+
 </html>
