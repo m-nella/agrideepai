@@ -1,1009 +1,361 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-    >
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgriDeepAI</title>
-
-    <link rel="icon" href="logo.png" type="image/png">
-
-
     <style>
-
-        /* =========================================================
-           GLOBAL RESET
-           ========================================================= */
-
-        *,
-        *::before,
-        *::after {
+        * {
+            margin: 0;
+            padding: 0;
             box-sizing: border-box;
-            margin: 0;
-            padding: 0;
         }
-
-
-        /* =========================================================
-           THEME VARIABLES
-           ========================================================= */
-
-        :root {
-
-            /* Main page background */
-            --outer-theme: #1e1e1f;
-
-
-            /* -----------------------------------------------------
-               DESKTOP
-               ----------------------------------------------------- */
-
-            --desktop-chat-width: 672px;
-
-            --desktop-chat-top: 40px;
-
-            --desktop-panel-bottom: 40px;
-
-            --desktop-powered-cover-height: 34px;
-
-            --desktop-footer-height: 72px;
-
-
-            /* -----------------------------------------------------
-               MOBILE
-               ----------------------------------------------------- */
-
-            --mobile-side-space: 24px;
-
-            --mobile-top-space: 24px;
-
-
-            /*
-             * Universal Powered-by protection.
-             *
-             * This is intentionally larger than the original
-             * mobile 44px value because the Taskade iframe can
-             * position its footer differently depending on:
-             *
-             * - browser
-             * - viewport
-             * - device
-             * - browser zoom
-             * - responsive layout
-             * - orientation
-             * - interface scaling
-             *
-             * The cover remains outside the iframe and therefore
-             * cannot be bypassed by the Taskade link.
-             */
-            --universal-powered-cover-height: 72px;
-
-        }
-
-
-        /* =========================================================
-           HTML
-           ========================================================= */
-
-        html {
-
-            width: 100%;
-            height: 100%;
-
-            margin: 0;
-            padding: 0;
-
-            background: var(--outer-theme);
-
-            overflow: hidden;
-        }
-
-
-        /* =========================================================
-           BODY
-           ========================================================= */
 
         body {
-
-            width: 100%;
-            height: 100%;
-
-            margin: 0;
-            padding: 0;
-
-            position: relative;
-
-            overflow: hidden;
-
-            background: var(--outer-theme) !important;
-
-            font-family:
-                -apple-system,
-                BlinkMacSystemFont,
-                "Segoe UI",
-                Roboto,
-                Helvetica,
-                Arial,
-                sans-serif;
-
-            color: #ececf1;
-
-            padding-bottom: env(safe-area-inset-bottom);
-        }
-
-
-        /* =========================================================
-           PAGE BACKGROUND
-           ========================================================= */
-
-        .page-background {
-
-            position: fixed;
-
-            inset: 0;
-
-            width: 100%;
-            height: 100%;
-
-            background: var(--outer-theme);
-
-            z-index: 0;
-
-            pointer-events: none;
-        }
-
-
-        /* =========================================================
-           TASKADE CONTAINER
-           ========================================================= */
-
-        .agent-container {
-
-            position: fixed;
-
-            inset: 0;
-
-            width: 100%;
-            height: 100%;
-
-            margin: 0;
-            padding: 0;
-
-            background: var(--outer-theme) !important;
-
-            border: 0;
-            outline: 0;
-
-            z-index: 1;
-
-            overflow: hidden;
-        }
-
-
-        /* =========================================================
-           TASKADE IFRAME
-           ========================================================= */
-
-        .agent-container iframe {
-
-            position: absolute;
-
-            inset: 0;
-
-            display: block;
-
-            width: 100%;
-            height: 100%;
-
-            margin: 0;
-            padding: 0;
-
-            border: 0;
-            outline: 0;
-
-            background: transparent !important;
-
-            z-index: 1;
-        }
-
-
-        /* =========================================================
-           DESKTOP OUTER MASK — TOP
-           ========================================================= */
-
-        .outer-top {
-
-            position: fixed;
-
-            top: 0;
-            left: 0;
-            right: 0;
-
-            height: var(--desktop-chat-top);
-
-            background: var(--outer-theme);
-
-            z-index: 10;
-
-            pointer-events: none;
-        }
-
-
-        /* =========================================================
-           DESKTOP OUTER MASK — LEFT
-           ========================================================= */
-
-        .outer-left {
-
-            position: fixed;
-
-            top: var(--desktop-chat-top);
-
-            bottom: var(--desktop-panel-bottom);
-
-            left: 0;
-
-            width:
-                max(
-                    0px,
-                    calc(
-                        (100vw - var(--desktop-chat-width)) / 2
-                    )
-                );
-
-            background: var(--outer-theme);
-
-            z-index: 10;
-
-            pointer-events: none;
-        }
-
-
-        /* =========================================================
-           DESKTOP OUTER MASK — RIGHT
-           ========================================================= */
-
-        .outer-right {
-
-            position: fixed;
-
-            top: var(--desktop-chat-top);
-
-            bottom: var(--desktop-panel-bottom);
-
-            right: 0;
-
-            width:
-                max(
-                    0px,
-                    calc(
-                        (100vw - var(--desktop-chat-width)) / 2
-                    )
-                );
-
-            background: var(--outer-theme);
-
-            z-index: 10;
-
-            pointer-events: none;
-        }
-
-
-        /* =========================================================
-           DESKTOP BOTTOM COVER
-           ========================================================= */
-
-        .footer-cover {
-
-            position: fixed;
-
-            left: 0;
-            right: 0;
-            bottom: 0;
-
-            height: var(--desktop-footer-height);
-
-            background: var(--outer-theme) !important;
-
-            z-index: 20;
-
-            pointer-events: none;
-
-            user-select: none;
-
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-
-            border: 0;
-            outline: 0;
-
-            box-shadow: none;
-        }
-
-
-        /* =========================================================
-           DESKTOP FOOTER BLOCKER
-           ========================================================= */
-
-        .footer-blocker {
-
-            position: fixed;
-
-            left: 0;
-            right: 0;
-            bottom: 0;
-
-            height: var(--desktop-footer-height);
-
-            background: transparent;
-
-            z-index: 21;
-
-            pointer-events: auto;
-
-            cursor: default;
-
-            user-select: none;
-
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-        }
-
-
-        /* =========================================================
-           UNIVERSAL POWERED-BY TASKADE COVER
-           
-           IMPORTANT:
-           
-           This is now active on ALL screen sizes.
-           
-           It is deliberately NOT restricted to:
-           
-           - mobile
-           - tablet
-           - desktop
-           - touch devices
-           - landscape
-           - portrait
-           
-           Therefore browser/device classification cannot cause
-           the Taskade branding to become visible.
-           ========================================================= */
-
-        .powered-by-cover {
-
-            position: fixed;
-
-            left: 0;
-            right: 0;
-            bottom: 0;
-
-            width: 100%;
-
-            height:
-                calc(
-                    var(--universal-powered-cover-height)
-                    + env(safe-area-inset-bottom)
-                );
-
-            background:
-                var(--outer-theme) !important;
-
-            border: 0;
-            outline: 0;
-
-            box-shadow: none;
-
-            /*
-             * Must be above the iframe.
-             */
-            z-index: 100;
-
-            /*
-             * The layer itself captures pointer/touch input.
-             * Therefore a hidden Taskade link underneath cannot
-             * be clicked or tapped.
-             */
-            pointer-events: auto;
-
-            cursor: default;
-
-            /*
-             * Prevent selection.
-             */
-            user-select: none;
-
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-
-            /*
-             * Prevent touch gestures from reaching the iframe.
-             */
-            touch-action: none;
-
-            /*
-             * Always visible.
-             */
-            display: block;
-
-            /*
-             * Make the layer completely opaque.
-             */
-            opacity: 1;
-
-            /*
-             * Prevent accidental text/content rendering.
-             */
-            font-size: 0;
-            line-height: 0;
-
-            /*
-             * Do not allow browser compositing to place the
-             * iframe above this layer.
-             */
-            isolation: isolate;
-        }
-
-
-        /* =========================================================
-           UNIVERSAL POWERED-BY INNER SHIELD
-           
-           A second shield gives additional protection against
-           small variations in iframe/footer positioning.
-           ========================================================= */
-
-        .powered-by-cover::before {
-
-            content: "";
-
-            position: absolute;
-
-            left: 0;
-            right: 0;
-            bottom: 0;
-
-            width: 100%;
-            height: 100%;
-
-            background:
-                var(--outer-theme) !important;
-
-            border: 0;
-            outline: 0;
-
-            pointer-events: auto;
-
-            user-select: none;
-
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-
-            touch-action: none;
-        }
-
-
-        /* =========================================================
-           LOADING OVERLAY
-           ========================================================= */
-
-        .loading-overlay {
-
-            position: fixed;
-
-            inset: 0;
-
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d0d0d;
+            height: 100vh;
             display: flex;
-
-            flex-direction: column;
-
-            align-items: center;
-
             justify-content: center;
-
-            gap: 16px;
-
-            background: var(--outer-theme) !important;
-
-            z-index: 150;
-
-            opacity: 1;
-
-            transition:
-                opacity 0.5s ease;
+            align-items: center;
         }
 
-
-        .loading-overlay.hidden {
-
-            opacity: 0;
-
-            pointer-events: none;
+        .chat-container {
+            width: 100%;
+            max-width: 900px;
+            height: 100vh;
+            max-height: 100vh;
+            background: #1a1a1a;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
         }
 
-
-        /* =========================================================
-           LOADING SPINNER
-           ========================================================= */
-
-        .loading-spinner {
-
-            width: 44px;
-            height: 44px;
-
-            border: 3px solid #2d2d30;
-
-            border-top-color: #ececf1;
-
-            border-radius: 50%;
-
-            animation:
-                spin 0.8s linear infinite;
+        /* Header */
+        .header {
+            padding: 16px 24px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #2a2a2a;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
+        .header h1 {
+            color: #ffffff;
+            font-size: 20px;
+            font-weight: 600;
+        }
 
-        .loading-text {
+        .header h1 span {
+            color: #22c55e;
+        }
 
-            color: #6e6e72;
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
 
+        .header-actions button {
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
             font-size: 14px;
+            padding: 4px 12px;
+            border-radius: 8px;
+            transition: 0.2s;
         }
 
-
-        @keyframes spin {
-
-            to {
-                transform: rotate(360deg);
-            }
-
+        .header-actions button:hover {
+            background: #2a2a2a;
+            color: #fff;
         }
 
-
-        /* =========================================================
-           TABLET
-           ========================================================= */
-
-        @media (min-width: 769px) and (max-width: 1100px) {
-
-            :root {
-
-                --desktop-chat-top: 32px;
-
-                --desktop-chat-width:
-                    min(
-                        672px,
-                        calc(100vw - 32px)
-                    );
-
-                --desktop-panel-bottom: 32px;
-
-                --desktop-powered-cover-height: 36px;
-
-                --desktop-footer-height: 48px;
-            }
-
+        /* Chat Messages */
+        .messages {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
 
-
-        /* =========================================================
-           MOBILE
-           
-           IMPORTANT:
-           
-           The old mobile-only Powered-by cover is no longer
-           necessary because the universal cover above is active
-           on every device.
-           ========================================================= */
-
-        @media (max-width: 768px) {
-
-            html,
-            body {
-
-                width: 100%;
-                height: 100%;
-
-                overflow: hidden;
-
-                background:
-                    var(--outer-theme) !important;
-            }
-
-
-            /* -----------------------------------------------------
-               Disable desktop geometry masks.
-               ----------------------------------------------------- */
-
-            .outer-top,
-            .outer-left,
-            .outer-right {
-
-                display: none;
-            }
-
-
-            /* -----------------------------------------------------
-               Disable desktop footer system on mobile.
-               ----------------------------------------------------- */
-
-            .footer-cover,
-            .footer-blocker {
-
-                display: none;
-            }
-
-
-            /* -----------------------------------------------------
-               Taskade container
-               ----------------------------------------------------- */
-
-            .agent-container {
-
-                position: fixed;
-
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-
-                width: 100%;
-                height: 100%;
-
-                overflow: hidden;
-
-                background:
-                    var(--outer-theme) !important;
-            }
-
-
-            /* -----------------------------------------------------
-               Mobile iframe
-               ----------------------------------------------------- */
-
-            .agent-container iframe {
-
-                position: absolute;
-
-                top: 0;
-                left: 0;
-
-                width: 100%;
-                height: 100%;
-
-                border: 0;
-
-                background:
-                    transparent !important;
-            }
-
+        .messages::-webkit-scrollbar {
+            width: 4px;
         }
 
-
-        /* =========================================================
-           VERY SMALL PHONES
-           
-           Do NOT change the universal cover based on width.
-           
-           This prevents a particular phone width from accidentally
-           exposing the Taskade branding.
-           ========================================================= */
-
-        @media (max-width: 480px) {
-
-            .agent-container,
-            .agent-container iframe {
-
-                width: 100%;
-                height: 100%;
-            }
-
+        .messages::-webkit-scrollbar-track {
+            background: #1a1a1a;
         }
 
-
-        /* =========================================================
-           LANDSCAPE PHONES
-           ========================================================= */
-
-        @media (max-width: 900px) and (orientation: landscape) {
-
-            .outer-top,
-            .outer-left,
-            .outer-right {
-
-                display: none;
-            }
-
-
-            .footer-cover,
-            .footer-blocker {
-
-                display: none;
-            }
-
-
-            .agent-container,
-            .agent-container iframe {
-
-                width: 100%;
-                height: 100%;
-            }
-
+        .messages::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
         }
 
+        .message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+            font-size: 15px;
+            animation: fadeIn 0.3s ease;
+        }
 
-        /* =========================================================
-           TOUCH DEVICES
-           
-           No special Powered-by behavior is needed here anymore.
-           
-           The universal cover already intercepts touch.
-           ========================================================= */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
-        @media (hover: none) and (pointer: coarse) {
+        .message.user {
+            background: #2563eb;
+            color: #fff;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
 
-            .powered-by-cover {
+        .message.bot {
+            background: #2a2a2a;
+            color: #e5e5e5;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
 
-                display: block;
+        .message.bot .loading-dots {
+            display: inline-block;
+        }
 
-                pointer-events: auto;
+        .message.bot .loading-dots span {
+            animation: pulse 1.2s infinite;
+            display: inline-block;
+        }
 
-                touch-action: none;
+        .message.bot .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .message.bot .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
 
-                cursor: default;
+        @keyframes pulse {
+            0%, 60%, 100% { opacity: 0.3; }
+            30% { opacity: 1; }
+        }
+
+        /* Input Area */
+        .input-area {
+            padding: 16px 24px;
+            background: #1a1a1a;
+            border-top: 1px solid #2a2a2a;
+            display: flex;
+            gap: 12px;
+        }
+
+        .input-area input {
+            flex: 1;
+            padding: 12px 16px;
+            background: #2a2a2a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 15px;
+            outline: none;
+            transition: 0.2s;
+        }
+
+        .input-area input:focus {
+            border-color: #2563eb;
+        }
+
+        .input-area input::placeholder {
+            color: #666;
+        }
+
+        .input-area button {
+            padding: 12px 24px;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .input-area button:hover {
+            background: #1d4ed8;
+        }
+
+        .input-area button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 8px 24px 16px;
+            background: #1a1a1a;
+            text-align: center;
+            font-size: 12px;
+            color: #444;
+        }
+
+        .footer a {
+            color: #2563eb;
+            text-decoration: none;
+        }
+
+        /* Placeholder when no messages */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #555;
+            text-align: center;
+        }
+
+        .empty-state h2 {
+            color: #888;
+            font-size: 22px;
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+            max-width: 400px;
+        }
+
+        .empty-state .icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .chat-container {
+                border-radius: 0;
             }
-
+            .header h1 {
+                font-size: 16px;
+            }
+            .message {
+                max-width: 95%;
+                font-size: 14px;
+            }
+            .input-area input {
+                font-size: 14px;
+            }
+            .input-area button {
+                font-size: 14px;
+                padding: 10px 16px;
+            }
         }
-
-
-        /* =========================================================
-           HIDE SCROLLBARS
-           ========================================================= */
-
-        ::-webkit-scrollbar {
-
-            display: none;
-        }
-
     </style>
-
 </head>
-
-
 <body>
 
-
-    <!-- =========================================================
-         PAGE BACKGROUND
-         ========================================================= -->
-
-    <div
-        class="page-background"
-        aria-hidden="true">
-    </div>
-
-
-    <!-- =========================================================
-         TASKADE AGENT
-         ========================================================= -->
-
-    <div
-        class="agent-container"
-        id="agentContainer"
-    >
-
-
-        <!-- =====================================================
-             LOADING OVERLAY
-             ===================================================== -->
-
-        <div
-            class="loading-overlay"
-            id="loadingOverlay"
-        >
-
-            <div class="loading-spinner"></div>
-
-            <div class="loading-text">
-                Loading AgriDeepAI...
+    <div class="chat-container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🌾 Agri<span>DeepAI</span></h1>
+            <div class="header-actions">
+                <button id="signInBtn" onclick="alert('Account system coming soon!')">Sign In</button>
+                <button id="signUpBtn" onclick="alert('Account system coming soon!')">Sign Up</button>
             </div>
-
         </div>
 
+        <!-- Messages Area -->
+        <div class="messages" id="messages">
+            <div class="empty-state" id="emptyState">
+                <div class="icon">🌾</div>
+                <h2>Welcome to AgriDeepAI</h2>
+                <p>Ask me anything about agriculture, livestock, crop diseases, farming techniques, and more.</p>
+            </div>
+        </div>
 
-        <!-- =====================================================
-             TASKADE IFRAME
-             ===================================================== -->
+        <!-- Input Area -->
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Ask me about agriculture and livestock..." />
+            <button id="sendBtn">Send</button>
+        </div>
 
-        <iframe
-            id="agentFrame"
-            src="https://www.taskade.com/a/agri-deep-ai-01M1HDQ1MDKJSW2936J4F3QY88"
-            allow="clipboard-read; clipboard-write"
-            title="AgriDeepAI AI Assistant">
-        </iframe>
-
+        <!-- Footer -->
+        <div class="footer">
+            Built by Ornella Mutuyimana · Powered by Groq &amp; Gemini
+        </div>
     </div>
-
-
-    <!-- =========================================================
-         DESKTOP OUTER THEME
-         ========================================================= -->
-
-    <div
-        class="outer-top"
-        aria-hidden="true">
-    </div>
-
-
-    <div
-        class="outer-left"
-        aria-hidden="true">
-    </div>
-
-
-    <div
-        class="outer-right"
-        aria-hidden="true">
-    </div>
-
-
-    <!-- =========================================================
-         DESKTOP BOTTOM THEME
-         ========================================================= -->
-
-    <div
-        class="footer-cover"
-        aria-hidden="true">
-    </div>
-
-
-    <!-- =========================================================
-         DESKTOP FOOTER BLOCKER
-         ========================================================= -->
-
-    <div
-        class="footer-blocker"
-        aria-hidden="true">
-    </div>
-
-
-    <!-- =========================================================
-         UNIVERSAL TASKADE BRANDING COVER
-         
-         This layer is intentionally outside the Taskade iframe.
-         
-         It is active on:
-         
-         - desktop
-         - laptop
-         - tablet
-         - iPad
-         - Android
-         - iPhone
-         - portrait
-         - landscape
-         - touch browsers
-         - mouse browsers
-         - Chrome
-         - Safari
-         - Firefox
-         - Edge
-         - responsive/emulated browser dimensions
-         
-         It also intercepts pointer/touch input so the covered
-         Taskade branding cannot be clicked.
-         ========================================================= -->
-
-    <div
-        class="powered-by-cover"
-        aria-hidden="true">
-    </div>
-
 
     <script>
+        // DOM Elements
+        const messagesDiv = document.getElementById('messages');
+        const emptyState = document.getElementById('emptyState');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
 
+        // Send message
+        async function sendMessage() {
+            const message = userInput.value.trim();
+            if (!message) return;
 
-        /* =========================================================
-           TASKADE URL
-           ========================================================= */
+            // Clear empty state
+            emptyState.style.display = 'none';
 
-        const AGENT_URL =
-            "https://www.taskade.com/a/agri-deep-ai-01M1HDQ1MDKJSW2936J4F3QY88";
+            // Add user message
+            addMessage(message, 'user');
+            userInput.value = '';
+            userInput.focus();
 
+            // Show loading indicator
+            const loadingId = addMessage('Thinking...', 'bot', true);
 
-        /* =========================================================
-           LOADING HANDLER
-           ========================================================= */
+            try {
+                // TODO: Connect to Cloudflare Worker in Phase 2
+                // For now, simulate a response
+                setTimeout(() => {
+                    const fakeResponse = "This is a demo response. In Phase 2, we'll connect to real AI via Cloudflare Worker with Groq and Gemini, giving you full intelligence and web search capabilities.";
+                    replaceLoading(loadingId, fakeResponse);
+                }, 1500);
 
-        function handleLoading() {
-
-            const overlay =
-                document.getElementById("loadingOverlay");
-
-            const iframe =
-                document.getElementById("agentFrame");
-
-
-            if (!overlay || !iframe) {
-                return;
+            } catch (error) {
+                replaceLoading(loadingId, 'Sorry, I encountered an error. Please try again.');
             }
-
-
-            /*
-             * Show loading screen initially.
-             */
-
-            overlay.classList.remove("hidden");
-
-
-            /*
-             * Remove loading screen after iframe loads.
-             */
-
-            iframe.addEventListener(
-                "load",
-                function () {
-
-                    setTimeout(
-                        function () {
-
-                            overlay.classList.add("hidden");
-
-                        },
-                        500
-                    );
-
-                },
-                {
-                    once: true
-                }
-            );
-
-
-            /*
-             * Safety fallback.
-             *
-             * This prevents a slow iframe from leaving the
-             * loading screen permanently visible.
-             */
-
-            setTimeout(
-                function () {
-
-                    overlay.classList.add("hidden");
-
-                },
-                3500
-            );
-
         }
 
+        // Add a message to the chat
+        function addMessage(text, sender, isLoading = false) {
+            const div = document.createElement('div');
+            div.className = `message ${sender}`;
 
-        /* =========================================================
-           INITIALIZE
-           ========================================================= */
-
-        document.addEventListener(
-            "DOMContentLoaded",
-            function () {
-
-                handleLoading();
-
+            if (isLoading) {
+                div.innerHTML = `<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span>`;
+            } else {
+                div.textContent = text;
             }
-        );
 
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
+            return div;
+        }
+
+        // Replace loading message with final response
+        function replaceLoading(loadingElement, response) {
+            loadingElement.className = 'message bot';
+            loadingElement.textContent = response;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // Event listeners
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        console.log('🌾 AgriDeepAI loaded. Phase 1 complete!');
     </script>
-
-
 </body>
-
 </html>
