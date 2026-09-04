@@ -3389,4 +3389,230 @@
                 const files = Array.from(this.files);
                 files.forEach(file => {
                     if (attachments.length >= APP_CONFIG.maxAttachments) {
-                       
+                        showToast('Maximum ' + APP_CONFIG.maxAttachments + ' files allowed.', 'warning');
+                        return;
+                    }
+                    if (file.size > APP_CONFIG.maxFileSize) {
+                        showToast('File "' + file.name + '" exceeds size limit.', 'error');
+                        return;
+                    }
+                    const isValid = APP_CONFIG.allowedFileTypes.some(t => {
+                        if (t.endsWith('/*')) return file.type.startsWith(t.replace('/*', ''));
+                        return file.name.endsWith(t.replace('.', ''));
+                    });
+                    if (!isValid) {
+                        showToast('File type not supported: "' + file.name + '"', 'error');
+                        return;
+                    }
+                    attachments.push(file);
+                    renderAttachments();
+                });
+                this.value = '';
+                if (userInput.value.trim().length > 0 || attachments.length > 0) {
+                    sendStopBtn.classList.add('is-active');
+                    sendStopBtn.disabled = false;
+                }
+            }
+        });
+
+        function renderAttachments() {
+            attachmentPreviews.innerHTML = '';
+            attachments.forEach((file, index) => {
+                const div = document.createElement('div');
+                div.className = 'attachment-preview';
+                const isImage = file.type.startsWith('image/');
+                div.innerHTML = `
+                    ${isImage ? `<img src="${URL.createObjectURL(file)}" alt="${file.name}" />` : `<span class="file-icon">📄</span>`}
+                    <span class="file-name">${file.name}</span>
+                    <button class="remove-attach" data-index="${index}" aria-label="Remove attachment">✕</button>
+                `;
+                div.querySelector('.remove-attach').addEventListener('click', function() {
+                    const idx = parseInt(this.dataset.index);
+                    attachments.splice(idx, 1);
+                    renderAttachments();
+                    if (userInput.value.trim().length > 0 || attachments.length > 0) {
+                        sendStopBtn.classList.add('is-active');
+                        sendStopBtn.disabled = false;
+                    } else {
+                        sendStopBtn.classList.remove('is-active');
+                        sendStopBtn.disabled = true;
+                    }
+                });
+                attachmentPreviews.appendChild(div);
+            });
+        }
+
+        // ==========================================================
+        // SUGGESTIONS
+        // ==========================================================
+        document.querySelectorAll('.suggestions button').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const text = this.dataset.suggestion;
+                if (text) {
+                    userInput.value = text;
+                    userInput.dispatchEvent(new Event('input'));
+                    sendMessage();
+                }
+            });
+        });
+
+        // ==========================================================
+        // LOAD FROM URL
+        // ==========================================================
+        function loadFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            const convId = params.get('conversation');
+            const msgId = params.get('message');
+            if (convId && state.conversations[convId]) {
+                switchConversation(convId);
+                if (msgId) {
+                    setTimeout(() => {
+                        const msgEl = messagesContainer.querySelector(`.message-wrapper[data-msg-id="${msgId}"]`);
+                        if (msgEl) {
+                            msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            msgEl.style.transition = 'background 0.3s';
+                            msgEl.style.background = 'var(--accent-glow)';
+                            setTimeout(() => msgEl.style.background = '', 1500);
+                        }
+                    }, 400);
+                }
+            }
+        }
+
+        // ==========================================================
+        // INIT
+        // ==========================================================
+        function init() {
+            loadSettings();
+
+            const savedConvs = Storage.get('conversations');
+            if (savedConvs && APP_CONFIG.enableLocalStorage) {
+                state.conversations = savedConvs;
+                const params = new URLSearchParams(window.location.search);
+                const convId = params.get('conversation');
+                if (convId && state.conversations[convId]) {
+                    state.activeId = convId;
+                    renderHistory();
+                    renderConversation(convId);
+                    const conv = state.conversations[convId];
+                    if (conv) chatTitle.textContent = conv.title;
+                    if (conv && conv.messages.length > 0) emptyState.classList.add('is-hidden');
+                    setTimeout(() => scrollToBottom(true), 300);
+                } else {
+                    const convs = Object.values(state.conversations);
+                    const withMessages = convs.filter(c => c.messages.length > 0);
+                    if (withMessages.length > 0) {
+                        const latest = withMessages.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+                        state.activeId = latest.id;
+                        renderHistory();
+                        renderConversation(latest.id);
+                        chatTitle.textContent = latest.title;
+                        emptyState.classList.add('is-hidden');
+                    } else if (convs.length > 0) {
+                        state.activeId = null;
+                        renderHistory();
+                        renderConversation(null);
+                        chatTitle.textContent = APP_CONFIG.name;
+                        emptyState.classList.remove('is-hidden');
+                    } else {
+                        state.activeId = null;
+                        renderHistory();
+                        renderConversation(null);
+                        chatTitle.textContent = APP_CONFIG.name;
+                        emptyState.classList.remove('is-hidden');
+                    }
+                }
+            } else {
+                state.activeId = null;
+                renderHistory();
+                renderConversation(null);
+                chatTitle.textContent = APP_CONFIG.name;
+                emptyState.classList.remove('is-hidden');
+            }
+
+            if (APP_CONFIG.enableLocalStorage) {
+                setInterval(() => {
+                    if (Object.keys(state.conversations).length > 0) {
+                        Storage.set('conversations', state.conversations);
+                    } else {
+                        Storage.remove('conversations');
+                    }
+                }, 5000);
+            }
+
+            console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized.');
+            console.log('📋 Features: professional AI response formatting, account system, markdown, code blocks, sharing.');
+        }
+
+        window.addEventListener('beforeunload', function() {
+            if (Object.keys(state.conversations).length > 0) {
+                Storage.set('conversations', state.conversations);
+            } else {
+                Storage.remove('conversations');
+            }
+        });
+
+        init();
+
+        window.addEventListener('load', function() {
+            loadFromURL();
+        });
+
+        // ==========================================================
+        // SHARE MODAL EVENTS
+        // ==========================================================
+        shareModalClose.addEventListener('click', () => closeModal(shareModal));
+        shareModalCloseBtn.addEventListener('click', () => closeModal(shareModal));
+        shareModal.addEventListener('click', function(e) {
+            if (e.target === this) closeModal(shareModal);
+        });
+        shareCopyBtn.addEventListener('click', function() {
+            const text = shareLinkInput.value;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Link copied to clipboard!', 'success');
+                const orig = this.textContent;
+                this.textContent = 'Copied!';
+                setTimeout(() => { this.textContent = orig; }, 2000);
+            }).catch(() => {
+                shareLinkInput.select();
+                document.execCommand('copy');
+                showToast('Link copied to clipboard!', 'success');
+                const orig = this.textContent;
+                this.textContent = 'Copied!';
+                setTimeout(() => { this.textContent = orig; }, 2000);
+            });
+        });
+
+        // ==========================================================
+        // CONFIRM MODAL EVENTS
+        // ==========================================================
+        confirmCloseBtn.addEventListener('click', () => closeModal(confirmModal));
+        confirmCancelBtn.addEventListener('click', () => closeModal(confirmModal));
+        confirmModal.addEventListener('click', function(e) {
+            if (e.target === this) closeModal(confirmModal);
+        });
+        confirmOkBtn.addEventListener('click', function() {
+            const cb = confirmModal._onConfirm;
+            closeModal(confirmModal);
+            if (typeof cb === 'function') cb();
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                if (accountModal.classList.contains('is-active')) closeModal(accountModal);
+                if (settingsModal.classList.contains('is-active')) closeModal(settingsModal);
+                if (profileModal.classList.contains('is-active')) closeModal(profileModal);
+                if (securityModal.classList.contains('is-active')) closeModal(securityModal);
+                if (shareModal.classList.contains('is-active')) closeModal(shareModal);
+                if (confirmModal.classList.contains('is-active')) closeModal(confirmModal);
+                if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
+                    closeSidebar();
+                }
+            }
+            if (e.key === 'Enter' && confirmModal.classList.contains('is-active')) {
+                confirmOkBtn.click();
+            }
+        });
+    </script>
+</body>
+</html>
