@@ -43,7 +43,7 @@
             --radius-full: 9999px;
 
             --sidebar-width: 248px;
-            --sidebar-collapsed: 68px;
+            --sidebar-collapsed: 60px;
             --header-height: 52px;
             --composer-max-height: 180px;
             --chat-max-width: 820px;
@@ -157,48 +157,76 @@
 
         .sidebar.is-collapsed .brand-text,
         .sidebar.is-collapsed .new-chat-label,
-        .sidebar.is-collapsed .chat-item .title,
-        .sidebar.is-collapsed .chat-item .chat-actions,
+        .sidebar.is-collapsed .chat-item,
+        .sidebar.is-collapsed .chat-history,
+        .sidebar.is-collapsed .empty-history,
         .sidebar.is-collapsed .account-info {
             opacity: 0;
             pointer-events: none;
             width: 0;
             overflow: hidden;
             margin: 0;
+            padding: 0;
+            height: 0;
+        }
+
+        .sidebar.is-collapsed .sidebar-header {
+            padding: 12px 10px;
+            justify-content: center;
+        }
+
+        .sidebar.is-collapsed .brand {
+            padding: 0;
+            margin: 0;
+        }
+
+        .sidebar.is-collapsed .brand img {
+            width: 28px;
+            height: 28px;
+        }
+
+        .sidebar.is-collapsed .sidebar-toggle {
+            display: none;
         }
 
         .sidebar.is-collapsed .new-chat-btn {
             justify-content: center;
-            padding: 10px;
-            width: 44px;
-            margin: 12px auto;
-            min-height: 44px;
+            padding: 8px;
+            width: 40px;
+            margin: 8px auto;
+            min-height: 40px;
+            border-radius: 50%;
         }
 
         .sidebar.is-collapsed .new-chat-btn svg {
             margin: 0;
         }
 
-        .sidebar.is-collapsed .sidebar-toggle {
-            transform: rotate(180deg);
-        }
-
-        .sidebar.is-collapsed .brand {
-            justify-content: center;
+        .sidebar.is-collapsed .chat-history {
+            flex: 0;
+            overflow: hidden;
             padding: 0;
         }
 
-        .sidebar.is-collapsed .brand img {
-            margin: 0;
+        .sidebar.is-collapsed .sidebar-footer {
+            padding: 8px 4px;
+            border-top: none;
         }
 
         .sidebar.is-collapsed .account-btn {
             justify-content: center;
-            padding: 8px;
+            padding: 4px;
+            min-height: 36px;
         }
 
         .sidebar.is-collapsed .account-btn .avatar {
-            margin: 0;
+            width: 28px;
+            height: 28px;
+            font-size: 11px;
+        }
+
+        .sidebar.is-collapsed .account-settings-icon {
+            display: none;
         }
 
         /* Sidebar header */
@@ -209,7 +237,8 @@
             justify-content: space-between;
             border-bottom: 1px solid var(--border-subtle);
             flex-shrink: 0;
-            min-height: 60px;
+            min-height: 56px;
+            transition: padding var(--transition-fast);
         }
 
         .brand {
@@ -221,8 +250,8 @@
         }
 
         .brand img {
-            width: 30px;
-            height: 30px;
+            width: 28px;
+            height: 28px;
             border-radius: 8px;
             flex-shrink: 0;
             object-fit: cover;
@@ -244,7 +273,7 @@
             border: none;
             color: var(--text-muted);
             cursor: pointer;
-            padding: 4px 6px;
+            padding: 4px;
             border-radius: var(--radius-sm);
             transition: var(--transition-fast);
             font-size: 16px;
@@ -278,9 +307,9 @@
             transition: transform var(--transition-med);
         }
 
-        /* New Chat – dark button */
+        /* New Chat – icon only, dark */
         .new-chat-btn {
-            margin: 12px 16px;
+            margin: 10px 16px;
             padding: 10px 16px;
             background: var(--bg-elevated);
             color: var(--text-primary);
@@ -295,7 +324,7 @@
             gap: 8px;
             justify-content: center;
             flex-shrink: 0;
-            min-height: 44px;
+            min-height: 40px;
             position: relative;
         }
 
@@ -334,6 +363,7 @@
             flex: 1;
             overflow-y: auto;
             padding: 6px 12px;
+            transition: all var(--transition-fast);
         }
 
         .chat-history::-webkit-scrollbar {
@@ -386,14 +416,7 @@
         .chat-item .chat-actions {
             display: flex;
             gap: 2px;
-            opacity: 0;
-            transition: var(--transition-fast);
             flex-shrink: 0;
-        }
-
-        .chat-item:hover .chat-actions,
-        .chat-item:focus-within .chat-actions {
-            opacity: 1;
         }
 
         .chat-item .chat-actions button {
@@ -459,7 +482,7 @@
             font-size: 13px;
             font-family: inherit;
             text-align: left;
-            min-height: 44px;
+            min-height: 40px;
         }
 
         .account-btn:hover {
@@ -472,14 +495,14 @@
         }
 
         .account-btn .avatar {
-            width: 30px;
-            height: 30px;
+            width: 28px;
+            height: 28px;
             border-radius: 50%;
             background: var(--bg-elevated);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             color: var(--text-secondary);
             flex-shrink: 0;
@@ -607,7 +630,7 @@
         .messages-container {
             flex: 1;
             overflow-y: auto;
-            padding: 20px 24px 100px 24px;
+            padding: 20px 24px 80px 24px;
             display: flex;
             flex-direction: column;
             scroll-behavior: smooth;
@@ -662,7 +685,7 @@
 
         .empty-state .subtitle {
             font-size: 15px;
-            color: var(--text-muted);
+            color: var(--text-secondary);
             max-width: 400px;
             line-height: 1.6;
             margin-top: 4px;
@@ -773,19 +796,12 @@
             }
         }
 
-        /* Message actions */
+        /* Message actions — always visible */
         .message-actions {
             display: flex;
             gap: 2px;
             margin-top: 4px;
-            opacity: 0;
-            transition: var(--transition-fast);
             flex-wrap: wrap;
-        }
-
-        .message-wrapper:hover .message-actions,
-        .message-wrapper:focus-within .message-actions {
-            opacity: 1;
         }
 
         .message-wrapper.is-user .message-actions {
@@ -941,14 +957,14 @@
         }
 
         /* ==========================================================
-           COMPOSER — with green border always
+           COMPOSER
            ========================================================== */
         .composer-wrapper {
             position: sticky;
             bottom: 0;
             left: 0;
             right: 0;
-            padding: 10px 24px 20px 24px;
+            padding: 10px 24px 6px 24px;
             background: linear-gradient(to top, var(--bg-app) 50%, transparent);
             flex-shrink: 0;
         }
@@ -957,7 +973,7 @@
             display: flex;
             flex-direction: column;
             background: var(--bg-surface);
-            border: 2px solid var(--accent); /* solid green border always */
+            border: 2px solid var(--accent);
             border-radius: var(--radius-lg);
             padding: 6px 8px 6px 12px;
             transition: var(--transition-fast);
@@ -1048,6 +1064,7 @@
             stroke-linejoin: round;
         }
 
+        /* Send button — always visible, dimmed when empty */
         .composer .composer-actions .send-btn {
             background: var(--accent);
             color: #fff;
@@ -1055,13 +1072,15 @@
             width: 34px;
             height: 34px;
             padding: 0;
-            display: none;
+            display: flex;
             align-items: center;
             justify-content: center;
+            opacity: 0.35;
+            transition: opacity var(--transition-fast), background var(--transition-fast);
         }
 
         .composer .composer-actions .send-btn.is-visible {
-            display: flex;
+            opacity: 1;
         }
 
         .composer .composer-actions .send-btn:hover {
@@ -1069,12 +1088,13 @@
         }
 
         .composer .composer-actions .send-btn:disabled {
-            opacity: 0.4;
+            opacity: 0.3;
         }
 
+        /* Stop button — same color as send */
         .composer .composer-actions .stop-btn {
-            background: var(--bg-elevated);
-            color: var(--text-primary);
+            background: var(--accent);
+            color: #fff;
             border-radius: 50%;
             width: 34px;
             height: 34px;
@@ -1089,12 +1109,17 @@
         }
 
         .composer .composer-actions .stop-btn:hover {
-            background: var(--bg-hover);
+            background: var(--accent-hover);
         }
 
         .composer .composer-actions .stop-btn svg {
             width: 16px;
             height: 16px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
 
         /* Attach button on the left */
@@ -1190,6 +1215,19 @@
         .attachment-preview .remove-attach:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
+        }
+
+        /* Footer message below composer */
+        .chat-footer {
+            padding: 6px 24px 16px 24px;
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+            max-width: var(--chat-max-width);
+            margin: 0 auto;
+            width: 100%;
+            line-height: 1.4;
         }
 
         /* ==========================================================
@@ -1538,7 +1576,11 @@
             }
 
             .composer-wrapper {
-                padding: 8px 16px 16px 16px;
+                padding: 8px 16px 4px 16px;
+            }
+
+            .chat-footer {
+                padding: 4px 16px 12px 16px;
             }
 
             .composer {
@@ -1578,7 +1620,12 @@
             }
 
             .composer-wrapper {
-                padding: 6px 12px 12px 12px;
+                padding: 6px 12px 4px 12px;
+            }
+
+            .chat-footer {
+                padding: 4px 12px 10px 12px;
+                font-size: 11px;
             }
 
             .composer {
@@ -1758,7 +1805,7 @@
                 </button>
             </div>
 
-            <!-- New Chat – dark button -->
+            <!-- New Chat – icon only with tooltip -->
             <button class="new-chat-btn" id="newChatBtn" title="Start a new conversation">
                 <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 <span class="new-chat-label">New Chat</span>
@@ -1807,7 +1854,7 @@
                 <div class="empty-state" id="emptyState">
                     <img src="logo.png" alt="AgriDeepAI" class="logo" id="emptyLogo" />
                     <h1>Agri<span class="accent">DeepAI</span></h1>
-                    <div class="subtitle">Your AI assistant for agriculture, livestock. Where should we start today?</div>
+                    <div class="subtitle">Your AI assistant for agriculture &amp; livestock. Where should we start today?</div>
                     <div class="suggestions">
                         <button data-suggestion="What are the best crops to grow in Rwanda?">🌱 Best crops in Rwanda</button>
                         <button data-suggestion="How to treat maize leaf disease?">🌽 Maize disease treatment</button>
@@ -1822,7 +1869,7 @@
                 </button>
             </div>
 
-            <!-- Composer with green border -->
+            <!-- Composer -->
             <div class="composer-wrapper">
                 <div class="composer" id="composer">
                     <div class="attachment-previews" id="attachmentPreviews"></div>
@@ -1843,6 +1890,9 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Footer message -->
+            <div class="chat-footer">AgriDeepAI can make mistake. Check for reference.</div>
 
         </main>
     </div>
@@ -2324,7 +2374,6 @@
             const conv = state.conversations[id];
             if (conv) chatTitle.textContent = conv.title;
             if (window.innerWidth <= 992) closeSidebar();
-            // Clear attachments and draft
             attachments = [];
             renderAttachments();
             state.draft = '';
@@ -2372,7 +2421,7 @@
             }
             wrapper.appendChild(bubble);
 
-            // Actions
+            // Actions — always visible
             const actions = document.createElement('div');
             actions.className = 'message-actions';
 
@@ -2445,10 +2494,8 @@
                     } else if (action === 'dislike') {
                         btn.classList.toggle('is-disliked');
                     } else if (action === 'share') {
-                        // Share link to this specific message
                         const convId = state.activeId;
                         if (convId) {
-                            // Find message ID
                             const msg = conv.messages.find(m => m.content === msgText);
                             if (msg) {
                                 const url = new URL(window.location.href);
@@ -2515,6 +2562,12 @@
                 actions.style.display = '';
                 editDiv.remove();
             });
+        }
+
+        // Find any empty conversation
+        function findEmptyConversation() {
+            const entries = Object.values(state.conversations);
+            return entries.find(conv => conv.messages.length === 0) || null;
         }
 
         function renderHistory() {
@@ -2666,6 +2719,7 @@
             const message = text || userInput.value.trim();
             if (!message && attachments.length === 0) return;
 
+            // If there's an empty conversation, reuse it instead of creating new
             let active = getActive();
             if (!state.activeId || (active && active.messages.length === 0)) {
                 if (!state.activeId) {
@@ -2800,15 +2854,27 @@
         stopBtn.addEventListener('click', stopGeneration);
 
         // ==========================================================
-        // NEW CHAT (reuse empty)
+        // NEW CHAT — improved logic: reuse empty chat, never duplicate
         // ==========================================================
         newChatBtn.addEventListener('click', function() {
-            const active = getActive();
-            if (active && active.messages.length === 0) {
+            // Check if there's any empty conversation anywhere
+            const emptyConv = findEmptyConversation();
+
+            if (emptyConv) {
+                // If the empty chat is already active, just focus
+                if (state.activeId === emptyConv.id) {
+                    userInput.focus();
+                    if (window.innerWidth <= 992) closeSidebar();
+                    return;
+                }
+                // Switch to the existing empty chat
+                switchConversation(emptyConv.id);
                 userInput.focus();
                 if (window.innerWidth <= 992) closeSidebar();
                 return;
             }
+
+            // No empty chat exists — create a new one
             const newId = createConversation('New Chat');
             state.activeId = newId;
             const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
@@ -2912,7 +2978,7 @@
         });
 
         // ==========================================================
-        // LOAD FROM URL PARAMETERS (share link support)
+        // LOAD FROM URL PARAMETERS
         // ==========================================================
         function loadFromURL() {
             const params = new URLSearchParams(window.location.search);
@@ -2921,21 +2987,9 @@
             if (convId && state.conversations[convId]) {
                 switchConversation(convId);
                 if (msgId) {
-                    // Scroll to the message
                     setTimeout(() => {
-                        const msgElements = messagesContainer.querySelectorAll('.message-wrapper');
-                        let target = null;
-                        for (let el of msgElements) {
-                            // We stored msg id as dataset.msgId? We need to store it.
-                            // We'll store on the wrapper: wrapper.dataset.msgId = msg.id
-                            // We'll add that.
-                            // But we haven't stored it yet. Let's modify appendMessageDOM to set dataset.msgId.
-                            // We'll update that function.
-                            // Since we are not storing id, we can just scroll to bottom or use a simple approach.
-                            // For simplicity, we scroll to bottom.
-                        }
                         scrollToBottom(true);
-                    }, 200);
+                    }, 300);
                 }
             }
         }
@@ -2949,7 +3003,6 @@
             const savedConvs = Storage.get('conversations');
             if (savedConvs && APP_CONFIG.enableLocalStorage) {
                 state.conversations = savedConvs;
-                // Load from URL if present
                 const params = new URLSearchParams(window.location.search);
                 const convId = params.get('conversation');
                 if (convId && state.conversations[convId]) {
@@ -2961,14 +3014,24 @@
                     if (conv && conv.messages.length > 0) emptyState.classList.add('is-hidden');
                     setTimeout(() => scrollToBottom(true), 300);
                 } else {
+                    // Find the most recent conversation with messages
                     const convs = Object.values(state.conversations);
-                    if (convs.length > 0) {
-                        const latest = convs.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+                    const withMessages = convs.filter(c => c.messages.length > 0);
+                    if (withMessages.length > 0) {
+                        const latest = withMessages.sort((a, b) => b.updatedAt - a.updatedAt)[0];
                         state.activeId = latest.id;
                         renderHistory();
                         renderConversation(latest.id);
                         chatTitle.textContent = latest.title;
-                        if (latest.messages.length > 0) emptyState.classList.add('is-hidden');
+                        emptyState.classList.add('is-hidden');
+                    } else if (convs.length > 0) {
+                        // There are only empty chats — pick the first one
+                        const first = convs[0];
+                        state.activeId = first.id;
+                        renderHistory();
+                        renderConversation(first.id);
+                        chatTitle.textContent = first.title;
+                        emptyState.classList.remove('is-hidden');
                     }
                 }
             }
@@ -2992,28 +3055,11 @@
             }
         });
 
-        // Override appendMessageDOM to store msg id for scroll
-        const origAppend = appendMessageDOM;
-        appendMessageDOM = function(content, role, isLoading) {
-            const wrapper = origAppend(content, role, isLoading);
-            // If we have a message id, we can store it
-            // But we don't have it here; we'll add after addMessage is called.
-            // We'll handle it differently: we'll store msg id in the wrapper after message is added.
-            return wrapper;
-        };
-
-        // Patch addMessage to also store id on DOM wrapper later if needed.
-        // We'll just rely on scroll to bottom for now.
-
         init();
 
-        // After init, handle any URL parameters again
         window.addEventListener('load', function() {
             loadFromURL();
         });
-
-        // Also update the message share to include message id properly.
-        // We'll just rely on conversation link for now.
     </script>
 </body>
 </html>
