@@ -38,7 +38,7 @@ Please use this information to provide a comprehensive, accurate answer.
     }
 
     // Call AI with fallback
-    const response = await callGroqAPI(systemPrompt, userMessage, history);
+    const response = await callAI(systemPrompt, userMessage, history);
 
     return res.status(200).json({
       response: response,
@@ -93,25 +93,13 @@ Rules for Your Responses:
 }
 
 // ==========================================================
-// GROQ API CALL — Primary AI
+// AI CALL — Unified with fallbacks
 // ==========================================================
-async function callGroqAPI(systemPrompt, userMessage, history) {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    console.warn('Groq API key missing, falling back to Gemini');
-    return callGeminiAPI(systemPrompt, userMessage, history);
-  }
-
-  const models = [
-    'llama-3.1-70b-versatile',  // Primary
-    'llama-3.1-8b-instant',     // Fallback 1
-    'mixtral-8x7b-32768',       // Fallback 2
-  ];
-
+async function callAI(systemPrompt, userMessage, history) {
+  // Build messages
   const messages = [
     { role: 'system', content: systemPrompt }
   ];
-
   if (history && Array.isArray(history)) {
     const limitedHistory = history.slice(-10);
     for (const msg of limitedHistory) {
@@ -122,107 +110,79 @@ async function callGroqAPI(systemPrompt, userMessage, history) {
   }
   messages.push({ role: 'user', content: userMessage });
 
-  let lastError = null;
-
-  for (const model of models) {
-    try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: messages,
-          temperature: 0.7,
-          max_tokens: 1024,
-          stream: false,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.warn(`Groq model ${model} failed:`, response.status, errorText);
-        lastError = errorText;
-        continue; // Try next model
-      }
-
-      const data = await response.json();
-      return data.choices[0].message.content;
-
-    } catch (error) {
-      console.warn(`Groq model ${model} error:`, error.message);
-      lastError = error.message;
-      continue;
-    }
-  }
-
-  // All Groq models failed, fallback to Gemini
-  console.warn('All Groq models failed, falling back to Gemini. Last error:', lastError);
-  return callGeminiAPI(systemPrompt, userMessage, history);
-}
-
-// ==========================================================
-// GEMINI API — Backup AI
-// ==========================================================
-async function callGeminiAPI(systemPrompt, userMessage, history) {
-  const apiKey = process.env.GOOGLE_API_KEY;
-  if (!apiKey) {
-    console.error('No Gemini API key available');
-    return "I'm currently experiencing technical difficulties. Please try again later. (No AI API keys configured)";
-  }
-
-  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp';
-
-  let conversationText = `System: ${systemPrompt}\n\n`;
-
-  if (history && Array.isArray(history)) {
-    const limitedHistory = history.slice(-10);
-    for (const msg of limitedHistory) {
-      if (msg.role === 'user') {
-        conversationText += `User: ${msg.content}\n`;
-      } else if (msg.role === 'assistant') {
-        conversationText += `Assistant: ${msg.content}\n`;
-      }
-    }
-  }
-
-  conversationText += `User: ${userMessage}\nAssistant:`;
-
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: conversationText }] }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1024,
+  // Try Groq first
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    const groqModels = [
+      'llama-3.1-70b-versatile',
+      'llama-3.1-8b-instant',
+      'mixtral-8x7b-32768'
+    ];
+    for (const model of groqModels) {
+      try {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${groqKey}`,
+            'Content-Type': 'application/json',
           },
-        }),
+          body: JSON.stringify({
+            model: model,
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 1024,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return data.choices[0].message.content;
+        } else {
+          const errorText = await response.text();
+          console.warn(`Groq model ${model} failed (${response.status}):`, errorText);
+        }
+      } catch (err) {
+        console.warn(`Groq model ${model} error:`, err.message);
       }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Gemini API error:', response.status, errorText);
-      return "I'm currently experiencing technical difficulties. Please try again later.";
     }
-
-    const data = await response.json();
-    return data.candidates[0].content.parts[0].text;
-
-  } catch (error) {
-    console.error('Gemini request failed:', error);
-    return "I'm currently experiencing technical difficulties. Please try again later.";
   }
+
+  // Fallback to Gemini
+  const geminiKey = process.env.GOOGLE_API_KEY;
+  if (geminiKey) {
+    const geminiModels = ['gemini-1.5-flash', 'gemini-1.5-pro'];
+    for (const model of geminiModels) {
+      try {
+        const conversationText = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: conversationText }] }],
+              generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+            }),
+          }
+        );
+        if (response.ok) {
+          const data = await response.json();
+          return data.candidates[0].content.parts[0].text;
+        } else {
+          const errorText = await response.text();
+          console.warn(`Gemini model ${model} failed (${response.status}):`, errorText);
+        }
+      } catch (err) {
+        console.warn(`Gemini model ${model} error:`, err.message);
+      }
+    }
+  }
+
+  // Ultimate fallback
+  throw new Error('All AI providers failed. Please check API keys and model availability.');
 }
 
 // ==========================================================
-// WEB SEARCH — Serper & Tavily (helper functions)
+// WEB SEARCH (Serper & Tavily)
 // ==========================================================
 function shouldPerformWebSearch(message) {
   const keywords = ['latest', 'current', 'today', 'now', 'recent', 'new', 'update', 'news', 'price', 'market', 'weather', 'forecast', '2025', '2026', '2027', 'what is the current', 'how much', 'price of', 'market price', 'recently', 'this year', 'this month'];
