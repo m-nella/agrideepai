@@ -14,7 +14,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    // Web search (optional)
+    console.log('📩 Received message:', message);
+
+    // Web search
     let searchResults = '';
     if (shouldPerformWebSearch(message)) {
       if (process.env.SERPER_API_KEY) {
@@ -37,7 +39,6 @@ Please use this information to provide a comprehensive, accurate answer.
 `;
     }
 
-    // Call AI with fallback
     const response = await callAI(systemPrompt, userMessage, history);
 
     return res.status(200).json({
@@ -46,7 +47,7 @@ Please use this information to provide a comprehensive, accurate answer.
     });
 
   } catch (error) {
-    console.error('Backend error:', error);
+    console.error('❌ Backend error:', error);
     return res.status(500).json({
       error: error.message || 'Something went wrong. Please try again.'
     });
@@ -74,15 +75,6 @@ If a user asks about any other country, topic, or field outside agriculture/live
 
 Your expertise covers both Rwanda-specific agriculture and global agricultural practices, ensuring users worldwide get relevant and accurate information.
 
-Your Main Topics:
-- Crop Diseases & Treatments (Global & Rwanda)
-- Livestock Health & Management (Global & Rwanda)
-- Farming Techniques (Global & Rwanda)
-- Agricultural Challenges & Solutions (Global & Rwanda)
-- Agribusiness & Markets (Global & Rwanda)
-- Agricultural Research & Innovations (Global & Rwanda)
-- Career & Education Guidance (Global & Rwanda)
-
 Rules for Your Responses:
 - Always prioritize factual accuracy.
 - If you cannot find a definitive answer, politely tell the user you could not find the information.
@@ -96,7 +88,6 @@ Rules for Your Responses:
 // AI CALL — Unified with fallbacks
 // ==========================================================
 async function callAI(systemPrompt, userMessage, history) {
-  // Build messages
   const messages = [
     { role: 'system', content: systemPrompt }
   ];
@@ -112,14 +103,18 @@ async function callAI(systemPrompt, userMessage, history) {
 
   // Try Groq first
   const groqKey = process.env.GROQ_API_KEY;
+  console.log('🔑 Groq API Key exists:', !!groqKey);
+
   if (groqKey) {
+    // CORRECTED: Using active Groq models
     const groqModels = [
-      'llama-3.1-70b-versatile',
-      'llama-3.1-8b-instant',
+      'llama3-70b-8192',
+      'llama3-8b-8192',
       'mixtral-8x7b-32768'
     ];
     for (const model of groqModels) {
       try {
+        console.log(`📡 Trying Groq model: ${model}`);
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -133,25 +128,33 @@ async function callAI(systemPrompt, userMessage, history) {
             max_tokens: 1024,
           }),
         });
+
         if (response.ok) {
           const data = await response.json();
+          console.log(`✅ Groq model ${model} succeeded`);
           return data.choices[0].message.content;
         } else {
           const errorText = await response.text();
-          console.warn(`Groq model ${model} failed (${response.status}):`, errorText);
+          console.warn(`⚠️ Groq model ${model} failed (${response.status}):`, errorText);
         }
       } catch (err) {
-        console.warn(`Groq model ${model} error:`, err.message);
+        console.warn(`⚠️ Groq model ${model} error:`, err.message);
       }
     }
+  } else {
+    console.warn('⚠️ No Groq API key found');
   }
 
   // Fallback to Gemini
   const geminiKey = process.env.GOOGLE_API_KEY;
+  console.log('🔑 Gemini API Key exists:', !!geminiKey);
+
   if (geminiKey) {
-    const geminiModels = ['gemini-1.5-flash', 'gemini-1.5-pro'];
+    // CORRECTED: Using active Gemini models with -001 suffix
+    const geminiModels = ['gemini-1.5-flash-001', 'gemini-1.5-pro-001'];
     for (const model of geminiModels) {
       try {
+        console.log(`📡 Trying Gemini model: ${model}`);
         const conversationText = messages.map(m => `${m.role}: ${m.content}`).join('\n');
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
@@ -164,20 +167,23 @@ async function callAI(systemPrompt, userMessage, history) {
             }),
           }
         );
+
         if (response.ok) {
           const data = await response.json();
+          console.log(`✅ Gemini model ${model} succeeded`);
           return data.candidates[0].content.parts[0].text;
         } else {
           const errorText = await response.text();
-          console.warn(`Gemini model ${model} failed (${response.status}):`, errorText);
+          console.warn(`⚠️ Gemini model ${model} failed (${response.status}):`, errorText);
         }
       } catch (err) {
-        console.warn(`Gemini model ${model} error:`, err.message);
+        console.warn(`⚠️ Gemini model ${model} error:`, err.message);
       }
     }
+  } else {
+    console.warn('⚠️ No Gemini API key found');
   }
 
-  // Ultimate fallback
   throw new Error('All AI providers failed. Please check API keys and model availability.');
 }
 
