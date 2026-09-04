@@ -1,3 +1,62 @@
+// ==========================================================
+// AgriDeepAI Backend — Vercel Serverless Function
+// ==========================================================
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const { message, history } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    console.log('📩 Received message:', message);
+
+    // Web search
+    let searchResults = '';
+    if (shouldPerformWebSearch(message)) {
+      if (process.env.SERPER_API_KEY) {
+        searchResults = await performSerperSearch(message);
+      } else if (process.env.TAVILY_API_KEY) {
+        searchResults = await performTavilySearch(message);
+      }
+    }
+
+    const systemPrompt = getSystemPrompt();
+    let userMessage = message;
+    if (searchResults) {
+      userMessage = `
+User question: ${message}
+
+Relevant web search results:
+${searchResults}
+
+Please use this information to provide a comprehensive, accurate answer.
+`;
+    }
+
+    const response = await callAI(systemPrompt, userMessage, history);
+
+    return res.status(200).json({
+      response: response,
+      searchUsed: !!searchResults
+    });
+
+  } catch (error) {
+    console.error('❌ Backend error:', error);
+    return res.status(500).json({
+      error: error.message || 'Something went wrong. Please try again.'
+    });
+  }
+}
+
+// ==========================================================
+// SYSTEM PROMPT — HUMAN-LIKE, INTELLIGENT
+// ==========================================================
 function getSystemPrompt() {
   return `
 You are AgriDeepAI, a warm, professional, and intelligent AI assistant created by Ornella Mutuyimana, a Rwandan national with a deep passion for agriculture, food security, and agri-tech innovation.
@@ -35,4 +94,161 @@ You are an expert in all things Agriculture and Livestock. You can answer questi
 ## Important Note:
 You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture. Your goal is to be helpful, engaging, and knowledgeable while staying true to your agricultural expertise.
 `;
+}
+
+// ==========================================================
+// AI CALL — Unified with fallbacks
+// ==========================================================
+async function callAI(systemPrompt, userMessage, history) {
+  const messages = [
+    { role: 'system', content: systemPrompt }
+  ];
+  if (history && Array.isArray(history)) {
+    const limitedHistory = history.slice(-10);
+    for (const msg of limitedHistory) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    }
+  }
+  messages.push({ role: 'user', content: userMessage });
+
+  // ==========================================================
+  // 1. TRY GROQ
+  // ==========================================================
+  const groqKey = process.env.GROQ_API_KEY;
+  console.log('🔑 Groq API Key exists:', !!groqKey);
+
+  if (groqKey) {
+    const groqModels = [
+      'groq/compound-mini',
+      'qwen/qwen3.6-27b',
+      'openai/gpt-oss-20b',
+      'openai/gpt-oss-120b',
+    ];
+    for (const model of groqModels) {
+      try {
+        console.log(`📡 Trying Groq model: ${model}`);
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${groqKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 1024,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`✅ Groq model ${model} succeeded`);
+          return data.choices[0].message.content;
+        } else {
+          const errorText = await response.text();
+          console.warn(`⚠️ Groq model ${model} failed (${response.status}):`, errorText);
+        }
+      } catch (err) {
+        console.warn(`⚠️ Groq model ${model} error:`, err.message);
+      }
+    }
+  }
+
+  // ==========================================================
+  // 2. FALLBACK TO GEMINI
+  // ==========================================================
+  const geminiKey = process.env.GOOGLE_API_KEY;
+  console.log('🔑 Gemini API Key exists:', !!geminiKey);
+
+  if (geminiKey) {
+    const geminiModels = [
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+    ];
+    for (const model of geminiModels) {
+      try {
+        console.log(`📡 Trying Gemini model: ${model}`);
+        const conversationText = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: conversationText }] }],
+              generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+            }),
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`✅ Gemini model ${model} succeeded`);
+          return data.candidates[0].content.parts[0].text;
+        } else {
+          const errorText = await response.text();
+          console.warn(`⚠️ Gemini model ${model} failed (${response.status}):`, errorText);
+        }
+      } catch (err) {
+        console.warn(`⚠️ Gemini model ${model} error:`, err.message);
+      }
+    }
+  }
+
+  // ==========================================================
+  // 3. ULTIMATE FALLBACK
+  // ==========================================================
+  throw new Error('All AI providers failed. Please check API keys and model availability.');
+}
+
+// ==========================================================
+// WEB SEARCH (Serper & Tavily)
+// ==========================================================
+function shouldPerformWebSearch(message) {
+  const keywords = ['latest', 'current', 'today', 'now', 'recent', 'new', 'update', 'news', 'price', 'market', 'weather', 'forecast', '2025', '2026', '2027', 'what is the current', 'how much', 'price of', 'market price', 'recently', 'this year', 'this month'];
+  const lower = message.toLowerCase();
+  return keywords.some(kw => lower.includes(kw));
+}
+
+async function performSerperSearch(query) {
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) return '';
+  try {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, num: 5 }),
+    });
+    if (!res.ok) return '';
+    const data = await res.json();
+    const results = data.organic || [];
+    if (results.length === 0) return '';
+    return results.slice(0, 5).map((r, i) =>
+      `\n${i+1}. ${r.title || 'Untitled'}\n   ${r.snippet || r.description || 'No description'}\n   Source: ${r.link || 'Unknown'}`
+    ).join('');
+  } catch { return ''; }
+}
+
+async function performTavilySearch(query) {
+  const apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) return '';
+  try {
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, query, search_depth: 'basic', max_results: 5 }),
+    });
+    if (!res.ok) return '';
+    const data = await res.json();
+    const results = data.results || [];
+    if (results.length === 0) return '';
+    return results.slice(0, 5).map((r, i) =>
+      `\n${i+1}. ${r.title || 'Untitled'}\n   ${r.content || r.snippet || 'No description'}\n   Source: ${r.url || 'Unknown'}`
+    ).join('');
+  } catch { return ''; }
 }
