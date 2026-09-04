@@ -4,7 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- SEO & DISCOVERABILITY -->
     <title>AgriDeepAI — Professional AI Assistant for Agriculture &amp; Livestock</title>
     <meta name="description" content="AgriDeepAI is a free, intelligent AI assistant specialized in agriculture, livestock, crop diseases, farming techniques, and agribusiness in Rwanda and globally. No sign-up required." />
     <meta name="keywords" content="agriculture AI, livestock AI, Rwanda agriculture, crop diseases, farming assistant, agribusiness, AI chatbot, free AI" />
@@ -42,6 +41,12 @@
 
     <link rel="icon" href="logo.png" type="image/png" />
 
+    <!-- Libraries for Markdown, sanitization, syntax highlighting -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
     <style>
         /* ==========================================================
            DESIGN TOKENS — Professional Green Accent
@@ -64,7 +69,6 @@
             --border-subtle: #262628;
             --border-strong: #3a3a3e;
 
-            /* Professional green — earthy, trustworthy, agriculture-focused */
             --accent: #2b7d4b;
             --accent-hover: #3a9a5e;
             --accent-ghost: rgba(43, 125, 75, 0.12);
@@ -102,10 +106,16 @@
 
             --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-            /* User message background: dim green (matches sidebar toggle) */
             --msg-user-bg: rgba(43, 125, 75, 0.25);
-            /* Bot message background: dark gray */
             --msg-bot-bg: #1e1e20;
+
+            /* Assistant response specific */
+            --assistant-text: #e5e7eb;
+            --assistant-muted: #9ca3af;
+            --assistant-border: rgba(255, 255, 255, 0.08);
+            --assistant-code-bg: #111315;
+            --assistant-inline-code-bg: rgba(255, 255, 255, 0.08);
+            --assistant-radius: 12px;
         }
 
         [data-theme="light"] {
@@ -139,11 +149,15 @@
 
             --msg-user-bg: rgba(43, 125, 75, 0.20);
             --msg-bot-bg: #f0f0f2;
+
+            --assistant-text: #1c1c1e;
+            --assistant-muted: #4a4a52;
+            --assistant-border: rgba(0, 0, 0, 0.08);
+            --assistant-code-bg: #f0f0f2;
+            --assistant-inline-code-bg: rgba(0, 0, 0, 0.06);
         }
 
-        /* ==========================================================
-           RESET & BASE
-           ========================================================== */
+        /* Reset & Base */
         *,
         *::before,
         *::after {
@@ -161,12 +175,8 @@
             overflow: hidden;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
-            text-rendering: optimizeLegibility;
         }
 
-        /* ==========================================================
-           APP LAYOUT
-           ========================================================== */
         .app {
             display: flex;
             height: 100vh;
@@ -176,9 +186,7 @@
             overflow: hidden;
         }
 
-        /* ==========================================================
-           SIDEBAR
-           ========================================================== */
+        /* ===== SIDEBAR ===== */
         .sidebar {
             width: var(--sidebar-width);
             height: 100vh;
@@ -192,11 +200,9 @@
             position: relative;
             z-index: 200;
         }
-
         .sidebar.is-collapsed {
             width: var(--sidebar-collapsed);
         }
-
         .sidebar.is-collapsed .brand-text,
         .sidebar.is-collapsed .new-chat-label,
         .sidebar.is-collapsed .chat-item,
@@ -206,7 +212,6 @@
         .sidebar.is-collapsed .sidebar-header .brand .brand-text {
             display: none;
         }
-
         .sidebar.is-collapsed .sidebar-header {
             padding: 8px 4px;
             border-bottom: none;
@@ -215,9 +220,7 @@
             gap: 4px;
             min-height: auto;
             flex-direction: column;
-            position: relative;
         }
-
         .sidebar.is-collapsed .sidebar-header .brand {
             padding: 0;
             margin: 0;
@@ -226,14 +229,12 @@
             align-items: center;
             gap: 0;
         }
-
         .sidebar.is-collapsed .sidebar-header .brand img {
             width: 30px;
             height: 30px;
             border-radius: 8px;
             display: block;
         }
-
         .sidebar.is-collapsed .sidebar-header .sidebar-toggle {
             background: var(--accent-dim);
             border: 1px solid var(--accent);
@@ -243,24 +244,20 @@
             height: 32px;
             padding: 4px;
             margin: 2px 0 0 0;
-            position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: var(--transition-fast);
         }
-
         .sidebar.is-collapsed .sidebar-header .sidebar-toggle:hover {
             background: var(--accent);
             border-color: var(--accent-hover);
         }
-
         .sidebar.is-collapsed .sidebar-header .sidebar-toggle svg {
             width: 16px;
             height: 16px;
             stroke: var(--text-primary);
         }
-
         .sidebar.is-collapsed .new-chat-btn {
             justify-content: center;
             padding: 4px;
@@ -271,29 +268,24 @@
             border: none;
             background: transparent;
         }
-
         .sidebar.is-collapsed .new-chat-btn:hover {
             background: var(--bg-hover);
         }
-
         .sidebar.is-collapsed .new-chat-btn svg {
             width: 18px;
             height: 18px;
         }
-
         .sidebar.is-collapsed .chat-history {
             flex: 0;
             overflow: hidden;
             padding: 0;
             height: 0;
         }
-
         .sidebar.is-collapsed .sidebar-footer {
             padding: 6px 4px 10px 4px;
             border-top: none;
             margin-top: auto;
         }
-
         .sidebar.is-collapsed .account-btn {
             justify-content: center;
             padding: 4px;
@@ -302,19 +294,16 @@
             width: 34px;
             margin: 0 auto;
         }
-
         .sidebar.is-collapsed .account-btn .avatar {
             width: 28px;
             height: 28px;
             font-size: 11px;
             margin: 0;
         }
-
         .sidebar.is-collapsed .account-settings-icon {
             display: none;
         }
 
-        /* ---- Expanded sidebar header ---- */
         .sidebar-header {
             padding: 14px 16px;
             display: flex;
@@ -323,10 +312,7 @@
             border-bottom: 1px solid var(--border-subtle);
             flex-shrink: 0;
             min-height: 56px;
-            transition: padding var(--transition-fast);
-            position: relative;
         }
-
         .brand {
             display: flex;
             align-items: center;
@@ -334,7 +320,6 @@
             overflow: hidden;
             white-space: nowrap;
         }
-
         .brand img {
             width: 28px;
             height: 28px;
@@ -342,19 +327,16 @@
             flex-shrink: 0;
             object-fit: cover;
         }
-
         .brand-text {
             font-size: 17px;
             font-weight: 700;
             color: var(--text-primary);
             transition: opacity var(--transition-fast), width var(--transition-fast);
         }
-
         .brand-text .accent {
             color: var(--accent);
         }
 
-        /* ---- Sidebar toggle (expanded) with green accent ---- */
         .sidebar-toggle {
             background: var(--accent-dim);
             border: 1px solid var(--accent);
@@ -369,31 +351,21 @@
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            position: relative;
-            margin-right: -2px;
             color: var(--text-primary);
         }
-
         .sidebar-toggle:hover {
             background: var(--accent);
             border-color: var(--accent-hover);
             box-shadow: 0 0 24px var(--accent-glow);
         }
-
-        .sidebar-toggle:focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 2px;
-        }
-
         .sidebar-toggle svg {
             width: 18px;
             height: 18px;
             fill: none;
-            stroke: var(--text-primary);
+            stroke: currentColor;
             stroke-width: 2;
             stroke-linecap: round;
             stroke-linejoin: round;
-            transition: transform var(--transition-med);
         }
 
         .new-chat-btn {
@@ -413,23 +385,14 @@
             justify-content: center;
             flex-shrink: 0;
             min-height: 40px;
-            position: relative;
         }
-
         .new-chat-btn:hover {
             background: var(--bg-hover);
             border-color: var(--border-strong);
         }
-
         .new-chat-btn:active {
             transform: scale(0.97);
         }
-
-        .new-chat-btn:focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 2px;
-        }
-
         .new-chat-btn svg {
             width: 18px;
             height: 18px;
@@ -440,7 +403,6 @@
             stroke-linejoin: round;
             flex-shrink: 0;
         }
-
         .new-chat-label {
             transition: opacity var(--transition-fast), width var(--transition-fast);
             white-space: nowrap;
@@ -453,7 +415,6 @@
             transition: all var(--transition-fast);
             position: relative;
         }
-
         .chat-history::-webkit-scrollbar {
             width: 3px;
         }
@@ -463,24 +424,6 @@
         .chat-history::-webkit-scrollbar-thumb {
             background: var(--bg-hover);
             border-radius: 4px;
-        }
-
-        .chat-item.is-pinned {
-            position: sticky;
-            top: 0;
-            background: var(--bg-surface);
-            z-index: 5;
-            border-bottom: 1px solid var(--border-subtle);
-            margin-bottom: 2px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        }
-
-        .chat-item.is-pinned:last-of-type {
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .chat-item.is-pinned+.chat-item:not(.is-pinned) {
-            margin-top: 8px;
         }
 
         .chat-item {
@@ -494,18 +437,14 @@
             margin-bottom: 1px;
             min-height: 36px;
             gap: 6px;
-            position: relative;
             background: var(--bg-surface);
         }
-
         .chat-item:hover {
             background: var(--bg-hover);
         }
-
         .chat-item.is-active {
             background: var(--bg-active);
         }
-
         .chat-item .title {
             font-size: 13px;
             color: var(--text-secondary);
@@ -513,19 +452,15 @@
             text-overflow: ellipsis;
             white-space: nowrap;
             flex: 1;
-            transition: opacity var(--transition-fast);
         }
-
         .chat-item.is-active .title {
             color: var(--text-primary);
         }
-
         .chat-item .chat-actions {
             display: flex;
             gap: 2px;
             flex-shrink: 0;
         }
-
         .chat-item .chat-actions button {
             background: none;
             border: none;
@@ -539,16 +474,13 @@
             align-items: center;
             justify-content: center;
         }
-
         .chat-item .chat-actions button:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
         }
-
         .chat-item .chat-actions button.is-pinned {
             color: var(--warning);
         }
-
         .chat-item .chat-actions button svg {
             width: 14px;
             height: 14px;
@@ -571,6 +503,7 @@
             padding: 10px 12px 12px 12px;
             border-top: 1px solid var(--border-subtle);
             flex-shrink: 0;
+            position: relative;
         }
 
         .account-btn {
@@ -590,16 +523,9 @@
             text-align: left;
             min-height: 40px;
         }
-
         .account-btn:hover {
             background: var(--bg-hover);
         }
-
-        .account-btn:focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 2px;
-        }
-
         .account-btn .avatar {
             width: 28px;
             height: 28px;
@@ -614,19 +540,11 @@
             flex-shrink: 0;
             overflow: hidden;
         }
-
-        .account-btn .avatar img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
         .account-info {
             flex: 1;
             min-width: 0;
             transition: opacity var(--transition-fast), width var(--transition-fast);
         }
-
         .account-info .name {
             font-size: 13px;
             font-weight: 500;
@@ -635,7 +553,6 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-
         .account-info .sub {
             font-size: 11px;
             color: var(--text-muted);
@@ -643,7 +560,6 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-
         .account-settings-icon {
             color: var(--text-muted);
             font-size: 16px;
@@ -653,11 +569,9 @@
             align-items: center;
             justify-content: center;
         }
-
         .account-btn:hover .account-settings-icon {
             color: var(--text-primary);
         }
-
         .account-settings-icon svg {
             width: 18px;
             height: 18px;
@@ -668,9 +582,55 @@
             stroke-linejoin: round;
         }
 
-        /* ==========================================================
-           MAIN CHAT
-           ========================================================== */
+        /* Account Dropdown */
+        .account-dropdown {
+            position: absolute;
+            bottom: 60px;
+            left: 10px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            padding: 6px 0;
+            min-width: 200px;
+            z-index: 500;
+            display: none;
+            flex-direction: column;
+        }
+        .account-dropdown.is-open {
+            display: flex;
+        }
+        .account-dropdown .dropdown-item {
+            padding: 10px 16px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: var(--transition-fast);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            font-family: inherit;
+        }
+        .account-dropdown .dropdown-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        .account-dropdown .dropdown-item .icon {
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
+        }
+        .account-dropdown .dropdown-divider {
+            height: 1px;
+            background: var(--border-subtle);
+            margin: 4px 12px;
+        }
+
+        /* ===== MAIN CHAT ===== */
         .main-chat {
             flex: 1;
             display: flex;
@@ -692,7 +652,6 @@
             background: var(--bg-app);
             min-height: var(--header-height);
         }
-
         .chat-header .sidebar-open-btn {
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
@@ -709,13 +668,11 @@
             transition: var(--transition-fast);
             flex-shrink: 0;
         }
-
         .chat-header .sidebar-open-btn:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
             box-shadow: var(--shadow-md);
         }
-
         .chat-header .sidebar-open-btn svg {
             width: 20px;
             height: 20px;
@@ -725,7 +682,6 @@
             stroke-linecap: round;
             stroke-linejoin: round;
         }
-
         .chat-header .chat-title {
             font-size: 14px;
             font-weight: 500;
@@ -744,7 +700,6 @@
             scroll-behavior: smooth;
             position: relative;
         }
-
         .messages-container::-webkit-scrollbar {
             width: 4px;
         }
@@ -756,9 +711,7 @@
             border-radius: 4px;
         }
 
-        /* ==========================================================
-           EMPTY STATE
-           ========================================================== */
+        /* ===== EMPTY STATE ===== */
         .empty-state {
             flex: 1;
             display: flex;
@@ -772,7 +725,6 @@
             margin: 0 auto;
             width: 100%;
         }
-
         .empty-state .logo {
             width: 64px;
             height: 64px;
@@ -781,18 +733,15 @@
             flex-shrink: 0;
             object-fit: cover;
         }
-
         .empty-state h1 {
             font-size: 26px;
             font-weight: 700;
             color: var(--text-primary);
             margin-bottom: 2px;
         }
-
         .empty-state h1 .accent {
             color: var(--accent);
         }
-
         .empty-state .subtitle {
             font-size: 15px;
             color: var(--text-secondary);
@@ -800,7 +749,6 @@
             line-height: 1.6;
             margin-top: 4px;
         }
-
         .empty-state .suggestions {
             display: flex;
             flex-wrap: wrap;
@@ -808,7 +756,6 @@
             margin-top: 24px;
             justify-content: center;
         }
-
         .empty-state .suggestions button {
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
@@ -820,74 +767,329 @@
             transition: var(--transition-fast);
             font-family: inherit;
         }
-
         .empty-state .suggestions button:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
             border-color: var(--accent);
         }
-
         .empty-state.is-hidden {
             display: none;
         }
 
-        /* ==========================================================
-           MESSAGES
-           ========================================================== */
-        .message-wrapper {
-            display: flex;
-            flex-direction: column;
-            margin-bottom: 18px;
-            animation: fadeUp 0.25s ease;
-            max-width: 78%;
-            width: 100%;
-        }
-
+        /* ===== USER MESSAGES ===== */
         .message-wrapper.is-user {
             align-self: flex-end;
+            max-width: 78%;
+            width: auto;
+            margin-bottom: 18px;
+            animation: fadeUp 0.25s ease;
         }
-
-        .message-wrapper.is-bot {
-            align-self: flex-start;
-        }
-
-        .message-bubble {
-            padding: 12px 18px;
-            border-radius: var(--radius-lg);
-            font-size: 14.5px;
-            line-height: 1.65;
-            word-wrap: break-word;
-            max-width: 100%;
-            position: relative;
-        }
-
-        /* User message uses dim green background (same as sidebar toggle) */
         .message-wrapper.is-user .message-bubble {
             background: var(--msg-user-bg);
             color: var(--text-primary);
             border-bottom-right-radius: 4px;
             border: 1px solid var(--accent);
+            padding: 12px 18px;
+            border-radius: var(--radius-lg);
+            font-size: 14.5px;
+            line-height: 1.65;
+            word-wrap: break-word;
         }
 
-        .message-wrapper.is-bot .message-bubble {
-            background: var(--msg-bot-bg);
+        /* ===== ASSISTANT RESPONSE (NEW) ===== */
+        .assistant-message {
+            width: 100%;
+            margin-bottom: 24px;
+            animation: fadeUp 0.3s ease;
+            position: relative;
+        }
+
+        .assistant-message-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            padding: 0 4px;
+        }
+        .assistant-message-header .logo {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            flex-shrink: 0;
+            object-fit: cover;
+        }
+        .assistant-message-header .name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .assistant-message-header .model-badge {
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            padding: 2px 10px;
+            border-radius: var(--radius-full);
+            margin-left: 4px;
+        }
+
+        .assistant-message-content {
+            max-width: 850px;
+            margin: 0 auto;
+            color: var(--assistant-text);
+            line-height: 1.65;
+            font-size: 15px;
+            padding: 0 4px;
+            width: 100%;
+        }
+
+        .assistant-message-content p {
+            margin: 0 0 1em;
+        }
+        .assistant-message-content p:last-child {
+            margin-bottom: 0;
+        }
+        .assistant-message-content h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 1.2em 0 0.6em;
             color: var(--text-primary);
-            border-bottom-left-radius: 4px;
+        }
+        .assistant-message-content h2 {
+            font-size: 20px;
+            font-weight: 650;
+            margin: 1.2em 0 0.6em;
+            color: var(--text-primary);
+        }
+        .assistant-message-content h3 {
+            font-size: 17px;
+            font-weight: 600;
+            margin: 1em 0 0.5em;
+            color: var(--text-primary);
+        }
+        .assistant-message-content strong {
+            font-weight: 650;
+            color: var(--text-primary);
+        }
+        .assistant-message-content ul,
+        .assistant-message-content ol {
+            padding-left: 1.5em;
+            margin: 0.5em 0 1em;
+        }
+        .assistant-message-content li {
+            margin-bottom: 0.25em;
+        }
+        .assistant-message-content blockquote {
+            border-left: 3px solid var(--accent);
+            padding-left: 16px;
+            margin: 0 0 1em;
+            color: var(--assistant-muted);
+            font-style: italic;
+        }
+        .assistant-message-content a {
+            color: var(--accent-hover);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        .assistant-message-content a:hover {
+            color: var(--accent);
+        }
+        .assistant-message-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 0 0 1em;
+            overflow-x: auto;
+            display: block;
+        }
+        .assistant-message-content table th,
+        .assistant-message-content table td {
+            border: 1px solid var(--border-subtle);
+            padding: 8px 12px;
+            text-align: left;
+        }
+        .assistant-message-content table th {
+            background: var(--bg-elevated);
+            font-weight: 600;
+        }
+        .assistant-message-content hr {
+            border: none;
+            border-top: 1px solid var(--border-subtle);
+            margin: 1.5em 0;
+        }
+        .assistant-message-content code:not(.hljs) {
+            background: var(--assistant-inline-code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-family: var(--font-mono);
+        }
+        .assistant-message-content .hljs {
+            background: var(--assistant-code-bg) !important;
+            border-radius: var(--radius-md);
+            padding: 16px;
+            font-size: 13px;
+            line-height: 1.6;
+            overflow-x: auto;
+            white-space: pre;
         }
 
-        .message-bubble .loading-dots span {
+        /* Code block wrapper */
+        .response-code-block {
+            background: var(--assistant-code-bg);
+            border-radius: var(--radius-md);
+            margin: 0 0 1em;
+            overflow: hidden;
+            border: 1px solid var(--assistant-border);
+        }
+        .response-code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 16px;
+            background: var(--bg-elevated);
+            border-bottom: 1px solid var(--assistant-border);
+            font-size: 12px;
+            color: var(--assistant-muted);
+        }
+        .response-code-header .language-label {
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+        }
+        .response-code-copy {
+            background: none;
+            border: none;
+            color: var(--assistant-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            font-family: inherit;
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            transition: var(--transition-fast);
+        }
+        .response-code-copy:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        .response-code-copy svg {
+            width: 14px;
+            height: 14px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .response-code-copy.copied {
+            color: var(--success);
+        }
+        .response-code-block pre {
+            margin: 0;
+            padding: 12px 16px;
+            overflow-x: auto;
+        }
+        .response-code-block pre code {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre;
+        }
+
+        /* ===== RESPONSE ACTIONS ===== */
+        .assistant-message-actions {
+            display: flex;
+            gap: 2px;
+            margin-top: 12px;
+            padding: 0 4px;
+            flex-wrap: wrap;
+        }
+        .assistant-message-actions button {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 6px 8px;
+            border-radius: var(--radius-sm);
+            transition: var(--transition-fast);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-family: inherit;
+            gap: 4px;
+        }
+        .assistant-message-actions button:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        .assistant-message-actions button.is-active {
+            color: var(--accent);
+        }
+        .assistant-message-actions button svg {
+            width: 16px;
+            height: 16px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .assistant-message-actions .action-label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .assistant-message-actions .action-label.copied {
+            color: var(--success);
+        }
+
+        /* ===== STREAMING CURSOR ===== */
+        .streaming-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1.1em;
+            background: var(--accent);
+            margin-left: 2px;
+            vertical-align: text-bottom;
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .streaming-cursor {
+                animation: none;
+            }
+        }
+
+        /* ===== THINKING INDICATOR ===== */
+        .assistant-thinking {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            font-size: 14px;
+            padding: 0 4px;
+            margin-bottom: 8px;
+        }
+        .assistant-thinking .dots span {
             animation: pulse 1.2s infinite;
             display: inline-block;
             font-size: 18px;
         }
-
-        .message-bubble .loading-dots span:nth-child(2) {
+        .assistant-thinking .dots span:nth-child(2) {
             animation-delay: 0.2s;
         }
-        .message-bubble .loading-dots span:nth-child(3) {
+        .assistant-thinking .dots span:nth-child(3) {
             animation-delay: 0.4s;
         }
-
         @keyframes pulse {
             0%,
             60%,
@@ -899,133 +1101,7 @@
             }
         }
 
-        @keyframes fadeUp {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        /* Message actions */
-        .message-actions {
-            display: flex;
-            gap: 2px;
-            margin-top: 4px;
-            flex-wrap: wrap;
-        }
-
-        .message-wrapper.is-user .message-actions {
-            justify-content: flex-end;
-        }
-        .message-wrapper.is-bot .message-actions {
-            justify-content: flex-start;
-        }
-
-        .message-actions button {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 4px 7px;
-            border-radius: var(--radius-sm);
-            transition: var(--transition-fast);
-            font-family: inherit;
-            line-height: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .message-actions button:hover {
-            background: var(--bg-hover);
-            color: var(--text-primary);
-        }
-
-        .message-actions button:focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 2px;
-        }
-
-        .message-actions button.is-liked {
-            color: var(--accent);
-        }
-        .message-actions button.is-disliked {
-            color: var(--error);
-        }
-
-        .message-actions button svg {
-            width: 16px;
-            height: 16px;
-            fill: none;
-            stroke: currentColor;
-            stroke-width: 2;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-        }
-
-        .edit-container {
-            width: 100%;
-            margin-top: 6px;
-        }
-
-        .edit-input {
-            width: 100%;
-            padding: 10px 14px;
-            background: var(--bg-input);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            color: var(--text-primary);
-            font-size: 14px;
-            font-family: inherit;
-            outline: none;
-            resize: vertical;
-            min-height: 44px;
-            transition: var(--transition-fast);
-            line-height: 1.5;
-        }
-
-        .edit-input:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px var(--accent-glow);
-        }
-
-        .edit-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-        }
-
-        .edit-actions button {
-            padding: 6px 16px;
-            border: none;
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 500;
-            font-family: inherit;
-            transition: var(--transition-fast);
-        }
-
-        .edit-actions .save-edit {
-            background: var(--accent);
-            color: #fff;
-        }
-        .edit-actions .save-edit:hover {
-            background: var(--accent-hover);
-        }
-
-        .edit-actions .cancel-edit {
-            background: var(--bg-elevated);
-            color: var(--text-secondary);
-        }
-        .edit-actions .cancel-edit:hover {
-            background: var(--bg-hover);
-        }
-
+        /* ===== SCROLL BUTTON ===== */
         .scroll-bottom-btn {
             position: absolute;
             bottom: 100px;
@@ -1044,16 +1120,13 @@
             box-shadow: var(--shadow-sm);
             z-index: 50;
         }
-
         .scroll-bottom-btn:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
         }
-
         .scroll-bottom-btn.is-visible {
             display: flex;
         }
-
         .scroll-bottom-btn svg {
             width: 18px;
             height: 18px;
@@ -1064,9 +1137,7 @@
             stroke-linejoin: round;
         }
 
-        /* ==========================================================
-           COMPOSER — with single send/stop button
-           ========================================================== */
+        /* ===== COMPOSER ===== */
         .composer-wrapper {
             position: sticky;
             bottom: 0;
@@ -1076,7 +1147,6 @@
             background: linear-gradient(to top, var(--bg-app) 50%, transparent);
             flex-shrink: 0;
         }
-
         .composer {
             display: flex;
             flex-direction: column;
@@ -1090,19 +1160,16 @@
             position: relative;
             box-shadow: 0 0 0 0 var(--accent-glow);
         }
-
         .composer:focus-within {
             border-color: var(--accent-hover);
             box-shadow: 0 0 0 4px var(--accent-glow);
         }
-
         .composer .input-row {
             display: flex;
             align-items: flex-end;
             gap: 6px;
             width: 100%;
         }
-
         .composer textarea {
             flex: 1;
             background: transparent;
@@ -1118,11 +1185,9 @@
             line-height: 1.5;
             order: 2;
         }
-
         .composer textarea::placeholder {
             color: var(--text-muted);
         }
-
         .composer .composer-actions {
             display: flex;
             align-items: center;
@@ -1130,8 +1195,6 @@
             flex-shrink: 0;
             order: 3;
         }
-
-        /* Single send/stop button */
         .composer .composer-actions .send-stop-btn {
             background: var(--accent);
             color: #fff;
@@ -1148,20 +1211,16 @@
             opacity: 0.35;
             position: relative;
         }
-
         .composer .composer-actions .send-stop-btn.is-active {
             opacity: 1;
         }
-
         .composer .composer-actions .send-stop-btn:hover:not(:disabled) {
             background: var(--accent-hover);
         }
-
         .composer .composer-actions .send-stop-btn:disabled {
             opacity: 0.25;
             cursor: not-allowed;
         }
-
         .composer .composer-actions .send-stop-btn svg {
             width: 18px;
             height: 18px;
@@ -1171,34 +1230,25 @@
             stroke-linecap: round;
             stroke-linejoin: round;
         }
-
-        /* Send icon visible by default, stop icon hidden */
         .composer .composer-actions .send-stop-btn .send-icon {
             display: block;
         }
-
         .composer .composer-actions .send-stop-btn .stop-icon {
             display: none;
         }
-
-        /* When generating, swap icons */
         .composer .composer-actions .send-stop-btn.is-generating .send-icon {
             display: none;
         }
-
         .composer .composer-actions .send-stop-btn.is-generating .stop-icon {
             display: block;
         }
-
         .composer .composer-actions .send-stop-btn.is-generating {
             opacity: 1;
             background: var(--accent);
         }
-
         .composer .composer-actions .send-stop-btn.is-generating:hover {
             background: var(--accent-hover);
         }
-
         .composer .attach-btn {
             order: 1;
             flex-shrink: 0;
@@ -1215,12 +1265,10 @@
             width: 34px;
             height: 34px;
         }
-
         .composer .attach-btn:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
         }
-
         .composer .attach-btn svg {
             width: 20px;
             height: 20px;
@@ -1230,12 +1278,9 @@
             stroke-linecap: round;
             stroke-linejoin: round;
         }
-
         .file-input {
             display: none;
         }
-
-        /* Attachment previews */
         .attachment-previews {
             display: flex;
             flex-wrap: wrap;
@@ -1244,7 +1289,6 @@
             order: 0;
             width: 100%;
         }
-
         .attachment-preview {
             display: flex;
             align-items: center;
@@ -1257,25 +1301,21 @@
             color: var(--text-secondary);
             animation: fadeUp 0.2s ease;
         }
-
         .attachment-preview img {
             width: 28px;
             height: 28px;
             border-radius: 4px;
             object-fit: cover;
         }
-
         .attachment-preview .file-icon {
             font-size: 18px;
         }
-
         .attachment-preview .file-name {
             max-width: 100px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-
         .attachment-preview .remove-attach {
             background: none;
             border: none;
@@ -1287,7 +1327,6 @@
             line-height: 1;
             transition: var(--transition-fast);
         }
-
         .attachment-preview .remove-attach:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
@@ -1305,9 +1344,7 @@
             line-height: 1.4;
         }
 
-        /* ==========================================================
-           MODALS
-           ========================================================== */
+        /* ===== MODALS ===== */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -1320,11 +1357,9 @@
             padding: 20px;
             animation: fadeIn 0.2s ease;
         }
-
         .modal-overlay.is-active {
             display: flex;
         }
-
         .modal-box {
             background: var(--bg-surface);
             border-radius: var(--radius-lg);
@@ -1337,7 +1372,6 @@
             overflow-y: auto;
             animation: slideUp 0.25s var(--ease-spring);
         }
-
         @keyframes slideUp {
             from {
                 opacity: 0;
@@ -1348,7 +1382,6 @@
                 transform: translateY(0) scale(1);
             }
         }
-
         @keyframes fadeIn {
             from {
                 opacity: 0;
@@ -1357,20 +1390,17 @@
                 opacity: 1;
             }
         }
-
         .modal-box .modal-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
             margin-bottom: 16px;
         }
-
         .modal-box .modal-header h2 {
             font-size: 20px;
             font-weight: 700;
             color: var(--text-primary);
         }
-
         .modal-box .modal-header .modal-close {
             background: none;
             border: none;
@@ -1384,12 +1414,10 @@
             align-items: center;
             justify-content: center;
         }
-
         .modal-box .modal-header .modal-close:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
         }
-
         .modal-box .modal-header .modal-close svg {
             width: 20px;
             height: 20px;
@@ -1399,18 +1427,15 @@
             stroke-linecap: round;
             stroke-linejoin: round;
         }
-
         .modal-box .modal-desc {
             color: var(--text-muted);
             font-size: 14px;
             margin-bottom: 18px;
             line-height: 1.5;
         }
-
         .modal-box .field {
             margin-bottom: 14px;
         }
-
         .modal-box .field label {
             display: block;
             font-size: 12px;
@@ -1418,7 +1443,6 @@
             color: var(--text-secondary);
             margin-bottom: 4px;
         }
-
         .modal-box .field input,
         .modal-box .field select {
             width: 100%;
@@ -1432,31 +1456,39 @@
             transition: var(--transition-fast);
             font-family: inherit;
         }
-
         .modal-box .field input:focus,
         .modal-box .field select:focus {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
-
+        .modal-box .field input[type="range"] {
+            accent-color: var(--accent);
+            padding: 0;
+            background: transparent;
+            border: none;
+        }
+        .modal-box .field .range-value {
+            display: inline-block;
+            min-width: 30px;
+            text-align: center;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
         .modal-box .error-msg {
             color: var(--error);
             font-size: 13px;
             margin-top: 4px;
             display: none;
         }
-
         .modal-box .error-msg.is-visible {
             display: block;
         }
-
         .modal-box .modal-actions {
             display: flex;
             gap: 10px;
             margin-top: 20px;
             flex-wrap: wrap;
         }
-
         .modal-box .modal-actions button {
             flex: 1;
             padding: 10px 16px;
@@ -1469,7 +1501,6 @@
             font-family: inherit;
             min-width: 70px;
         }
-
         .modal-box .modal-actions .btn-primary {
             background: var(--accent);
             color: #fff;
@@ -1477,7 +1508,6 @@
         .modal-box .modal-actions .btn-primary:hover {
             background: var(--accent-hover);
         }
-
         .modal-box .modal-actions .btn-secondary {
             background: var(--bg-elevated);
             color: var(--text-primary);
@@ -1485,7 +1515,6 @@
         .modal-box .modal-actions .btn-secondary:hover {
             background: var(--bg-hover);
         }
-
         .modal-box .modal-actions .btn-ghost {
             background: transparent;
             color: var(--text-muted);
@@ -1494,7 +1523,6 @@
             color: var(--text-primary);
             background: var(--bg-hover);
         }
-
         .modal-box .modal-actions .btn-danger {
             background: var(--error);
             color: #fff;
@@ -1506,7 +1534,6 @@
         .share-modal .modal-box {
             max-width: 480px;
         }
-
         .share-link-container {
             display: flex;
             gap: 8px;
@@ -1517,7 +1544,6 @@
             border: 1px solid var(--border-subtle);
             align-items: center;
         }
-
         .share-link-container input {
             flex: 1;
             background: transparent;
@@ -1529,12 +1555,10 @@
             padding: 4px 0;
             min-width: 0;
         }
-
         .share-link-container input::selection {
             background: var(--accent);
             color: #fff;
         }
-
         .share-link-container .copy-link-btn {
             background: var(--accent);
             color: #fff;
@@ -1548,36 +1572,18 @@
             font-family: inherit;
             flex-shrink: 0;
         }
-
         .share-link-container .copy-link-btn:hover {
             background: var(--accent-hover);
         }
-
         .share-link-container .copy-link-btn:active {
             transform: scale(0.96);
-        }
-
-        .share-note {
-            font-size: 13px;
-            color: var(--text-muted);
-            margin-bottom: 12px;
         }
 
         .confirm-modal .modal-box {
             max-width: 400px;
         }
 
-        .confirm-modal .modal-actions .btn-danger {
-            background: var(--error);
-            color: #fff;
-        }
-        .confirm-modal .modal-actions .btn-danger:hover {
-            background: #dc2626;
-        }
-
-        /* ==========================================================
-           TOASTS
-           ========================================================== */
+        /* ===== TOASTS ===== */
         .toast-container {
             position: fixed;
             bottom: 24px;
@@ -1590,7 +1596,6 @@
             width: 100%;
             pointer-events: none;
         }
-
         .toast {
             background: var(--bg-toast);
             border: 1px solid var(--border-subtle);
@@ -1604,12 +1609,10 @@
             pointer-events: auto;
             transition: var(--transition-fast);
         }
-
         .toast.is-hiding {
             opacity: 0;
             transform: translateX(30px);
         }
-
         @keyframes toastIn {
             from {
                 opacity: 0;
@@ -1620,19 +1623,16 @@
                 transform: translateX(0);
             }
         }
-
         .toast .toast-icon {
             font-size: 18px;
             flex-shrink: 0;
         }
-
         .toast .toast-msg {
             flex: 1;
             font-size: 13.5px;
             color: var(--text-primary);
             line-height: 1.4;
         }
-
         .toast .toast-dismiss {
             background: none;
             border: none;
@@ -1645,11 +1645,9 @@
             align-items: center;
             justify-content: center;
         }
-
         .toast .toast-dismiss:hover {
             color: var(--text-primary);
         }
-
         .toast .toast-dismiss svg {
             width: 16px;
             height: 16px;
@@ -1659,7 +1657,6 @@
             stroke-linecap: round;
             stroke-linejoin: round;
         }
-
         .toast.is-success .toast-icon {
             color: var(--success);
         }
@@ -1673,10 +1670,7 @@
             color: var(--accent);
         }
 
-        /* ==========================================================
-           RESPONSIVE
-           ========================================================== */
-
+        /* ===== RESPONSIVE ===== */
         @media (max-width: 992px) {
             .sidebar {
                 position: fixed;
@@ -1688,11 +1682,9 @@
                 box-shadow: var(--shadow-lg);
                 border-right: none;
             }
-
             .sidebar.is-open {
                 transform: translateX(0);
             }
-
             .sidebar-overlay {
                 display: none;
                 position: fixed;
@@ -1701,35 +1693,27 @@
                 z-index: 299;
                 animation: fadeIn 0.2s ease;
             }
-
             .sidebar-overlay.is-visible {
                 display: block;
             }
-
             .chat-header .sidebar-open-btn {
                 display: flex;
             }
-
             .chat-header .chat-title {
                 font-size: 13px;
             }
-
             .messages-container {
                 padding: 16px 16px 80px 16px;
             }
-
             .composer-wrapper {
                 padding: 8px 16px 4px 16px;
             }
-
             .chat-footer {
                 padding: 4px 16px 12px 16px;
             }
-
             .composer {
                 border-radius: var(--radius-md);
             }
-
             .empty-state h1 {
                 font-size: 22px;
             }
@@ -1737,15 +1721,15 @@
                 width: 56px;
                 height: 56px;
             }
-            .message-wrapper {
+            .message-wrapper.is-user {
                 max-width: 90%;
             }
             .modal-box {
                 max-width: 380px;
                 padding: 24px;
             }
-            .share-modal .modal-box {
-                max-width: 420px;
+            .assistant-message-content {
+                max-width: 100%;
             }
         }
 
@@ -1753,50 +1737,40 @@
             .messages-container {
                 padding: 12px 12px 70px 12px;
             }
-
-            .message-bubble {
+            .message-wrapper.is-user .message-bubble {
                 font-size: 13.5px;
                 padding: 10px 14px;
-                border-radius: var(--radius-md);
             }
-
-            .message-wrapper {
+            .message-wrapper.is-user {
                 max-width: 96%;
             }
-
             .composer-wrapper {
                 padding: 6px 12px 4px 12px;
             }
-
             .chat-footer {
                 padding: 4px 12px 10px 12px;
                 font-size: 11px;
             }
-
             .composer {
                 padding: 4px 6px 4px 10px;
                 border-radius: var(--radius-md);
             }
-
             .composer textarea {
                 font-size: 14px;
                 padding: 6px 0;
                 min-height: 20px;
             }
-
             .composer .composer-actions button,
             .composer .attach-btn {
                 width: 30px;
                 height: 30px;
                 padding: 4px;
             }
-
             .composer .composer-actions button svg,
             .composer .attach-btn svg {
                 width: 18px;
                 height: 18px;
             }
-
             .composer .composer-actions .send-stop-btn {
                 width: 30px;
                 height: 30px;
@@ -1805,7 +1779,6 @@
                 width: 16px;
                 height: 16px;
             }
-
             .empty-state .logo {
                 width: 44px;
                 height: 44px;
@@ -1820,29 +1793,38 @@
                 font-size: 12px;
                 padding: 6px 14px;
             }
-
             .sidebar {
                 width: 260px;
             }
-
             .chat-header {
                 padding: 0 12px;
                 height: 44px;
                 min-height: 44px;
             }
-
             .modal-box {
                 padding: 20px;
                 max-width: 340px;
             }
-            .share-modal .modal-box {
-                max-width: 360px;
-            }
-
             .toast-container {
                 right: 12px;
                 bottom: 80px;
                 max-width: 280px;
+            }
+            .assistant-message-content {
+                font-size: 14px;
+            }
+            .assistant-message-content h1 {
+                font-size: 20px;
+            }
+            .assistant-message-content h2 {
+                font-size: 18px;
+            }
+            .assistant-message-content h3 {
+                font-size: 16px;
+            }
+            .response-code-block pre {
+                padding: 8px 12px;
+                font-size: 12px;
             }
         }
 
@@ -1850,7 +1832,7 @@
             .messages-container {
                 padding: 8px 8px 60px 8px;
             }
-            .message-bubble {
+            .message-wrapper.is-user .message-bubble {
                 font-size: 13px;
                 padding: 8px 12px;
             }
@@ -1863,34 +1845,6 @@
             .empty-state .suggestions button {
                 font-size: 11px;
                 padding: 4px 10px;
-            }
-        }
-
-        @media (max-width: 900px) and (orientation: landscape) {
-            .messages-container {
-                padding: 12px 16px 70px 16px;
-            }
-            .empty-state .logo {
-                width: 40px;
-                height: 40px;
-            }
-            .empty-state h1 {
-                font-size: 18px;
-            }
-            .empty-state .suggestions {
-                margin-top: 14px;
-            }
-            .sidebar {
-                width: 220px;
-            }
-        }
-
-        @media (hover: none) {
-            .message-actions {
-                opacity: 1;
-            }
-            .chat-item .chat-actions {
-                opacity: 1;
             }
         }
 
@@ -1908,7 +1862,6 @@
             outline: 2px solid var(--accent);
             outline-offset: 2px;
         }
-
         ::-webkit-scrollbar {
             width: 4px;
             height: 4px;
@@ -1931,7 +1884,6 @@
 
         <!-- SIDEBAR -->
         <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
-
             <div class="sidebar-header">
                 <div class="brand">
                     <img src="logo.png" alt="AgriDeepAI Logo" id="sidebarLogo" />
@@ -1962,6 +1914,27 @@
                         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     </span>
                 </button>
+
+                <!-- Account Dropdown -->
+                <div class="account-dropdown" id="accountDropdown">
+                    <button class="dropdown-item" data-action="account">
+                        <span class="icon">👤</span> Account
+                    </button>
+                    <button class="dropdown-item" data-action="profile">
+                        <span class="icon">📝</span> Profile
+                    </button>
+                    <button class="dropdown-item" data-action="security">
+                        <span class="icon">🔒</span> Security
+                    </button>
+                    <div class="dropdown-divider"></div>
+                    <button class="dropdown-item" data-action="settings">
+                        <span class="icon">⚙️</span> Settings
+                    </button>
+                    <div class="dropdown-divider"></div>
+                    <button class="dropdown-item" data-action="logout" style="color:var(--error);">
+                        <span class="icon">🚪</span> Log Out
+                    </button>
+                </div>
             </div>
         </aside>
 
@@ -1969,7 +1942,6 @@
 
         <!-- MAIN CHAT -->
         <main class="main-chat" id="mainChat">
-
             <header class="chat-header" id="chatHeader">
                 <button class="sidebar-open-btn" id="sidebarOpenBtn" aria-label="Open sidebar" title="Open sidebar">
                     <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -1978,7 +1950,6 @@
             </header>
 
             <div class="messages-container" id="messagesContainer">
-
                 <div class="empty-state" id="emptyState">
                     <img src="logo.png" alt="AgriDeepAI" class="logo" id="emptyLogo" />
                     <h1>Agri<span class="accent">DeepAI</span></h1>
@@ -1990,7 +1961,6 @@
                         <button data-suggestion="Tell me about livestock farming in Rwanda">🐄 Livestock farming</button>
                     </div>
                 </div>
-
                 <button class="scroll-bottom-btn" id="scrollBottomBtn" aria-label="Scroll to bottom" title="Jump to latest">
                     <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
@@ -2007,7 +1977,6 @@
                         <input type="file" id="fileInput" class="file-input" accept="image/*,.pdf,.doc,.docx,.txt" multiple />
                         <textarea id="userInput" rows="1" placeholder="Ask me about agriculture and livestock..."></textarea>
                         <div class="composer-actions">
-                            <!-- Single Send/Stop Button -->
                             <button class="send-stop-btn" id="sendStopBtn" aria-label="Send message" title="Send message">
                                 <span class="send-icon">
                                     <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -2020,13 +1989,12 @@
                     </div>
                 </div>
             </div>
-
             <div class="chat-footer">AgriDeepAI can make mistake. Check for reference.</div>
-
         </main>
     </div>
 
     <!-- MODALS -->
+    <!-- Account Modal (Sign In / Sign Up) -->
     <div class="modal-overlay" id="accountModal">
         <div class="modal-box">
             <div class="modal-header">
@@ -2059,6 +2027,7 @@
         </div>
     </div>
 
+    <!-- Settings Modal (enhanced) -->
     <div class="modal-overlay" id="settingsModal">
         <div class="modal-box">
             <div class="modal-header">
@@ -2067,7 +2036,7 @@
                     <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
-            <p class="modal-desc">Customize your experience.</p>
+            <p class="modal-desc">Customize your AI experience.</p>
             <div class="field">
                 <label for="themeSelect">Appearance</label>
                 <select id="themeSelect">
@@ -2083,6 +2052,26 @@
                     <option value="false">Disabled (Shift+Enter for new line)</option>
                 </select>
             </div>
+            <div class="field">
+                <label for="modelSelect">AI Model</label>
+                <select id="modelSelect">
+                    <option value="groq/compound-mini">Groq Compound Mini</option>
+                    <option value="qwen/qwen3.6-27b">Qwen 3.6 27B</option>
+                    <option value="openai/gpt-oss-20b">GPT‑OSS 20B</option>
+                    <option value="openai/gpt-oss-120b">GPT‑OSS 120B</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                </select>
+            </div>
+            <div class="field">
+                <label for="temperatureSlider">Temperature: <span class="range-value" id="tempValue">0.7</span></label>
+                <input type="range" id="temperatureSlider" min="0" max="1" step="0.05" value="0.7" />
+            </div>
+            <div class="field">
+                <label>
+                    <input type="checkbox" id="webSearchToggle" checked /> Enable Web Search
+                </label>
+            </div>
             <div class="modal-actions">
                 <button class="btn-primary" id="settingsSaveBtn">Save</button>
                 <button class="btn-secondary" id="settingsCloseActionBtn">Close</button>
@@ -2090,6 +2079,60 @@
         </div>
     </div>
 
+    <!-- Profile Modal -->
+    <div class="modal-overlay" id="profileModal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2>Profile</h2>
+                <button class="modal-close" id="profileCloseBtn" aria-label="Close">
+                    <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <p class="modal-desc">Your account details.</p>
+            <div class="field">
+                <label>Name</label>
+                <input type="text" id="profileName" readonly style="background:var(--bg-input);" />
+            </div>
+            <div class="field">
+                <label>Email</label>
+                <input type="email" id="profileEmail" readonly style="background:var(--bg-input);" />
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" id="profileCloseActionBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Security Modal -->
+    <div class="modal-overlay" id="securityModal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2>Security</h2>
+                <button class="modal-close" id="securityCloseBtn" aria-label="Close">
+                    <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <p class="modal-desc">Change your password (simulated).</p>
+            <div class="field">
+                <label>Current Password</label>
+                <input type="password" id="currentPass" placeholder="••••••••" />
+            </div>
+            <div class="field">
+                <label>New Password</label>
+                <input type="password" id="newPass" placeholder="••••••••" />
+            </div>
+            <div class="field">
+                <label>Confirm New Password</label>
+                <input type="password" id="confirmPass" placeholder="••••••••" />
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" id="securitySaveBtn">Update Password</button>
+                <button class="btn-secondary" id="securityCloseActionBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Share Modal -->
     <div class="modal-overlay share-modal" id="shareModal">
         <div class="modal-box">
             <div class="modal-header">
@@ -2110,6 +2153,7 @@
         </div>
     </div>
 
+    <!-- Confirm Modal -->
     <div class="modal-overlay confirm-modal" id="confirmModal">
         <div class="modal-box">
             <div class="modal-header">
@@ -2126,6 +2170,7 @@
         </div>
     </div>
 
+    <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- ==========================================================
@@ -2137,11 +2182,11 @@
         // ==========================================================
         const APP_CONFIG = {
             name: 'AgriDeepAI',
-            version: '1.0.0',
+            version: '2.0.0',
             tagline: 'Your AI assistant for agriculture, livestock.',
             apiEndpoint: '/api/chat',
             enableAttachments: true,
-            enableStreaming: true,
+            enableStreaming: false, // backend doesn't support streaming yet
             enableLocalStorage: true,
             maxFileSize: 10 * 1024 * 1024,
             allowedFileTypes: ['image/*', '.pdf', '.doc', '.docx', '.txt'],
@@ -2162,6 +2207,17 @@
             user: null,
             attachments: [],
             draft: '',
+            // Settings
+            selectedModel: 'groq/compound-mini',
+            temperature: 0.7,
+            webSearchEnabled: true,
+            // Streaming
+            streamingMessageId: null,
+            streamingRawContent: '',
+            streamingContainer: null,
+            renderPending: false,
+            lastScrollTop: 0,
+            userScrolledUp: false,
         };
 
         // ==========================================================
@@ -2192,6 +2248,7 @@
         const avatarDisplay = $('avatarDisplay');
         const userNameDisplay = $('userNameDisplay');
         const userSubDisplay = $('userSubDisplay');
+        const accountDropdown = $('accountDropdown');
 
         // Modals
         const accountModal = $('accountModal');
@@ -2213,6 +2270,24 @@
         const themeSelect = $('themeSelect');
         const enterSendSelect = $('enterSendSelect');
         const settingsSaveBtn = $('settingsSaveBtn');
+        const modelSelect = $('modelSelect');
+        const temperatureSlider = $('temperatureSlider');
+        const tempValue = $('tempValue');
+        const webSearchToggle = $('webSearchToggle');
+
+        const profileModal = $('profileModal');
+        const profileCloseBtn = $('profileCloseBtn');
+        const profileCloseActionBtn = $('profileCloseActionBtn');
+        const profileName = $('profileName');
+        const profileEmail = $('profileEmail');
+
+        const securityModal = $('securityModal');
+        const securityCloseBtn = $('securityCloseBtn');
+        const securityCloseActionBtn = $('securityCloseActionBtn');
+        const currentPass = $('currentPass');
+        const newPass = $('newPass');
+        const confirmPass = $('confirmPass');
+        const securitySaveBtn = $('securitySaveBtn');
 
         const shareModal = $('shareModal');
         const shareModalClose = $('shareModalClose');
@@ -2267,7 +2342,6 @@
                 </button>
             `;
             toastContainer.appendChild(toast);
-
             toast.querySelector('.toast-dismiss').addEventListener('click', () => dismissToast(toast));
             setTimeout(() => dismissToast(toast), duration);
         }
@@ -2323,102 +2397,6 @@
         }
 
         // ==========================================================
-        // MODAL EVENTS
-        // ==========================================================
-
-        // Account modal
-        modalCloseBtn.addEventListener('click', () => closeModal(accountModal));
-        accountModal.addEventListener('click', function(e) {
-            if (e.target === this) closeModal(accountModal);
-        });
-
-        modalSwitchBtn.addEventListener('click', function() {
-            const isSignUp = modalSubmitBtn.textContent === 'Sign Up';
-            openAccountModal(isSignUp ? 'signin' : 'signup');
-        });
-
-        modalGuestBtn.addEventListener('click', function() {
-            closeModal(accountModal);
-            if (!state.user) {
-                state.user = null;
-                Storage.remove('user');
-                updateUIForUser(null);
-                showToast('Continuing as guest.', 'info');
-            }
-        });
-
-        modalSubmitBtn.addEventListener('click', function() {
-            const email = modalEmail.value.trim();
-            const password = modalPassword.value.trim();
-            if (!email || !password) {
-                modalError.textContent = 'Please fill in all fields.';
-                modalError.classList.add('is-visible');
-                return;
-            }
-            const isSignUp = modalSubmitBtn.textContent === 'Sign Up';
-            const name = isSignUp ? modalName.value.trim() || 'User' : 'User';
-            loginUser(email, password, name);
-        });
-
-        document.addEventListener('keydown', function(e) {
-            if (accountModal.classList.contains('is-active') && e.key === 'Enter') {
-                modalSubmitBtn.click();
-            }
-        });
-
-        // Share modal
-        shareModalClose.addEventListener('click', () => closeModal(shareModal));
-        shareModalCloseBtn.addEventListener('click', () => closeModal(shareModal));
-        shareModal.addEventListener('click', function(e) {
-            if (e.target === this) closeModal(shareModal);
-        });
-
-        shareCopyBtn.addEventListener('click', function() {
-            const text = shareLinkInput.value;
-            navigator.clipboard.writeText(text).then(() => {
-                showToast('Link copied to clipboard!', 'success');
-                const orig = this.textContent;
-                this.textContent = 'Copied!';
-                setTimeout(() => { this.textContent = orig; }, 2000);
-            }).catch(() => {
-                shareLinkInput.select();
-                document.execCommand('copy');
-                showToast('Link copied to clipboard!', 'success');
-                const orig = this.textContent;
-                this.textContent = 'Copied!';
-                setTimeout(() => { this.textContent = orig; }, 2000);
-            });
-        });
-
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && shareModal.classList.contains('is-active')) {
-                closeModal(shareModal);
-            }
-        });
-
-        // Confirm modal
-        confirmCloseBtn.addEventListener('click', () => closeModal(confirmModal));
-        confirmCancelBtn.addEventListener('click', () => closeModal(confirmModal));
-        confirmModal.addEventListener('click', function(e) {
-            if (e.target === this) closeModal(confirmModal);
-        });
-
-        confirmOkBtn.addEventListener('click', function() {
-            const cb = confirmModal._onConfirm;
-            closeModal(confirmModal);
-            if (typeof cb === 'function') cb();
-        });
-
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && confirmModal.classList.contains('is-active')) {
-                closeModal(confirmModal);
-            }
-            if (e.key === 'Enter' && confirmModal.classList.contains('is-active')) {
-                confirmOkBtn.click();
-            }
-        });
-
-        // ==========================================================
         // ACCOUNT SYSTEM
         // ==========================================================
         function updateUIForUser(user) {
@@ -2448,6 +2426,7 @@
             state.user = null;
             Storage.remove('user');
             updateUIForUser(null);
+            closeDropdown();
             showToast('Logged out.', 'info');
         }
 
@@ -2458,27 +2437,150 @@
             updateUIForUser(savedUser);
         }
 
-        // Account button
-        accountBtn.addEventListener('click', function(e) {
+        // ==========================================================
+        // ACCOUNT DROPDOWN
+        // ==========================================================
+        let dropdownOpen = false;
+
+        function toggleDropdown(e) {
             e.stopPropagation();
+            dropdownOpen = !dropdownOpen;
+            accountDropdown.classList.toggle('is-open', dropdownOpen);
+        }
+
+        function closeDropdown() {
+            dropdownOpen = false;
+            accountDropdown.classList.remove('is-open');
+        }
+
+        accountBtn.addEventListener('click', toggleDropdown);
+
+        document.addEventListener('click', function(e) {
+            if (dropdownOpen && !accountDropdown.contains(e.target) && e.target !== accountBtn) {
+                closeDropdown();
+            }
+        });
+
+        accountDropdown.querySelectorAll('.dropdown-item').forEach(item => {
+            item.addEventListener('click', function(e) {
+                const action = this.dataset.action;
+                closeDropdown();
+                switch (action) {
+                    case 'account':
+                        if (state.user) {
+                            showToast('Account: ' + state.user.email, 'info');
+                        } else {
+                            openAccountModal('signin');
+                        }
+                        break;
+                    case 'profile':
+                        if (state.user) {
+                            profileName.value = state.user.name || '';
+                            profileEmail.value = state.user.email || '';
+                            openModal(profileModal);
+                        } else {
+                            showToast('Please sign in first.', 'warning');
+                        }
+                        break;
+                    case 'security':
+                        if (state.user) {
+                            openModal(securityModal);
+                        } else {
+                            showToast('Please sign in first.', 'warning');
+                        }
+                        break;
+                    case 'settings':
+                        openModal(settingsModal);
+                        break;
+                    case 'logout':
+                        if (state.user) {
+                            openConfirmModal('Logout', 'Logout from your account?', logoutUser);
+                        } else {
+                            showToast('You are not signed in.', 'info');
+                        }
+                        break;
+                }
+            });
+        });
+
+        // Settings icon on account button (opens dropdown)
+        settingsIcon.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // Reuse the same logic: if user signed in, toggle dropdown, else open account modal
             if (state.user) {
-                openConfirmModal('Logout', 'Logout from your account?', function() {
-                    logoutUser();
-                });
+                if (dropdownOpen) closeDropdown();
+                else {
+                    dropdownOpen = true;
+                    accountDropdown.classList.add('is-open');
+                }
             } else {
                 openAccountModal('signin');
             }
         });
 
-        settingsIcon.addEventListener('click', function(e) {
-            e.stopPropagation();
-            if (state.user) {
-                openConfirmModal('Logout', 'Logout from your account?', function() {
-                    logoutUser();
-                });
-            } else {
-                openAccountModal('signin');
+        // Account modal events
+        modalCloseBtn.addEventListener('click', () => closeModal(accountModal));
+        accountModal.addEventListener('click', function(e) {
+            if (e.target === this) closeModal(accountModal);
+        });
+        modalSwitchBtn.addEventListener('click', function() {
+            const isSignUp = modalSubmitBtn.textContent === 'Sign Up';
+            openAccountModal(isSignUp ? 'signin' : 'signup');
+        });
+        modalGuestBtn.addEventListener('click', function() {
+            closeModal(accountModal);
+            if (!state.user) {
+                state.user = null;
+                Storage.remove('user');
+                updateUIForUser(null);
+                showToast('Continuing as guest.', 'info');
             }
+        });
+        modalSubmitBtn.addEventListener('click', function() {
+            const email = modalEmail.value.trim();
+            const password = modalPassword.value.trim();
+            if (!email || !password) {
+                modalError.textContent = 'Please fill in all fields.';
+                modalError.classList.add('is-visible');
+                return;
+            }
+            const isSignUp = modalSubmitBtn.textContent === 'Sign Up';
+            const name = isSignUp ? modalName.value.trim() || 'User' : 'User';
+            loginUser(email, password, name);
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (accountModal.classList.contains('is-active') && e.key === 'Enter') {
+                modalSubmitBtn.click();
+            }
+        });
+
+        // Profile modal
+        profileCloseBtn.addEventListener('click', () => closeModal(profileModal));
+        profileCloseActionBtn.addEventListener('click', () => closeModal(profileModal));
+        profileModal.addEventListener('click', function(e) { if (e.target === this) closeModal(profileModal); });
+
+        // Security modal
+        securityCloseBtn.addEventListener('click', () => closeModal(securityModal));
+        securityCloseActionBtn.addEventListener('click', () => closeModal(securityModal));
+        securityModal.addEventListener('click', function(e) { if (e.target === this) closeModal(securityModal); });
+        securitySaveBtn.addEventListener('click', function() {
+            const curr = currentPass.value;
+            const np = newPass.value;
+            const conf = confirmPass.value;
+            if (!curr || !np || !conf) {
+                showToast('Please fill all fields.', 'error');
+                return;
+            }
+            if (np !== conf) {
+                showToast('Passwords do not match.', 'error');
+                return;
+            }
+            showToast('Password updated successfully (simulated).', 'success');
+            closeModal(securityModal);
+            currentPass.value = '';
+            newPass.value = '';
+            confirmPass.value = '';
         });
 
         // ==========================================================
@@ -2489,17 +2591,33 @@
             if (saved) {
                 state.theme = saved.theme || 'dark';
                 state.enterToSend = saved.enterToSend !== undefined ? saved.enterToSend : true;
+                state.selectedModel = saved.selectedModel || 'groq/compound-mini';
+                state.temperature = saved.temperature !== undefined ? saved.temperature : 0.7;
+                state.webSearchEnabled = saved.webSearchEnabled !== undefined ? saved.webSearchEnabled : true;
             }
             applyTheme(state.theme);
             themeSelect.value = state.theme;
             enterSendSelect.value = state.enterToSend ? 'true' : 'false';
+            modelSelect.value = state.selectedModel;
+            temperatureSlider.value = state.temperature;
+            tempValue.textContent = state.temperature;
+            webSearchToggle.checked = state.webSearchEnabled;
         }
 
         function saveSettings() {
             state.theme = themeSelect.value;
             state.enterToSend = enterSendSelect.value === 'true';
+            state.selectedModel = modelSelect.value;
+            state.temperature = parseFloat(temperatureSlider.value);
+            state.webSearchEnabled = webSearchToggle.checked;
             applyTheme(state.theme);
-            Storage.set('settings', { theme: state.theme, enterToSend: state.enterToSend });
+            Storage.set('settings', {
+                theme: state.theme,
+                enterToSend: state.enterToSend,
+                selectedModel: state.selectedModel,
+                temperature: state.temperature,
+                webSearchEnabled: state.webSearchEnabled
+            });
             closeModal(settingsModal);
             showToast('Settings saved!', 'success');
         }
@@ -2510,7 +2628,15 @@
                 theme;
             document.documentElement.setAttribute('data-theme', resolved);
             if (theme !== 'system') Storage.set('theme', theme);
+            // Re-highlight code blocks if any
+            document.querySelectorAll('.response-code-block pre code').forEach(block => {
+                hljs.highlightElement(block);
+            });
         }
+
+        temperatureSlider.addEventListener('input', function() {
+            tempValue.textContent = this.value;
+        });
 
         document.addEventListener('keydown', function(e) {
             if (settingsModal.classList.contains('is-active') && e.key === 'Escape') {
@@ -2529,22 +2655,18 @@
         // SIDEBAR
         // ==========================================================
         function toggleSidebar() {
-            const isCollapsed = sidebar.classList.contains('is-collapsed');
             if (window.innerWidth <= 992) {
                 sidebar.classList.toggle('is-open');
                 sidebarOverlay.classList.toggle('is-visible');
             } else {
                 sidebar.classList.toggle('is-collapsed');
             }
-            // Update toggle icon direction
             const nowCollapsed = sidebar.classList.contains('is-collapsed');
             const svg = sidebarToggle.querySelector('svg');
             if (svg) {
-                if (nowCollapsed) {
-                    svg.innerHTML = '<path d="M9 18l6-6-6-6"/>';
-                } else {
-                    svg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
-                }
+                svg.innerHTML = nowCollapsed ?
+                    '<path d="M9 18l6-6-6-6"/>' :
+                    '<path d="M15 18l-6-6 6-6"/>';
             }
         }
 
@@ -2591,14 +2713,13 @@
         } else {
             sidebar.classList.remove('is-collapsed');
         }
-        // Set initial toggle icon
         const initSvg = sidebarToggle.querySelector('svg');
         if (initSvg && !sidebar.classList.contains('is-collapsed')) {
             initSvg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
         }
 
         // ==========================================================
-        // CHAT FUNCTIONS
+        // CHAT FUNCTIONS (modified)
         // ==========================================================
         function genId() { return 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
 
@@ -2635,7 +2756,7 @@
             const conv = state.conversations[id];
             if (conv) chatTitle.textContent = conv.title;
             if (window.innerWidth <= 992) closeSidebar();
-            attachments = [];
+            state.attachments = [];
             renderAttachments();
             state.draft = '';
             userInput.value = '';
@@ -2651,18 +2772,11 @@
 
         function renderConversation(id) {
             const conv = state.conversations[id];
-            if (!conv) {
-                const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
-                wrappers.forEach(el => el.remove());
-                emptyState.classList.remove('is-hidden');
-                scrollBottomBtn.classList.remove('is-visible');
-                return;
-            }
-
-            const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
+            // Remove all messages
+            const wrappers = messagesContainer.querySelectorAll('.message-wrapper, .assistant-message');
             wrappers.forEach(el => el.remove());
 
-            if (conv.messages.length === 0) {
+            if (!conv || conv.messages.length === 0) {
                 emptyState.classList.remove('is-hidden');
                 scrollBottomBtn.classList.remove('is-visible');
                 return;
@@ -2670,299 +2784,259 @@
             emptyState.classList.add('is-hidden');
 
             conv.messages.forEach(msg => {
-                appendMessageDOM(msg.content, msg.role, false);
+                if (msg.role === 'user') {
+                    appendUserMessage(msg.content);
+                } else if (msg.role === 'assistant') {
+                    renderAssistantMessage(msg.id, msg.content, false);
+                }
             });
             updateScrollBtn();
             scrollToBottom(false);
         }
 
-        function appendMessageDOM(content, role, isLoading) {
+        // ==========================================================
+        // USER MESSAGE (simple)
+        // ==========================================================
+        function appendUserMessage(content) {
             const wrapper = document.createElement('div');
-            wrapper.className = 'message-wrapper is-' + role;
-
+            wrapper.className = 'message-wrapper is-user';
             const bubble = document.createElement('div');
             bubble.className = 'message-bubble';
+            bubble.textContent = content;
+            wrapper.appendChild(bubble);
+            messagesContainer.appendChild(wrapper);
+        }
+
+        // ==========================================================
+        // ASSISTANT RESPONSE RENDERER (core new system)
+        // ==========================================================
+        function renderAssistantMessage(messageId, content, isLoading = false) {
+            // Check if container already exists
+            let container = messagesContainer.querySelector(`.assistant-message[data-message-id="${messageId}"]`);
+            if (!container) {
+                container = document.createElement('div');
+                container.className = 'assistant-message';
+                container.dataset.messageId = messageId;
+                messagesContainer.appendChild(container);
+            }
+
+            // Build header
+            let header = container.querySelector('.assistant-message-header');
+            if (!header) {
+                header = document.createElement('div');
+                header.className = 'assistant-message-header';
+                header.innerHTML = `
+                    <img src="logo.png" alt="AgriDeepAI" class="logo" />
+                    <span class="name">${APP_CONFIG.name}</span>
+                    <span class="model-badge">${state.selectedModel.split('/').pop() || 'AI'}</span>
+                `;
+                container.appendChild(header);
+            }
+
+            // Content area
+            let contentDiv = container.querySelector('.assistant-message-content');
+            if (!contentDiv) {
+                contentDiv = document.createElement('div');
+                contentDiv.className = 'assistant-message-content';
+                container.appendChild(contentDiv);
+            }
 
             if (isLoading) {
-                // ==========================================================
-                // THINKING STATUS — Shows "Thinking..." while generating
-                // ==========================================================
-                bubble.innerHTML = `
-                    <span style="display:flex;align-items:center;gap:8px;">
-                        <span class="loading-dots"><span>.</span><span>.</span><span>.</span></span>
-                        <span style="font-size:13px;color:var(--text-muted);">Thinking...</span>
-                    </span>
-                `;
-                wrapper.dataset.loading = 'true';
-            } else {
-                bubble.textContent = content;
-            }
-            wrapper.appendChild(bubble);
-
-            const actions = document.createElement('div');
-            actions.className = 'message-actions';
-
-            if (role === 'user') {
-                actions.innerHTML = `
-                    <button data-action="copy" aria-label="Copy" title="Copy">
-                        <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    </button>
-                    <button data-action="edit" aria-label="Edit" title="Edit">
-                        <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                    </button>
-                `;
-            } else {
-                actions.innerHTML = `
-                    <button data-action="copy" aria-label="Copy" title="Copy">
-                        <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    </button>
-                    <button data-action="regenerate" aria-label="Regenerate" title="Regenerate">
-                        <svg viewBox="0 0 24 24"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-                    </button>
-                    <button data-action="like" aria-label="Like" title="Like">
-                        <svg viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
-                    </button>
-                    <button data-action="dislike" aria-label="Dislike" title="Dislike">
-                        <svg viewBox="0 0 24 24"><path d="M10 15v3a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
-                    </button>
-                    <button data-action="share" aria-label="Share message link" title="Share message link">
-                        <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                    </button>
-                `;
-            }
-
-            actions.querySelectorAll('button[data-action]').forEach(btn => {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    const action = btn.dataset.action;
-                    const msgText = bubble.textContent;
-                    const conv = getActive();
-
-                    if (action === 'copy') {
-                        navigator.clipboard.writeText(msgText).then(() => {
-                            btn.style.color = 'var(--accent)';
-                            setTimeout(() => btn.style.color = '', 1500);
-                            showToast('Copied!', 'success');
-                        }).catch(() => {
-                            const ta = document.createElement('textarea');
-                            ta.value = msgText;
-                            document.body.appendChild(ta);
-                            ta.select();
-                            document.execCommand('copy');
-                            ta.remove();
-                            btn.style.color = 'var(--accent)';
-                            setTimeout(() => btn.style.color = '', 1500);
-                            showToast('Copied!', 'success');
-                        });
-                    } else if (action === 'edit' && role === 'user') {
-                        startEdit(wrapper, msgText);
-                    } else if (action === 'regenerate' && role === 'bot' && conv) {
-                        const lastUser = conv.messages.filter(m => m.role === 'user').pop();
-                        if (lastUser) {
-                            const idx = conv.messages.indexOf(
-                                conv.messages.find(m => m.id === wrapper.dataset.msgId)
-                            );
-                            if (idx > -1) conv.messages.splice(idx, 1);
-                            wrapper.remove();
-                            sendMessage(lastUser.content);
-                        }
-                    } else if (action === 'like') {
-                        btn.classList.toggle('is-liked');
-                    } else if (action === 'dislike') {
-                        btn.classList.toggle('is-disliked');
-                    } else if (action === 'share') {
-                        const convId = state.activeId;
-                        if (convId) {
-                            const msg = conv.messages.find(m => m.content === msgText);
-                            if (msg) {
-                                const url = new URL(window.location.href);
-                                url.searchParams.set('conversation', convId);
-                                url.searchParams.set('message', msg.id);
-                                openShareModal(
-                                    'Share Message',
-                                    'Share this message with anyone.',
-                                    url.toString(),
-                                    'Anyone with the link can view this message.'
-                                );
-                            } else {
-                                showToast('Unable to find message.', 'error');
-                            }
-                        }
-                    }
-                });
-            });
-
-            wrapper.appendChild(actions);
-            messagesContainer.appendChild(wrapper);
-            return wrapper;
-        }
-
-        function startEdit(wrapper, original) {
-            const bubble = wrapper.querySelector('.message-bubble');
-            const actions = wrapper.querySelector('.message-actions');
-            bubble.style.display = 'none';
-            actions.style.display = 'none';
-
-            const editDiv = document.createElement('div');
-            editDiv.className = 'edit-container';
-            editDiv.innerHTML = `
-                <textarea class="edit-input">${original}</textarea>
-                <div class="edit-actions">
-                    <button class="save-edit">Save</button>
-                    <button class="cancel-edit">Cancel</button>
-                </div>
-            `;
-            wrapper.appendChild(editDiv);
-
-            const ta = editDiv.querySelector('.edit-input');
-            ta.focus();
-            ta.setSelectionRange(ta.value.length, ta.value.length);
-
-            editDiv.querySelector('.save-edit').addEventListener('click', function() {
-                const newText = ta.value.trim();
-                if (newText) {
-                    const conv = getActive();
-                    if (conv) {
-                        const msg = conv.messages.find(m => m.content === original && m.role === 'user');
-                        if (msg) {
-                            msg.content = newText;
-                            const idx = conv.messages.indexOf(msg);
-                            conv.messages = conv.messages.slice(0, idx + 1);
-                            renderConversation(state.activeId);
-                            sendMessage(newText);
-                        }
-                    }
-                }
-            });
-
-            editDiv.querySelector('.cancel-edit').addEventListener('click', function() {
-                bubble.style.display = '';
-                actions.style.display = '';
-                editDiv.remove();
-            });
-        }
-
-        function findEmptyConversation() {
-            const entries = Object.values(state.conversations);
-            return entries.find(conv => conv.messages.length === 0) || null;
-        }
-
-        function renderHistory() {
-            const items = chatHistory.querySelectorAll('.chat-item');
-            items.forEach(el => el.remove());
-
-            const emptyEl = chatHistory.querySelector('.empty-history');
-            if (emptyEl) emptyEl.remove();
-
-            const convs = Object.values(state.conversations);
-            if (convs.length === 0) {
-                chatHistory.innerHTML =
-                    '<div class="empty-history">No chats yet.<br />Start a new conversation.</div>';
-                return;
-            }
-
-            const pinned = convs.filter(c => c.pinned);
-            const unpinned = convs.filter(c => !c.pinned);
-
-            pinned.sort((a, b) => b.updatedAt - a.updatedAt);
-            unpinned.sort((a, b) => b.updatedAt - a.updatedAt);
-
-            const sorted = [...pinned, ...unpinned];
-
-            sorted.forEach((conv) => {
-                const div = document.createElement('div');
-                div.className = 'chat-item' + (conv.id === state.activeId ? ' is-active' : '');
-                if (conv.pinned) {
-                    div.classList.add('is-pinned');
-                }
-                div.dataset.chatId = conv.id;
-
-                div.innerHTML = `
-                    <span class="title">${conv.title}</span>
-                    <div class="chat-actions">
-                        <button class="${conv.pinned ? 'is-pinned' : ''}" data-action="pin" aria-label="Pin" title="Pin">
-                            <svg viewBox="0 0 24 24"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 12h14"/><path d="M7 12v-5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v5"/></svg>
-                        </button>
-                        <button data-action="delete" aria-label="Delete" title="Delete">
-                            <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        </button>
-                        <button data-action="share" aria-label="Share conversation link" title="Share conversation link">
-                            <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                        </button>
+                // Show thinking indicator
+                contentDiv.innerHTML = `
+                    <div class="assistant-thinking">
+                        <span class="dots"><span>.</span><span>.</span><span>.</span></span>
+                        <span>Thinking...</span>
                     </div>
                 `;
+                // Remove any old actions
+                const oldActions = container.querySelector('.assistant-message-actions');
+                if (oldActions) oldActions.remove();
+                return container;
+            }
 
-                div.addEventListener('click', function(e) {
-                    if (e.target.closest('button')) return;
-                    switchConversation(conv.id);
+            // Render markdown content
+            if (content) {
+                const rawHtml = marked.parse(content);
+                const safeHtml = DOMPurify.sanitize(rawHtml, {
+                    ALLOWED_TAGS: [
+                        'p', 'br', 'strong', 'em', 'i', 'b', 'u', 's', 'strike',
+                        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                        'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+                        'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+                        'hr', 'div', 'span'
+                    ],
+                    ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'id']
+                });
+                contentDiv.innerHTML = safeHtml;
+
+                // Process code blocks
+                contentDiv.querySelectorAll('pre code').forEach(codeBlock => {
+                    const parentPre = codeBlock.closest('pre');
+                    if (!parentPre) return;
+
+                    // Determine language
+                    let lang = 'plaintext';
+                    const classList = codeBlock.className.split(' ');
+                    for (const cls of classList) {
+                        if (cls.startsWith('language-')) {
+                            lang = cls.replace('language-', '');
+                            break;
+                        }
+                    }
+
+                    // Wrap in our code block structure
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'response-code-block';
+
+                    const headerDiv = document.createElement('div');
+                    headerDiv.className = 'response-code-header';
+                    headerDiv.innerHTML = `
+                        <span class="language-label">${lang}</span>
+                        <button class="response-code-copy" data-code="${encodeURIComponent(codeBlock.textContent)}" aria-label="Copy code">
+                            <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            <span>Copy</span>
+                        </button>
+                    `;
+                    wrapper.appendChild(headerDiv);
+
+                    // Move the pre inside wrapper
+                    const newPre = parentPre.cloneNode(true);
+                    wrapper.appendChild(newPre);
+
+                    parentPre.parentNode.replaceChild(wrapper, parentPre);
+
+                    // Syntax highlight
+                    const codeElement = wrapper.querySelector('code');
+                    if (codeElement && lang !== 'plaintext') {
+                        hljs.highlightElement(codeElement);
+                    }
                 });
 
-                div.querySelectorAll('button[data-action]').forEach(btn => {
+                // Attach copy handlers for code blocks
+                container.querySelectorAll('.response-code-copy').forEach(btn => {
                     btn.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        const action = btn.dataset.action;
-                        if (action === 'delete') {
-                            openConfirmModal('Delete Conversation', 'Delete this conversation?', function() {
-                                deleteConversation(conv.id);
-                            });
-                        } else if (action === 'pin') {
-                            togglePin(conv.id);
-                        } else if (action === 'share') {
-                            const url = new URL(window.location.href);
-                            url.searchParams.set('conversation', conv.id);
-                            openShareModal(
-                                'Share Conversation',
-                                'Share this conversation with anyone.',
-                                url.toString(),
-                                'Anyone with the link can view this conversation.'
-                            );
-                        }
+                        const encoded = this.dataset.code;
+                        const code = decodeURIComponent(encoded);
+                        copyCodeToClipboard(code, this);
                     });
                 });
 
-                chatHistory.appendChild(div);
+                // Add response actions
+                let actions = container.querySelector('.assistant-message-actions');
+                if (!actions) {
+                    actions = document.createElement('div');
+                    actions.className = 'assistant-message-actions';
+                    container.appendChild(actions);
+                }
+                actions.innerHTML = `
+                    <button data-action="copy-response" aria-label="Copy response">
+                        <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <span class="action-label">Copy</span>
+                    </button>
+                    <button data-action="positive-feedback" aria-label="Good response">
+                        <svg viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+                    </button>
+                    <button data-action="negative-feedback" aria-label="Bad response">
+                        <svg viewBox="0 0 24 24"><path d="M10 15v3a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
+                    </button>
+                    <button data-action="regenerate" aria-label="Regenerate response">
+                        <svg viewBox="0 0 24 24"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                    </button>
+                    <button data-action="share-response" aria-label="Share response">
+                        <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                    </button>
+                `;
+
+                // Action handlers
+                actions.querySelector('[data-action="copy-response"]').addEventListener('click', function() {
+                    const rawContent = content;
+                    navigator.clipboard.writeText(rawContent).then(() => {
+                        const label = this.querySelector('.action-label');
+                        label.textContent = 'Copied!';
+                        label.classList.add('copied');
+                        setTimeout(() => {
+                            label.textContent = 'Copy';
+                            label.classList.remove('copied');
+                        }, 1500);
+                    }).catch(() => {
+                        showToast('Unable to copy.', 'error');
+                    });
+                });
+
+                actions.querySelector('[data-action="positive-feedback"]').addEventListener('click', function() {
+                    this.classList.toggle('is-active');
+                    showToast('Feedback sent!', 'success');
+                });
+
+                actions.querySelector('[data-action="negative-feedback"]').addEventListener('click', function() {
+                    this.classList.toggle('is-active');
+                    showToast('Feedback sent!', 'info');
+                });
+
+                actions.querySelector('[data-action="regenerate"]').addEventListener('click', function() {
+                    const conv = getActive();
+                    if (!conv) return;
+                    // Find the user message that triggered this response
+                    const msgIndex = conv.messages.findIndex(m => m.id === messageId);
+                    if (msgIndex > 0) {
+                        const userMsg = conv.messages[msgIndex - 1];
+                        if (userMsg && userMsg.role === 'user') {
+                            // Remove this assistant message and all subsequent ones
+                            conv.messages = conv.messages.slice(0, msgIndex);
+                            renderConversation(state.activeId);
+                            sendMessage(userMsg.content);
+                        }
+                    }
+                });
+
+                actions.querySelector('[data-action="share-response"]').addEventListener('click', function() {
+                    const convId = state.activeId;
+                    if (convId) {
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('conversation', convId);
+                        url.searchParams.set('message', messageId);
+                        openShareModal(
+                            'Share Message',
+                            'Share this message with anyone.',
+                            url.toString(),
+                            'Anyone with the link can view this message.'
+                        );
+                    }
+                });
+            }
+
+            return container;
+        }
+
+        // ==========================================================
+        // CODE COPY HELPER
+        // ==========================================================
+        function copyCodeToClipboard(code, button) {
+            navigator.clipboard.writeText(code).then(() => {
+                const label = button.querySelector('span') || button;
+                const original = label.textContent;
+                label.textContent = 'Copied!';
+                button.classList.add('copied');
+                setTimeout(() => {
+                    label.textContent = original;
+                    button.classList.remove('copied');
+                }, 1500);
+            }).catch(() => {
+                showToast('Unable to copy code.', 'error');
             });
-        }
-
-        function deleteConversation(id) {
-            const conv = state.conversations[id];
-            if (!conv) return;
-            delete state.conversations[id];
-            if (state.activeId === id) {
-                state.activeId = null;
-                chatTitle.textContent = APP_CONFIG.name;
-                const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
-                wrappers.forEach(el => el.remove());
-                emptyState.classList.remove('is-hidden');
-                scrollBottomBtn.classList.remove('is-visible');
-            }
-            Storage.set('conversations', state.conversations);
-            renderHistory();
-            showToast('Conversation deleted.', 'info');
-        }
-
-        function togglePin(id) {
-            const conv = state.conversations[id];
-            if (!conv) return;
-            conv.pinned = !conv.pinned;
-            renderHistory();
-            if (state.activeId) {
-                const el = chatHistory.querySelector(`.chat-item[data-chat-id="${state.activeId}"]`);
-                if (el) el.classList.add('is-active');
-            }
-            showToast(conv.pinned ? 'Pinned.' : 'Unpinned.', 'info');
         }
 
         // ==========================================================
         // SCROLL
         // ==========================================================
-        let userScrolledUp = false;
-
         messagesContainer.addEventListener('scroll', function() {
-            const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 10;
-            if (atBottom) { userScrolledUp = false;
-                scrollBottomBtn.classList.remove('is-visible'); } else {
-                userScrolledUp = true;
+            const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 20;
+            if (atBottom) {
+                state.userScrolledUp = false;
+                scrollBottomBtn.classList.remove('is-visible');
+            } else {
+                state.userScrolledUp = true;
                 if (state.isGenerating || state.isStreaming) {
                     scrollBottomBtn.classList.add('is-visible');
                 }
@@ -2973,7 +3047,7 @@
             const el = messagesContainer;
             if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
             else el.scrollTop = el.scrollHeight;
-            userScrolledUp = false;
+            state.userScrolledUp = false;
             scrollBottomBtn.classList.remove('is-visible');
         }
 
@@ -2981,7 +3055,7 @@
 
         function updateScrollBtn() {
             const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer
-                .clientHeight < 10;
+                .clientHeight < 20;
             if (!atBottom && (state.isGenerating || state.isStreaming)) {
                 scrollBottomBtn.classList.add('is-visible');
             } else {
@@ -2990,7 +3064,7 @@
         }
 
         // ==========================================================
-        // SEND / STOP with single button (BACKEND INTEGRATION)
+        // SEND MESSAGE (core)
         // ==========================================================
         let attachments = [];
 
@@ -3020,9 +3094,11 @@
                 fullText = message ? message + '\n📎 Attachments: ' + names : '📎 Attachments: ' + names;
             }
 
-            addMessage(conv.id, 'user', fullText);
-            appendMessageDOM(fullText, 'user', false);
+            // Add user message
+            const userMsg = addMessage(conv.id, 'user', fullText);
+            appendUserMessage(fullText);
 
+            // Clear input
             userInput.value = '';
             userInput.style.height = 'auto';
             sendStopBtn.classList.remove('is-active');
@@ -3035,18 +3111,22 @@
                 chatTitle.textContent = conv.title;
             }
 
+            // Force scroll to bottom to see loading
+            scrollToBottom(true);
+
+            // Create assistant message container (loading state)
+            const assistantMsgId = genId();
+            const loadingContainer = renderAssistantMessage(assistantMsgId, '', true);
+
             state.isGenerating = true;
             sendStopBtn.classList.add('is-generating');
             sendStopBtn.disabled = false;
             sendStopBtn.setAttribute('aria-label', 'Stop generating');
             sendStopBtn.title = 'Stop generating';
 
-            const loadingWrapper = appendMessageDOM('', 'bot', true);
-
             state.abortController = new AbortController();
 
             try {
-                // Prepare conversation history for the backend
                 const history = conv.messages.slice(0, -1).map(msg => ({
                     role: msg.role,
                     content: msg.content
@@ -3054,12 +3134,13 @@
 
                 const response = await fetch('/api/chat', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         message: message,
                         history: history,
+                        model: state.selectedModel,
+                        temperature: state.temperature,
+                        webSearchEnabled: state.webSearchEnabled,
                     }),
                     signal: state.abortController.signal,
                 });
@@ -3072,28 +3153,33 @@
                 const data = await response.json();
                 const aiResponse = data.response || 'Sorry, I could not generate a response.';
 
-                if (loadingWrapper) {
-                    const bubble = loadingWrapper.querySelector('.message-bubble');
-                    if (bubble) bubble.textContent = aiResponse;
-                    loadingWrapper.dataset.loading = 'false';
-                }
-                addMessage(conv.id, 'bot', aiResponse);
+                // Remove loading container and render final response
+                if (loadingContainer) loadingContainer.remove();
+                const botMsg = addMessage(conv.id, 'assistant', aiResponse);
+                renderAssistantMessage(botMsg.id, aiResponse, false);
 
             } catch (error) {
                 if (error.name === 'AbortError') {
-                    // Generation was stopped
-                    if (loadingWrapper) {
-                        const bubble = loadingWrapper.querySelector('.message-bubble');
-                        if (bubble) bubble.textContent = 'Generation stopped.';
+                    if (loadingContainer) {
+                        const contentDiv = loadingContainer.querySelector('.assistant-message-content');
+                        if (contentDiv) {
+                            contentDiv.innerHTML = '<p style="color:var(--text-muted);">Generation stopped.</p>';
+                        }
+                        const oldActions = loadingContainer.querySelector('.assistant-message-actions');
+                        if (oldActions) oldActions.remove();
                     }
-                    addMessage(conv.id, 'bot', 'Generation stopped.');
+                    addMessage(conv.id, 'assistant', 'Generation stopped.');
                 } else {
                     showToast('Error: ' + error.message, 'error');
-                    if (loadingWrapper) {
-                        const bubble = loadingWrapper.querySelector('.message-bubble');
-                        if (bubble) bubble.textContent = 'Sorry, an error occurred. Please try again.';
+                    if (loadingContainer) {
+                        const contentDiv = loadingContainer.querySelector('.assistant-message-content');
+                        if (contentDiv) {
+                            contentDiv.innerHTML = '<p style="color:var(--error);">Sorry, an error occurred. Please try again.</p>';
+                        }
+                        const oldActions = loadingContainer.querySelector('.assistant-message-actions');
+                        if (oldActions) oldActions.remove();
                     }
-                    addMessage(conv.id, 'bot', 'Sorry, an error occurred. Please try again.');
+                    addMessage(conv.id, 'assistant', 'Sorry, an error occurred. Please try again.');
                 }
             }
 
@@ -3106,7 +3192,7 @@
 
             renderHistory();
             updateScrollBtn();
-            if (!userScrolledUp) scrollToBottom(true);
+            if (!state.userScrolledUp) scrollToBottom(true);
             userInput.focus();
         }
 
@@ -3148,7 +3234,6 @@
             }
         });
 
-        // Send/Stop button click
         sendStopBtn.addEventListener('click', function() {
             if (state.isGenerating) {
                 stopGeneration();
@@ -3158,11 +3243,109 @@
         });
 
         // ==========================================================
+        // HISTORY
+        // ==========================================================
+        function renderHistory() {
+            const items = chatHistory.querySelectorAll('.chat-item');
+            items.forEach(el => el.remove());
+            const emptyEl = chatHistory.querySelector('.empty-history');
+            if (emptyEl) emptyEl.remove();
+
+            const convs = Object.values(state.conversations);
+            if (convs.length === 0) {
+                chatHistory.innerHTML = '<div class="empty-history">No chats yet.<br />Start a new conversation.</div>';
+                return;
+            }
+
+            const pinned = convs.filter(c => c.pinned);
+            const unpinned = convs.filter(c => !c.pinned);
+            pinned.sort((a, b) => b.updatedAt - a.updatedAt);
+            unpinned.sort((a, b) => b.updatedAt - a.updatedAt);
+            const sorted = [...pinned, ...unpinned];
+
+            sorted.forEach((conv) => {
+                const div = document.createElement('div');
+                div.className = 'chat-item' + (conv.id === state.activeId ? ' is-active' : '');
+                if (conv.pinned) div.classList.add('is-pinned');
+                div.dataset.chatId = conv.id;
+                div.innerHTML = `
+                    <span class="title">${conv.title}</span>
+                    <div class="chat-actions">
+                        <button class="${conv.pinned ? 'is-pinned' : ''}" data-action="pin" aria-label="Pin" title="Pin">
+                            <svg viewBox="0 0 24 24"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 12h14"/><path d="M7 12v-5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v5"/></svg>
+                        </button>
+                        <button data-action="delete" aria-label="Delete" title="Delete">
+                            <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                        <button data-action="share" aria-label="Share conversation link" title="Share conversation link">
+                            <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                        </button>
+                    </div>
+                `;
+                div.addEventListener('click', function(e) {
+                    if (e.target.closest('button')) return;
+                    switchConversation(conv.id);
+                });
+                div.querySelectorAll('button[data-action]').forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const action = btn.dataset.action;
+                        if (action === 'delete') {
+                            openConfirmModal('Delete Conversation', 'Delete this conversation?', function() {
+                                deleteConversation(conv.id);
+                            });
+                        } else if (action === 'pin') {
+                            togglePin(conv.id);
+                        } else if (action === 'share') {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set('conversation', conv.id);
+                            openShareModal(
+                                'Share Conversation',
+                                'Share this conversation with anyone.',
+                                url.toString(),
+                                'Anyone with the link can view this conversation.'
+                            );
+                        }
+                    });
+                });
+                chatHistory.appendChild(div);
+            });
+        }
+
+        function deleteConversation(id) {
+            const conv = state.conversations[id];
+            if (!conv) return;
+            delete state.conversations[id];
+            if (state.activeId === id) {
+                state.activeId = null;
+                chatTitle.textContent = APP_CONFIG.name;
+                const wrappers = messagesContainer.querySelectorAll('.message-wrapper, .assistant-message');
+                wrappers.forEach(el => el.remove());
+                emptyState.classList.remove('is-hidden');
+                scrollBottomBtn.classList.remove('is-visible');
+            }
+            Storage.set('conversations', state.conversations);
+            renderHistory();
+            showToast('Conversation deleted.', 'info');
+        }
+
+        function togglePin(id) {
+            const conv = state.conversations[id];
+            if (!conv) return;
+            conv.pinned = !conv.pinned;
+            renderHistory();
+            if (state.activeId) {
+                const el = chatHistory.querySelector(`.chat-item[data-chat-id="${state.activeId}"]`);
+                if (el) el.classList.add('is-active');
+            }
+            showToast(conv.pinned ? 'Pinned.' : 'Unpinned.', 'info');
+        }
+
+        // ==========================================================
         // NEW CHAT
         // ==========================================================
         newChatBtn.addEventListener('click', function() {
-            const emptyConv = findEmptyConversation();
-
+            const emptyConv = Object.values(state.conversations).find(c => c.messages.length === 0);
             if (emptyConv) {
                 if (state.activeId === emptyConv.id) {
                     userInput.focus();
@@ -3174,10 +3357,9 @@
                 if (window.innerWidth <= 992) closeSidebar();
                 return;
             }
-
             const newId = createConversation('New Chat');
             state.activeId = newId;
-            const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
+            const wrappers = messagesContainer.querySelectorAll('.message-wrapper, .assistant-message');
             wrappers.forEach(el => el.remove());
             emptyState.classList.remove('is-hidden');
             chatTitle.textContent = 'New Chat';
@@ -3272,25 +3454,6 @@
         });
 
         // ==========================================================
-        // KEYBOARD SHORTCUTS
-        // ==========================================================
-        document.addEventListener('keydown', function(e) {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-                e.preventDefault();
-                userInput.focus();
-            }
-            if (e.key === 'Escape') {
-                if (accountModal.classList.contains('is-active')) closeModal(accountModal);
-                if (settingsModal.classList.contains('is-active')) closeModal(settingsModal);
-                if (shareModal.classList.contains('is-active')) closeModal(shareModal);
-                if (confirmModal.classList.contains('is-active')) closeModal(confirmModal);
-                if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
-                    closeSidebar();
-                }
-            }
-        });
-
-        // ==========================================================
         // LOAD FROM URL
         // ==========================================================
         function loadFromURL() {
@@ -3301,8 +3464,14 @@
                 switchConversation(convId);
                 if (msgId) {
                     setTimeout(() => {
-                        scrollToBottom(true);
-                    }, 300);
+                        const msgEl = messagesContainer.querySelector(`.assistant-message[data-message-id="${msgId}"], .message-wrapper[data-message-id="${msgId}"]`);
+                        if (msgEl) {
+                            msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            msgEl.style.transition = 'background 0.3s';
+                            msgEl.style.background = 'var(--accent-glow)';
+                            setTimeout(() => msgEl.style.background = '', 1500);
+                        }
+                    }, 400);
                 }
             }
         }
@@ -3369,8 +3538,7 @@
             }
 
             console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized.');
-            console.log('📋 Features: chat, attachments, settings, themes, modals, shareable links.');
-            console.log('🔜 Phase 2: Connected to real AI backend.');
+            console.log('📋 Features: professional AI response container, account system, markdown, code blocks, sharing.');
         }
 
         window.addEventListener('beforeunload', function() {
@@ -3385,6 +3553,62 @@
 
         window.addEventListener('load', function() {
             loadFromURL();
+        });
+
+        // ==========================================================
+        // SHARE MODAL EVENTS
+        // ==========================================================
+        shareModalClose.addEventListener('click', () => closeModal(shareModal));
+        shareModalCloseBtn.addEventListener('click', () => closeModal(shareModal));
+        shareModal.addEventListener('click', function(e) {
+            if (e.target === this) closeModal(shareModal);
+        });
+        shareCopyBtn.addEventListener('click', function() {
+            const text = shareLinkInput.value;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Link copied to clipboard!', 'success');
+                const orig = this.textContent;
+                this.textContent = 'Copied!';
+                setTimeout(() => { this.textContent = orig; }, 2000);
+            }).catch(() => {
+                shareLinkInput.select();
+                document.execCommand('copy');
+                showToast('Link copied to clipboard!', 'success');
+                const orig = this.textContent;
+                this.textContent = 'Copied!';
+                setTimeout(() => { this.textContent = orig; }, 2000);
+            });
+        });
+
+        // ==========================================================
+        // CONFIRM MODAL EVENTS
+        // ==========================================================
+        confirmCloseBtn.addEventListener('click', () => closeModal(confirmModal));
+        confirmCancelBtn.addEventListener('click', () => closeModal(confirmModal));
+        confirmModal.addEventListener('click', function(e) {
+            if (e.target === this) closeModal(confirmModal);
+        });
+        confirmOkBtn.addEventListener('click', function() {
+            const cb = confirmModal._onConfirm;
+            closeModal(confirmModal);
+            if (typeof cb === 'function') cb();
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                if (accountModal.classList.contains('is-active')) closeModal(accountModal);
+                if (settingsModal.classList.contains('is-active')) closeModal(settingsModal);
+                if (profileModal.classList.contains('is-active')) closeModal(profileModal);
+                if (securityModal.classList.contains('is-active')) closeModal(securityModal);
+                if (shareModal.classList.contains('is-active')) closeModal(shareModal);
+                if (confirmModal.classList.contains('is-active')) closeModal(confirmModal);
+                if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
+                    closeSidebar();
+                }
+            }
+            if (e.key === 'Enter' && confirmModal.classList.contains('is-active')) {
+                confirmOkBtn.click();
+            }
         });
     </script>
 </body>
