@@ -2,24 +2,44 @@
 // AgriDeepAI Backend — Vercel Serverless Function
 // ==========================================================
 
+import { createClient } from '@supabase/supabase-js';
+import { PDFExtract } from 'pdf-parse'; // using pdf-parse for PDFs
+import mammoth from 'mammoth'; // for docx
+
+// Supabase client
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { message, history, model, temperature, webSearchEnabled } = req.body;
+    const { message, history, model, temperature, webSearchEnabled, files, userId } = req.body;
 
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+    if (!message && !files) {
+      return res.status(400).json({ error: 'Message or files required' });
     }
 
     console.log('📩 Received message:', message);
+    console.log('📎 Files received:', files ? files.length : 0);
+    console.log('👤 User:', userId || 'guest');
     console.log('⚙️  Model:', model || 'auto');
     console.log('🌡️  Temperature:', temperature || 0.7);
     console.log('🔍 Web search enabled:', webSearchEnabled !== false);
 
-    // Web search
+    // 1. Process files (if any)
+    let fileContents = '';
+    let visionPrompt = '';
+    if (files && files.length > 0) {
+      const processed = await processFiles(files);
+      fileContents = processed.text;
+      visionPrompt = processed.visionPrompt;
+    }
+
+    // 2. Web search (if enabled)
     let searchResults = '';
     if (webSearchEnabled !== false && shouldPerformWebSearch(message)) {
       if (process.env.SERPER_API_KEY) {
@@ -29,24 +49,35 @@ export default async function handler(req, res) {
       }
     }
 
+    // 3. Build system prompt
     const systemPrompt = getSystemPrompt();
-    let userMessage = message;
+
+    // 4. Build user message with context
+    let userMessage = message || '';
+    if (visionPrompt) {
+      userMessage += '\n\n' + visionPrompt;
+    }
+    if (fileContents) {
+      userMessage += '\n\nFile content:\n' + fileContents;
+    }
     if (searchResults) {
-      userMessage = `
-User question: ${message}
-
-Relevant web search results:
-${searchResults}
-
-Please use this information to provide a comprehensive, accurate answer.
-`;
+      userMessage += '\n\nRelevant web search results:\n' + searchResults;
     }
 
-    const response = await callAI(systemPrompt, userMessage, history, model, temperature);
+    // 5. Call AI (with multimodal support if vision is needed)
+    const response = await callAI(systemPrompt, userMessage, history, model, temperature, files);
+
+    // 6. If user is authenticated, save conversation to Supabase
+    if (userId && supabase) {
+      // Save chat history (we'll implement a simple store)
+      // For simplicity, we're not saving here but we'll save from frontend.
+      // Actually we'll handle saving on frontend via Supabase directly.
+    }
 
     return res.status(200).json({
       response: response,
-      searchUsed: !!searchResults
+      searchUsed: !!searchResults,
+      fileProcessed: !!fileContents || !!visionPrompt,
     });
 
   } catch (error) {
@@ -55,6 +86,47 @@ Please use this information to provide a comprehensive, accurate answer.
       error: error.message || 'Something went wrong. Please try again.'
     });
   }
+}
+
+// ==========================================================
+// FILE PROCESSING
+// ==========================================================
+async function processFiles(files) {
+  let text = '';
+  let visionPrompt = '';
+  for (const file of files) {
+    const { name, type, data } = file; // data is base64 string
+    if (type.startsWith('image/')) {
+      // For images, we'll use Gemini Vision; store base64
+      visionPrompt += `\n[Image: ${name}]`;
+      // We'll pass the base64 to the AI call
+    } else if (type === 'application/pdf') {
+      // Parse PDF
+      try {
+        const buffer = Buffer.from(data, 'base64');
+        const result = await PDFExtract(buffer);
+        text += `\n--- Content of ${name} ---\n${result.text}\n---\n`;
+      } catch (e) {
+        text += `\n[Could not parse PDF: ${name}]\n`;
+      }
+    } else if (type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+               type === 'application/msword') {
+      // Parse DOCX/DOC
+      try {
+        const buffer = Buffer.from(data, 'base64');
+        const result = await mammoth.extractRawText({ buffer });
+        text += `\n--- Content of ${name} ---\n${result.value}\n---\n`;
+      } catch (e) {
+        text += `\n[Could not parse document: ${name}]\n`;
+      }
+    } else if (type === 'text/plain') {
+      const content = Buffer.from(data, 'base64').toString('utf-8');
+      text += `\n--- Content of ${name} ---\n${content}\n---\n`;
+    } else {
+      text += `\n[Unsupported file type: ${name}]\n`;
+    }
+  }
+  return { text, visionPrompt };
 }
 
 // ==========================================================
@@ -107,7 +179,8 @@ You are an expert in all things Agriculture and Livestock. You can answer questi
 - Use bullet points or numbered lists for steps, facts, or comparisons.
 - Keep paragraphs short and conversational.
 - When giving a list of examples, present them in a clean bulleted list.
-- For file attachments: If a user attaches an image, politely explain that you cannot see images directly, and ask them to describe what's in the photo or explain what they need help with.
+- For image attachments: You have vision capabilities, so you can describe what you see in the image and answer questions about it, but always relate it to agriculture/livestock if possible.
+- For document attachments: You can read text from PDF, DOCX, and TXT files and use that information in your response.
 - Always end with a friendly question to engage the user further.
 
 ## Important Note:
@@ -116,9 +189,9 @@ You are not just a rigid agricultural chatbot — you are a friendly, intelligen
 }
 
 // ==========================================================
-// AI CALL — Unified with fallbacks
+// AI CALL — Unified with fallbacks + Vision support
 // ==========================================================
-async function callAI(systemPrompt, userMessage, history, preferredModel, temperature = 0.7) {
+async function callAI(systemPrompt, userMessage, history, preferredModel, temperature, files) {
   const messages = [
     { role: 'system', content: systemPrompt }
   ];
@@ -130,8 +203,101 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
       }
     }
   }
-  messages.push({ role: 'user', content: userMessage });
 
+  // Prepare user message with possible image attachments for Gemini Vision
+  let userContent = userMessage;
+  let hasVision = false;
+  let imageParts = [];
+
+  if (files && files.length > 0) {
+    for (const file of files) {
+      if (file.type && file.type.startsWith('image/')) {
+        hasVision = true;
+        imageParts.push({
+          inline_data: {
+            mime_type: file.type,
+            data: file.data // base64
+          }
+        });
+      }
+    }
+  }
+
+  // If vision is needed, we'll use Gemini 2.5 Pro which supports multimodal
+  if (hasVision && process.env.GOOGLE_API_KEY) {
+    // Use Gemini Vision
+    try {
+      const geminiKey = process.env.GOOGLE_API_KEY;
+      const model = 'gemini-2.5-pro'; // or gemini-2.5-flash if available
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+
+      // Build contents array
+      const contents = [];
+      // System instruction (as first part)
+      const systemText = systemPrompt;
+      // Combine conversation history into a single text
+      let historyText = '';
+      if (history && history.length) {
+        historyText = history.map(m => `${m.role}: ${m.content}`).join('\n');
+      }
+      const userText = userMessage;
+
+      // Build parts: system + history + user text + images
+      const parts = [];
+      parts.push({ text: `System: ${systemText}\n\nHistory:\n${historyText}\n\nUser: ${userText}` });
+      // Add images
+      for (const imgPart of imageParts) {
+        parts.push({ inline_data: imgPart.inline_data });
+      }
+
+      const requestBody = {
+        contents: [
+          {
+            parts: parts
+          }
+        ],
+        generationConfig: {
+          temperature: temperature || 0.7,
+          maxOutputTokens: 1024,
+        }
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Gemini Vision succeeded');
+        return data.candidates[0].content.parts[0].text;
+      } else {
+        const errorText = await response.text();
+        console.warn('⚠️ Gemini Vision failed:', errorText);
+        // Fall through to regular text
+      }
+    } catch (err) {
+      console.warn('⚠️ Gemini Vision error:', err.message);
+    }
+  }
+
+  // If no vision or vision failed, use regular text models (Groq or Gemini text)
+  // Build messages for text-only
+  const textMessages = [
+    { role: 'system', content: systemPrompt }
+  ];
+  if (history && Array.isArray(history)) {
+    const limitedHistory = history.slice(-10);
+    for (const msg of limitedHistory) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        textMessages.push({ role: msg.role, content: msg.content });
+      }
+    }
+  }
+  textMessages.push({ role: 'user', content: userMessage });
+
+  // Now try Groq and Gemini text
   // ==========================================================
   // 1. TRY GROQ
   // ==========================================================
@@ -166,8 +332,8 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
           },
           body: JSON.stringify({
             model: model,
-            messages: messages,
-            temperature: temperature,
+            messages: textMessages,
+            temperature: temperature || 0.7,
             max_tokens: 1024,
           }),
         });
@@ -187,7 +353,7 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   }
 
   // ==========================================================
-  // 2. FALLBACK TO GEMINI
+  // 2. FALLBACK TO GEMINI TEXT
   // ==========================================================
   const geminiKey = process.env.GOOGLE_API_KEY;
   console.log('🔑 Gemini API Key exists:', !!geminiKey);
@@ -212,14 +378,14 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
     for (const model of geminiModels) {
       try {
         console.log(`📡 Trying Gemini model: ${model}`);
-        const conversationText = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+        const conversationText = textMessages.map(m => `${m.role}: ${m.content}`).join('\n');
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: conversationText }] }],
-            generationConfig: { temperature: temperature, maxOutputTokens: 1024 },
+            generationConfig: { temperature: temperature || 0.7, maxOutputTokens: 1024 },
           }),
         });
 
@@ -251,8 +417,8 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
         },
         body: JSON.stringify({
           model: 'groq/compound-mini',
-          messages: messages,
-          temperature: temperature,
+          messages: textMessages,
+          temperature: temperature || 0.7,
           max_tokens: 1024,
         }),
       });
