@@ -8,17 +8,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, history } = req.body;
+    const { message, history, model, temperature, webSearchEnabled } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
     console.log('📩 Received message:', message);
+    console.log('⚙️  Model:', model || 'auto');
+    console.log('🌡️  Temperature:', temperature || 0.7);
+    console.log('🔍 Web search enabled:', webSearchEnabled !== false);
 
-    // Web search
+    // Web search (only if enabled)
     let searchResults = '';
-    if (shouldPerformWebSearch(message)) {
+    if (webSearchEnabled !== false && shouldPerformWebSearch(message)) {
       if (process.env.SERPER_API_KEY) {
         searchResults = await performSerperSearch(message);
       } else if (process.env.TAVILY_API_KEY) {
@@ -39,7 +42,7 @@ Please use this information to provide a comprehensive, accurate answer.
 `;
     }
 
-    const response = await callAI(systemPrompt, userMessage, history);
+    const response = await callAI(systemPrompt, userMessage, history, model, temperature);
 
     return res.status(200).json({
       response: response,
@@ -55,7 +58,7 @@ Please use this information to provide a comprehensive, accurate answer.
 }
 
 // ==========================================================
-// SYSTEM PROMPT — HUMAN-LIKE, INTELLIGENT
+// SYSTEM PROMPT — HUMAN-LIKE, INTELLIGENT, PROFESSIONAL
 // ==========================================================
 function getSystemPrompt() {
   return `
@@ -91,15 +94,22 @@ You are an expert in all things Agriculture and Livestock. You can answer questi
 - Be concise, clear, and easy to understand
 - Always maintain a respectful and professional tone
 
+## Response Style:
+- Use **bold** for emphasis and section headers.
+- Use bullet points or numbered lists for steps, facts, or comparisons.
+- Keep paragraphs short and conversational.
+- When giving a list of examples, present them in a clean bulleted list (not raw markdown tables, as they render poorly in plain text).
+- Always end with a friendly question to engage the user further.
+
 ## Important Note:
 You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture. Your goal is to be helpful, engaging, and knowledgeable while staying true to your agricultural expertise.
 `;
 }
 
 // ==========================================================
-// AI CALL — Unified with fallbacks
+// AI CALL — Unified with fallbacks, now accepts model and temperature
 // ==========================================================
-async function callAI(systemPrompt, userMessage, history) {
+async function callAI(systemPrompt, userMessage, history, preferredModel, temperature = 0.7) {
   const messages = [
     { role: 'system', content: systemPrompt }
   ];
@@ -114,18 +124,17 @@ async function callAI(systemPrompt, userMessage, history) {
   messages.push({ role: 'user', content: userMessage });
 
   // ==========================================================
-  // 1. TRY GROQ
+  // 1. TRY GROQ (with optional preferred model)
   // ==========================================================
   const groqKey = process.env.GROQ_API_KEY;
   console.log('🔑 Groq API Key exists:', !!groqKey);
 
+  // Build list of models to try: preferred first, then fallbacks
+  const groqModels = preferredModel && preferredModel.startsWith('groq/') 
+    ? [preferredModel, ...['groq/compound-mini', 'qwen/qwen3.6-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'].filter(m => m !== preferredModel)]
+    : ['groq/compound-mini', 'qwen/qwen3.6-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'];
+
   if (groqKey) {
-    const groqModels = [
-      'groq/compound-mini',
-      'qwen/qwen3.6-27b',
-      'openai/gpt-oss-20b',
-      'openai/gpt-oss-120b',
-    ];
     for (const model of groqModels) {
       try {
         console.log(`📡 Trying Groq model: ${model}`);
@@ -138,7 +147,7 @@ async function callAI(systemPrompt, userMessage, history) {
           body: JSON.stringify({
             model: model,
             messages: messages,
-            temperature: 0.7,
+            temperature: temperature,
             max_tokens: 1024,
           }),
         });
@@ -158,18 +167,16 @@ async function callAI(systemPrompt, userMessage, history) {
   }
 
   // ==========================================================
-  // 2. FALLBACK TO GEMINI
+  // 2. FALLBACK TO GEMINI (with optional preferred model)
   // ==========================================================
   const geminiKey = process.env.GOOGLE_API_KEY;
   console.log('🔑 Gemini API Key exists:', !!geminiKey);
 
+  const geminiModels = preferredModel && preferredModel.startsWith('gemini-')
+    ? [preferredModel, ...['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash'].filter(m => m !== preferredModel)]
+    : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash'];
+
   if (geminiKey) {
-    const geminiModels = [
-      'gemini-2.5-flash',
-      'gemini-2.5-pro',
-      'gemini-3.5-flash',
-      'gemini-3.6-flash',
-    ];
     for (const model of geminiModels) {
       try {
         console.log(`📡 Trying Gemini model: ${model}`);
@@ -181,7 +188,7 @@ async function callAI(systemPrompt, userMessage, history) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{ parts: [{ text: conversationText }] }],
-              generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+              generationConfig: { temperature: temperature, maxOutputTokens: 1024 },
             }),
           }
         );
