@@ -3,25 +3,20 @@
 // ==========================================================
 
 export default async function handler(req, res) {
-  // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Parse request body
     const { message, history } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    // Step 1: Check if we need to search the web
-    const shouldSearch = shouldPerformWebSearch(message);
+    // Web search (optional)
     let searchResults = '';
-
-    if (shouldSearch) {
-      // Try Serper first, then Tavily as fallback
+    if (shouldPerformWebSearch(message)) {
       if (process.env.SERPER_API_KEY) {
         searchResults = await performSerperSearch(message);
       } else if (process.env.TAVILY_API_KEY) {
@@ -29,10 +24,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Step 2: Build the system prompt (AgriDeepAI's personality)
     const systemPrompt = getSystemPrompt();
-
-    // Step 3: Build the user message with search context
     let userMessage = message;
     if (searchResults) {
       userMessage = `
@@ -45,10 +37,9 @@ Please use this information to provide a comprehensive, accurate answer.
 `;
     }
 
-    // Step 4: Call the AI
+    // Call AI with fallback
     const response = await callGroqAPI(systemPrompt, userMessage, history);
 
-    // Step 5: Return the response
     return res.status(200).json({
       response: response,
       searchUsed: !!searchResults
@@ -57,13 +48,13 @@ Please use this information to provide a comprehensive, accurate answer.
   } catch (error) {
     console.error('Backend error:', error);
     return res.status(500).json({
-      error: 'Something went wrong. Please try again.'
+      error: error.message || 'Something went wrong. Please try again.'
     });
   }
 }
 
 // ==========================================================
-// SYSTEM PROMPT — AgriDeepAI's Identity
+// SYSTEM PROMPT
 // ==========================================================
 function getSystemPrompt() {
   return `
@@ -106,19 +97,21 @@ Rules for Your Responses:
 // ==========================================================
 async function callGroqAPI(systemPrompt, userMessage, history) {
   const apiKey = process.env.GROQ_API_KEY;
-  const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-
   if (!apiKey) {
     console.warn('Groq API key missing, falling back to Gemini');
     return callGeminiAPI(systemPrompt, userMessage, history);
   }
 
-  // Build messages array
+  const models = [
+    'llama-3.1-70b-versatile',  // Primary
+    'llama-3.1-8b-instant',     // Fallback 1
+    'mixtral-8x7b-32768',       // Fallback 2
+  ];
+
   const messages = [
     { role: 'system', content: systemPrompt }
   ];
 
-  // Add conversation history (if provided)
   if (history && Array.isArray(history)) {
     const limitedHistory = history.slice(-10);
     for (const msg of limitedHistory) {
@@ -127,39 +120,47 @@ async function callGroqAPI(systemPrompt, userMessage, history) {
       }
     }
   }
-
-  // Add current user message
   messages.push({ role: 'user', content: userMessage });
 
-  try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: messages,
-        temperature: 0.7,
-        max_tokens: 1024,
-        stream: false,
-      }),
-    });
+  let lastError = null;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Groq API error:', response.status, errorText);
-      return callGeminiAPI(systemPrompt, userMessage, history);
+  for (const model of models) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messages,
+          temperature: 0.7,
+          max_tokens: 1024,
+          stream: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`Groq model ${model} failed:`, response.status, errorText);
+        lastError = errorText;
+        continue; // Try next model
+      }
+
+      const data = await response.json();
+      return data.choices[0].message.content;
+
+    } catch (error) {
+      console.warn(`Groq model ${model} error:`, error.message);
+      lastError = error.message;
+      continue;
     }
-
-    const data = await response.json();
-    return data.choices[0].message.content;
-
-  } catch (error) {
-    console.error('Groq request failed:', error);
-    return callGeminiAPI(systemPrompt, userMessage, history);
   }
+
+  // All Groq models failed, fallback to Gemini
+  console.warn('All Groq models failed, falling back to Gemini. Last error:', lastError);
+  return callGeminiAPI(systemPrompt, userMessage, history);
 }
 
 // ==========================================================
@@ -167,12 +168,12 @@ async function callGroqAPI(systemPrompt, userMessage, history) {
 // ==========================================================
 async function callGeminiAPI(systemPrompt, userMessage, history) {
   const apiKey = process.env.GOOGLE_API_KEY;
-  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp';
-
   if (!apiKey) {
     console.error('No Gemini API key available');
     return "I'm currently experiencing technical difficulties. Please try again later. (No AI API keys configured)";
   }
+
+  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp';
 
   let conversationText = `System: ${systemPrompt}\n\n`;
 
@@ -194,13 +195,9 @@ async function callGeminiAPI(systemPrompt, userMessage, history) {
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{
-            parts: [{ text: conversationText }]
-          }],
+          contents: [{ parts: [{ text: conversationText }] }],
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 1024,
@@ -225,121 +222,48 @@ async function callGeminiAPI(systemPrompt, userMessage, history) {
 }
 
 // ==========================================================
-// WEB SEARCH — Serper API (Primary)
+// WEB SEARCH — Serper & Tavily (helper functions)
 // ==========================================================
 function shouldPerformWebSearch(message) {
-  const searchKeywords = [
-    'latest', 'current', 'today', 'now', 'recent', 'new',
-    'update', 'news', 'price', 'market', 'weather',
-    'forecast', '2025', '2026', '2027',
-    'what is the current', 'how much', 'price of',
-    'market price', 'recently', 'this year', 'this month',
-    'today', 'tomorrow', 'yesterday'
-  ];
-
+  const keywords = ['latest', 'current', 'today', 'now', 'recent', 'new', 'update', 'news', 'price', 'market', 'weather', 'forecast', '2025', '2026', '2027', 'what is the current', 'how much', 'price of', 'market price', 'recently', 'this year', 'this month'];
   const lower = message.toLowerCase();
-  for (const keyword of searchKeywords) {
-    if (lower.includes(keyword)) {
-      return true;
-    }
-  }
-  return false;
+  return keywords.some(kw => lower.includes(kw));
 }
 
 async function performSerperSearch(query) {
   const apiKey = process.env.SERPER_API_KEY;
-  if (!apiKey) {
-    console.warn('Serper API key not configured');
-    return '';
-  }
-
+  if (!apiKey) return '';
   try {
-    const response = await fetch('https://google.serper.dev/search', {
+    const res = await fetch('https://google.serper.dev/search', {
       method: 'POST',
-      headers: {
-        'X-API-KEY': apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        q: query,
-        num: 5,
-      }),
+      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, num: 5 }),
     });
-
-    if (!response.ok) {
-      console.error('Serper API error:', response.status);
-      return '';
-    }
-
-    const data = await response.json();
-    const organicResults = data.organic || [];
-    if (organicResults.length === 0) {
-      return '';
-    }
-
-    let formattedResults = '';
-    for (let i = 0; i < Math.min(organicResults.length, 5); i++) {
-      const result = organicResults[i];
-      formattedResults += `\n${i + 1}. ${result.title || 'Untitled'}\n`;
-      formattedResults += `   ${result.snippet || result.description || 'No description available'}\n`;
-      formattedResults += `   Source: ${result.link || 'Unknown'}\n`;
-    }
-
-    return formattedResults;
-
-  } catch (error) {
-    console.error('Serper search error:', error);
-    return '';
-  }
+    if (!res.ok) return '';
+    const data = await res.json();
+    const results = data.organic || [];
+    if (results.length === 0) return '';
+    return results.slice(0, 5).map((r, i) =>
+      `\n${i+1}. ${r.title || 'Untitled'}\n   ${r.snippet || r.description || 'No description'}\n   Source: ${r.link || 'Unknown'}`
+    ).join('');
+  } catch { return ''; }
 }
 
-// ==========================================================
-// WEB SEARCH — Tavily API (Fallback)
-// ==========================================================
 async function performTavilySearch(query) {
   const apiKey = process.env.TAVILY_API_KEY;
-  if (!apiKey) {
-    console.warn('Tavily API key not configured');
-    return '';
-  }
-
+  if (!apiKey) return '';
   try {
-    const response = await fetch('https://api.tavily.com/search', {
+    const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        api_key: apiKey,
-        query: query,
-        search_depth: 'basic',
-        max_results: 5,
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, query, search_depth: 'basic', max_results: 5 }),
     });
-
-    if (!response.ok) {
-      console.error('Tavily API error:', response.status);
-      return '';
-    }
-
-    const data = await response.json();
+    if (!res.ok) return '';
+    const data = await res.json();
     const results = data.results || [];
-    if (results.length === 0) {
-      return '';
-    }
-
-    let formattedResults = '';
-    for (let i = 0; i < Math.min(results.length, 5); i++) {
-      const result = results[i];
-      formattedResults += `\n${i + 1}. ${result.title || 'Untitled'}\n`;
-      formattedResults += `   ${result.content || result.snippet || 'No description available'}\n`;
-      formattedResults += `   Source: ${result.url || 'Unknown'}\n`;
-    }
-
-    return formattedResults;
-
-  } catch (error) {
-    console.error('Tavily search error:', error);
-    return '';
-  }
+    if (results.length === 0) return '';
+    return results.slice(0, 5).map((r, i) =>
+      `\n${i+1}. ${r.title || 'Untitled'}\n   ${r.content || r.snippet || 'No description'}\n   Source: ${r.url || 'Unknown'}`
+    ).join('');
+  } catch { return ''; }
 }
