@@ -27,10 +27,10 @@
             --border-subtle: #262628;
             --border-strong: #3a3a3e;
 
-            --accent: #5b7cfa;
-            --accent-hover: #6f8cff;
-            --accent-ghost: rgba(91, 124, 250, 0.12);
-            --accent-glow: rgba(91, 124, 250, 0.18);
+            --accent: #22c55e;
+            --accent-hover: #34d399;
+            --accent-ghost: rgba(34, 197, 94, 0.12);
+            --accent-glow: rgba(34, 197, 94, 0.18);
 
             --success: #34c759;
             --warning: #f5a623;
@@ -62,6 +62,10 @@
             --transition-slow: 0.36s cubic-bezier(0.22, 1, 0.36, 1);
 
             --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+            /* User message background: dark, bot message: slightly lighter */
+            --msg-user-bg: #2a2a2e;
+            --msg-bot-bg: #1e1e20;
         }
 
         [data-theme="light"] {
@@ -82,15 +86,18 @@
             --border-subtle: #d8d8dc;
             --border-strong: #c8c8cc;
 
-            --accent: #4a6cf7;
-            --accent-hover: #5a7aff;
-            --accent-ghost: rgba(74, 108, 247, 0.10);
-            --accent-glow: rgba(74, 108, 247, 0.14);
+            --accent: #22a84a;
+            --accent-hover: #34b85a;
+            --accent-ghost: rgba(34, 168, 74, 0.10);
+            --accent-glow: rgba(34, 168, 74, 0.14);
 
             --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
             --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
             --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.08);
             --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.10);
+
+            --msg-user-bg: #e0e0e2;
+            --msg-bot-bg: #f0f0f2;
         }
 
         /* ==========================================================
@@ -272,13 +279,13 @@
             transition: transform var(--transition-med);
         }
 
-        /* New Chat */
+        /* New Chat – dark button */
         .new-chat-btn {
             margin: 12px 16px;
             padding: 10px 16px;
-            background: var(--accent);
-            color: #fff;
-            border: none;
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
             font-size: 13px;
             font-weight: 600;
@@ -294,7 +301,8 @@
         }
 
         .new-chat-btn:hover {
-            background: var(--accent-hover);
+            background: var(--bg-hover);
+            border-color: var(--border-strong);
         }
 
         .new-chat-btn:active {
@@ -412,6 +420,16 @@
             color: var(--warning);
         }
 
+        .chat-item .chat-actions button svg {
+            width: 14px;
+            height: 14px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
         .empty-history {
             color: var(--text-muted);
             font-size: 13px;
@@ -510,6 +528,16 @@
 
         .account-btn:hover .account-settings-icon {
             color: var(--text-primary);
+        }
+
+        .account-settings-icon svg {
+            width: 18px;
+            height: 18px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
 
         /* ==========================================================
@@ -700,13 +728,13 @@
         }
 
         .message-wrapper.is-user .message-bubble {
-            background: var(--accent);
-            color: #fff;
+            background: var(--msg-user-bg);
+            color: var(--text-primary);
             border-bottom-right-radius: 4px;
         }
 
         .message-wrapper.is-bot .message-bubble {
-            background: var(--bg-surface);
+            background: var(--msg-bot-bg);
             color: var(--text-primary);
             border-bottom-left-radius: 4px;
         }
@@ -932,7 +960,7 @@
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-lg);
-            padding: 6px 8px 6px 16px;
+            padding: 6px 8px 6px 12px;
             transition: var(--transition-fast);
             max-width: var(--chat-max-width);
             margin: 0 auto;
@@ -964,6 +992,7 @@
             min-height: 24px;
             max-height: var(--composer-max-height);
             line-height: 1.5;
+            order: 2; /* textarea in middle, after attach, before actions */
         }
 
         .composer textarea::placeholder {
@@ -975,6 +1004,7 @@
             align-items: center;
             gap: 2px;
             flex-shrink: 0;
+            order: 3;
         }
 
         .composer .composer-actions button {
@@ -1067,12 +1097,51 @@
             height: 16px;
         }
 
+        /* Attach button on the left */
+        .composer .attach-btn {
+            order: 1;
+            flex-shrink: 0;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 50%;
+            transition: var(--transition-fast);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 34px;
+            height: 34px;
+        }
+
+        .composer .attach-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .composer .attach-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .file-input {
+            display: none;
+        }
+
         /* Attachment previews */
         .attachment-previews {
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
             padding: 4px 0 8px 0;
+            order: 0; /* above input row */
+            width: 100%;
         }
 
         .attachment-preview {
@@ -1121,10 +1190,6 @@
         .attachment-preview .remove-attach:hover {
             background: var(--bg-hover);
             color: var(--text-primary);
-        }
-
-        .file-input {
-            display: none;
         }
 
         /* ==========================================================
@@ -1517,7 +1582,7 @@
             }
 
             .composer {
-                padding: 4px 6px 4px 12px;
+                padding: 4px 6px 4px 10px;
                 border-radius: var(--radius-md);
             }
 
@@ -1527,13 +1592,15 @@
                 min-height: 20px;
             }
 
-            .composer .composer-actions button {
+            .composer .composer-actions button,
+            .composer .attach-btn {
                 width: 30px;
                 height: 30px;
                 padding: 4px;
             }
 
-            .composer .composer-actions button svg {
+            .composer .composer-actions button svg,
+            .composer .attach-btn svg {
                 width: 18px;
                 height: 18px;
             }
@@ -1691,7 +1758,7 @@
                 </button>
             </div>
 
-            <!-- New Chat -->
+            <!-- New Chat – dark button -->
             <button class="new-chat-btn" id="newChatBtn" title="Start a new conversation">
                 <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 <span class="new-chat-label">New Chat</span>
@@ -1710,7 +1777,9 @@
                         <div class="name" id="userNameDisplay">Guest</div>
                         <div class="sub" id="userSubDisplay">Not signed in</div>
                     </div>
-                    <span class="account-settings-icon" id="settingsIcon" title="Settings">⚙</span>
+                    <span class="account-settings-icon" id="settingsIcon" title="Settings">
+                        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </span>
                 </button>
             </div>
         </aside>
@@ -1758,15 +1827,12 @@
                 <div class="composer" id="composer">
                     <div class="attachment-previews" id="attachmentPreviews"></div>
                     <div class="input-row">
+                        <button class="attach-btn" id="attachBtn" aria-label="Attach file" title="Attach file or image">
+                            <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                        </button>
+                        <input type="file" id="fileInput" class="file-input" accept="image/*,.pdf,.doc,.docx,.txt" multiple />
                         <textarea id="userInput" rows="1" placeholder="Ask me about agriculture and livestock..."></textarea>
                         <div class="composer-actions">
-                            <button id="attachBtn" aria-label="Attach file" title="Attach file or image">
-                                <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                            </button>
-                            <input type="file" id="fileInput" class="file-input" accept="image/*,.pdf,.doc,.docx,.txt" multiple />
-                            <button id="microphoneBtn" aria-label="Voice input" title="Voice input">
-                                <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-                            </button>
                             <button class="stop-btn" id="stopBtn" aria-label="Stop generating" title="Stop generating">
                                 <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
                             </button>
@@ -1856,7 +1922,7 @@
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- ==========================================================
-    JAVASCRIPT — STATE, RENDERING, LOGIC
+    JAVASCRIPT
     ========================================================== -->
     <script>
         // ==========================================================
@@ -1867,7 +1933,6 @@
             version: '1.0.0',
             tagline: 'Your AI assistant for agriculture, livestock.',
             apiEndpoint: '/api/chat',
-            enableVoice: true,
             enableAttachments: true,
             enableStreaming: true,
             enableLocalStorage: true,
@@ -1915,7 +1980,6 @@
         const attachBtn = $('attachBtn');
         const fileInput = $('fileInput');
         const attachmentPreviews = $('attachmentPreviews');
-        const microphoneBtn = $('microphoneBtn');
         const scrollBottomBtn = $('scrollBottomBtn');
         const chatTitle = $('chatTitle');
         const accountBtn = $('accountBtn');
@@ -2260,14 +2324,18 @@
             const conv = state.conversations[id];
             if (conv) chatTitle.textContent = conv.title;
             if (window.innerWidth <= 992) closeSidebar();
-            // Clear attachments
+            // Clear attachments and draft
             attachments = [];
             renderAttachments();
-            // Reset draft
             state.draft = '';
             userInput.value = '';
             userInput.style.height = 'auto';
             sendBtn.classList.remove('is-visible');
+            // If the conversation is empty, ensure empty state is shown
+            if (conv && conv.messages.length === 0) {
+                emptyState.classList.remove('is-hidden');
+                scrollBottomBtn.classList.remove('is-visible');
+            }
         }
 
         function renderConversation(id) {
@@ -2333,6 +2401,9 @@
                     <button data-action="dislike" aria-label="Dislike" title="Dislike">
                         <svg viewBox="0 0 24 24"><path d="M10 15v3a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
                     </button>
+                    <button data-action="share" aria-label="Share" title="Share">
+                        <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                    </button>
                 `;
             }
 
@@ -2375,6 +2446,16 @@
                         btn.classList.toggle('is-liked');
                     } else if (action === 'dislike') {
                         btn.classList.toggle('is-disliked');
+                    } else if (action === 'share') {
+                        if (navigator.share) {
+                            navigator.share({ title: 'AgriDeepAI', text: msgText }).catch(() => {});
+                        } else {
+                            navigator.clipboard.writeText(msgText).then(() => {
+                                showToast('Message copied!', 'success');
+                            }).catch(() => {
+                                prompt('Copy this message:', msgText);
+                            });
+                        }
                     }
                 });
             });
@@ -2457,9 +2538,15 @@
                 div.innerHTML = `
                     <span class="title">${conv.title}</span>
                     <div class="chat-actions">
-                        <button class="${conv.pinned ? 'is-pinned' : ''}" data-action="pin" aria-label="Pin" title="Pin">📌</button>
-                        <button data-action="delete" aria-label="Delete" title="Delete">🗑</button>
-                        <button data-action="share" aria-label="Share" title="Share">🔗</button>
+                        <button class="${conv.pinned ? 'is-pinned' : ''}" data-action="pin" aria-label="Pin" title="Pin">
+                            <svg viewBox="0 0 24 24"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 12h14"/><path d="M7 12v-5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v5"/></svg>
+                        </button>
+                        <button data-action="delete" aria-label="Delete" title="Delete">
+                            <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                        <button data-action="share" aria-label="Share" title="Share">
+                            <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                        </button>
                     </div>
                 `;
 
@@ -2575,13 +2662,20 @@
             const message = text || userInput.value.trim();
             if (!message && attachments.length === 0) return;
 
-            // Ensure we have a conversation
-            if (!state.activeId) {
-                const newId = createConversation(message.slice(0, 30) + (message.length > 30 ? '...' : ''));
-                state.activeId = newId;
+            // If there's an active empty conversation, reuse it; otherwise create new
+            let active = getActive();
+            if (!state.activeId || (active && active.messages.length === 0)) {
+                // Reuse or create
+                if (!state.activeId) {
+                    const newId = createConversation(message.slice(0, 30) + (message.length > 30 ? '...' : ''));
+                    state.activeId = newId;
+                    active = getActive();
+                } else {
+                    // It's empty, we'll reuse it
+                    // Ensure title is updated later
+                }
                 renderHistory();
-                const conv = state.conversations[newId];
-                if (conv) chatTitle.textContent = conv.title;
+                if (active) chatTitle.textContent = active.title;
                 emptyState.classList.add('is-hidden');
             }
 
@@ -2713,9 +2807,18 @@
         stopBtn.addEventListener('click', stopGeneration);
 
         // ==========================================================
-        // NEW CHAT
+        // NEW CHAT (Improved: reuse empty conversation)
         // ==========================================================
         newChatBtn.addEventListener('click', function() {
+            // If current active conversation exists and is empty, just reuse it.
+            const active = getActive();
+            if (active && active.messages.length === 0) {
+                // Already empty, just focus
+                userInput.focus();
+                if (window.innerWidth <= 992) closeSidebar();
+                return;
+            }
+            // Otherwise create a new one
             const newId = createConversation('New Chat');
             state.activeId = newId;
             const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
@@ -2788,68 +2891,6 @@
         }
 
         // ==========================================================
-        // VOICE INPUT
-        // ==========================================================
-        let isListening = false;
-        let recognition = null;
-
-        if (APP_CONFIG.enableVoice && 'webkitSpeechRecognition' in window) {
-            recognition = new webkitSpeechRecognition();
-            recognition.lang = 'en-US';
-            recognition.continuous = false;
-            recognition.interimResults = true;
-
-            recognition.onstart = function() {
-                isListening = true;
-                microphoneBtn.style.color = 'var(--accent)';
-                showToast('Listening...', 'info');
-            };
-
-            recognition.onend = function() {
-                isListening = false;
-                microphoneBtn.style.color = '';
-            };
-
-            recognition.onresult = function(event) {
-                let final = '';
-                let interim = '';
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    const transcript = event.results[i][0].transcript;
-                    if (event.results[i].isFinal) final += transcript;
-                    else interim += transcript;
-                }
-                if (final) {
-                    userInput.value = final;
-                    userInput.dispatchEvent(new Event('input'));
-                    sendMessage();
-                } else if (interim) {
-                    userInput.value = interim;
-                    userInput.dispatchEvent(new Event('input'));
-                }
-            };
-
-            recognition.onerror = function(event) {
-                showToast('Voice error: ' + event.error, 'error');
-                isListening = false;
-                microphoneBtn.style.color = '';
-            };
-        }
-
-        microphoneBtn.addEventListener('click', function() {
-            if (!APP_CONFIG.enableVoice || !recognition) {
-                showToast('Voice input not supported.', 'warning');
-                return;
-            }
-            if (isListening) {
-                recognition.stop();
-                isListening = false;
-                microphoneBtn.style.color = '';
-            } else {
-                recognition.start();
-            }
-        });
-
-        // ==========================================================
         // SUGGESTIONS
         // ==========================================================
         document.querySelectorAll('.suggestions button').forEach(btn => {
@@ -2909,7 +2950,7 @@
             }
 
             console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized.');
-            console.log('📋 Features: chat, voice, attachments, settings, themes, modals.');
+            console.log('📋 Features: chat, attachments, settings, themes, modals.');
             console.log('🔜 Phase 2: Connect to real AI backend.');
         }
 
