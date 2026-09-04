@@ -85,7 +85,7 @@ Rules for Your Responses:
 }
 
 // ==========================================================
-// AI CALL — Unified with fallbacks
+// AI CALL — Using working models from your output
 // ==========================================================
 async function callAI(systemPrompt, userMessage, history) {
   const messages = [
@@ -101,16 +101,19 @@ async function callAI(systemPrompt, userMessage, history) {
   }
   messages.push({ role: 'user', content: userMessage });
 
-  // Try Groq first
+  // ==========================================================
+  // 1. TRY GROQ (from your output)
+  // ==========================================================
   const groqKey = process.env.GROQ_API_KEY;
   console.log('🔑 Groq API Key exists:', !!groqKey);
 
   if (groqKey) {
-    // CORRECTED: Using active Groq models
+    // These models were confirmed in your Groq list
     const groqModels = [
-      'llama3-70b-8192',
-      'llama3-8b-8192',
-      'mixtral-8x7b-32768'
+      'groq/compound-mini',      // Fast, good for chat
+      'qwen/qwen3.6-27b',        // Good quality
+      'openai/gpt-oss-20b',      // Reliable
+      'openai/gpt-oss-120b',     // High quality (may be slower)
     ];
     for (const model of groqModels) {
       try {
@@ -141,17 +144,21 @@ async function callAI(systemPrompt, userMessage, history) {
         console.warn(`⚠️ Groq model ${model} error:`, err.message);
       }
     }
-  } else {
-    console.warn('⚠️ No Groq API key found');
   }
 
-  // Fallback to Gemini
+  // ==========================================================
+  // 2. FALLBACK TO GEMINI (from your output)
+  // ==========================================================
   const geminiKey = process.env.GOOGLE_API_KEY;
   console.log('🔑 Gemini API Key exists:', !!geminiKey);
 
   if (geminiKey) {
-    // CORRECTED: Using active Gemini models with -001 suffix
-    const geminiModels = ['gemini-1.5-flash-001', 'gemini-1.5-pro-001'];
+    // These models were confirmed in your Gemini list
+    const geminiModels = [
+      'gemini-2.5-flash',        // Fast, good quality
+      'gemini-2.5-pro',          // Higher quality
+      'gemini-3.5-flash',        // Newer fast model
+    ];
     for (const model of geminiModels) {
       try {
         console.log(`📡 Trying Gemini model: ${model}`);
@@ -180,10 +187,11 @@ async function callAI(systemPrompt, userMessage, history) {
         console.warn(`⚠️ Gemini model ${model} error:`, err.message);
       }
     }
-  } else {
-    console.warn('⚠️ No Gemini API key found');
   }
 
+  // ==========================================================
+  // 3. ULTIMATE FALLBACK
+  // ==========================================================
   throw new Error('All AI providers failed. Please check API keys and model availability.');
 }
 
