@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     }
 
     console.log('📩 Received message:', message);
-    console.log('⚙️  Model:', model || 'auto');
+    console.log('⚙️  Requested model:', model || 'auto');
     console.log('🌡️  Temperature:', temperature || 0.7);
     console.log('🔍 Web search enabled:', webSearchEnabled !== false);
 
@@ -42,6 +42,7 @@ Please use this information to provide a comprehensive, accurate answer.
 `;
     }
 
+    // Call AI with the requested model (if provided) but fallback to working ones
     const response = await callAI(systemPrompt, userMessage, history, model, temperature);
 
     return res.status(200).json({
@@ -58,7 +59,7 @@ Please use this information to provide a comprehensive, accurate answer.
 }
 
 // ==========================================================
-// SYSTEM PROMPT — HUMAN-LIKE, INTELLIGENT, PROFESSIONAL
+// SYSTEM PROMPT (unchanged, same as before)
 // ==========================================================
 function getSystemPrompt() {
   return `
@@ -107,7 +108,7 @@ You are not just a rigid agricultural chatbot — you are a friendly, intelligen
 }
 
 // ==========================================================
-// AI CALL — Unified with fallbacks, now accepts model and temperature
+// AI CALL — Robust fallback with working models
 // ==========================================================
 async function callAI(systemPrompt, userMessage, history, preferredModel, temperature = 0.7) {
   const messages = [
@@ -124,15 +125,31 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   messages.push({ role: 'user', content: userMessage });
 
   // ==========================================================
-  // 1. TRY GROQ (with optional preferred model)
+  // 1. TRY GROQ — with preferred model first (if valid)
   // ==========================================================
   const groqKey = process.env.GROQ_API_KEY;
   console.log('🔑 Groq API Key exists:', !!groqKey);
 
-  // Build list of models to try: preferred first, then fallbacks
-  const groqModels = preferredModel && preferredModel.startsWith('groq/') 
-    ? [preferredModel, ...['groq/compound-mini', 'qwen/qwen3.6-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'].filter(m => m !== preferredModel)]
-    : ['groq/compound-mini', 'qwen/qwen3.6-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'];
+  // Define known working Groq models (from your previous success)
+  const workingGroqModels = [
+    'groq/compound-mini',
+    'qwen/qwen3.6-27b',
+    'openai/gpt-oss-20b',
+    'openai/gpt-oss-120b'
+  ];
+
+  // Build the list: if preferredModel is a Groq model, put it first, else just use working list
+  let groqModels = workingGroqModels;
+  if (preferredModel && preferredModel.startsWith('groq/')) {
+    // Ensure it's in the list
+    if (!workingGroqModels.includes(preferredModel)) {
+      // If it's not in the working list, we'll still try it but fallback
+      groqModels = [preferredModel, ...workingGroqModels];
+    } else {
+      // Move it to front
+      groqModels = [preferredModel, ...workingGroqModels.filter(m => m !== preferredModel)];
+    }
+  }
 
   if (groqKey) {
     for (const model of groqModels) {
@@ -167,31 +184,44 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   }
 
   // ==========================================================
-  // 2. FALLBACK TO GEMINI (with optional preferred model)
+  // 2. FALLBACK TO GEMINI — with preferred model if provided
   // ==========================================================
   const geminiKey = process.env.GOOGLE_API_KEY;
   console.log('🔑 Gemini API Key exists:', !!geminiKey);
 
-  const geminiModels = preferredModel && preferredModel.startsWith('gemini-')
-    ? [preferredModel, ...['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash'].filter(m => m !== preferredModel)]
-    : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash'];
+  // Use the exact model names that were confirmed working before
+  // (If you had success with 2.5/3.5, keep them; but if 404, maybe use 1.5)
+  const workingGeminiModels = [
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash'
+  ];
+
+  let geminiModels = workingGeminiModels;
+  if (preferredModel && preferredModel.startsWith('gemini-')) {
+    if (!workingGeminiModels.includes(preferredModel)) {
+      geminiModels = [preferredModel, ...workingGeminiModels];
+    } else {
+      geminiModels = [preferredModel, ...workingGeminiModels.filter(m => m !== preferredModel)];
+    }
+  }
 
   if (geminiKey) {
     for (const model of geminiModels) {
       try {
         console.log(`📡 Trying Gemini model: ${model}`);
         const conversationText = messages.map(m => `${m.role}: ${m.content}`).join('\n');
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: conversationText }] }],
-              generationConfig: { temperature: temperature, maxOutputTokens: 1024 },
-            }),
-          }
-        );
+        // Gemini endpoint format
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: conversationText }] }],
+            generationConfig: { temperature: temperature, maxOutputTokens: 1024 },
+          }),
+        });
 
         if (response.ok) {
           const data = await response.json();
@@ -200,6 +230,7 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
         } else {
           const errorText = await response.text();
           console.warn(`⚠️ Gemini model ${model} failed (${response.status}):`, errorText);
+          // If 404, maybe the model doesn't exist; we'll continue to next
         }
       } catch (err) {
         console.warn(`⚠️ Gemini model ${model} error:`, err.message);
@@ -208,13 +239,37 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   }
 
   // ==========================================================
-  // 3. ULTIMATE FALLBACK
+  // 3. ULTIMATE FALLBACK — try Groq again with a simpler model (just in case)
   // ==========================================================
+  if (groqKey) {
+    try {
+      console.log('📡 Ultimate fallback: trying groq/compound-mini one more time');
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${groqKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'groq/compound-mini',
+          messages: messages,
+          temperature: temperature,
+          max_tokens: 1024,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Ultimate fallback succeeded');
+        return data.choices[0].message.content;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   throw new Error('All AI providers failed. Please check API keys and model availability.');
 }
 
 // ==========================================================
-// WEB SEARCH (Serper & Tavily)
+// WEB SEARCH (Serper & Tavily) — unchanged
 // ==========================================================
 function shouldPerformWebSearch(message) {
   const keywords = ['latest', 'current', 'today', 'now', 'recent', 'new', 'update', 'news', 'price', 'market', 'weather', 'forecast', '2025', '2026', '2027', 'what is the current', 'how much', 'price of', 'market price', 'recently', 'this year', 'this month'];
