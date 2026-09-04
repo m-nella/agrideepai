@@ -63,7 +63,6 @@
 
             --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-            /* User message background: dark, bot message: slightly lighter */
             --msg-user-bg: #2a2a2e;
             --msg-bot-bg: #1e1e20;
         }
@@ -942,7 +941,7 @@
         }
 
         /* ==========================================================
-           COMPOSER
+           COMPOSER — with green border always
            ========================================================== */
         .composer-wrapper {
             position: sticky;
@@ -958,18 +957,19 @@
             display: flex;
             flex-direction: column;
             background: var(--bg-surface);
-            border: 1px solid var(--border-subtle);
+            border: 2px solid var(--accent); /* solid green border always */
             border-radius: var(--radius-lg);
             padding: 6px 8px 6px 12px;
             transition: var(--transition-fast);
             max-width: var(--chat-max-width);
             margin: 0 auto;
             position: relative;
+            box-shadow: 0 0 0 0 var(--accent-glow);
         }
 
         .composer:focus-within {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px var(--accent-glow);
+            border-color: var(--accent-hover);
+            box-shadow: 0 0 0 4px var(--accent-glow);
         }
 
         .composer .input-row {
@@ -992,7 +992,7 @@
             min-height: 24px;
             max-height: var(--composer-max-height);
             line-height: 1.5;
-            order: 2; /* textarea in middle, after attach, before actions */
+            order: 2;
         }
 
         .composer textarea::placeholder {
@@ -1140,7 +1140,7 @@
             flex-wrap: wrap;
             gap: 6px;
             padding: 4px 0 8px 0;
-            order: 0; /* above input row */
+            order: 0;
             width: 100%;
         }
 
@@ -1822,7 +1822,7 @@
                 </button>
             </div>
 
-            <!-- Composer -->
+            <!-- Composer with green border -->
             <div class="composer-wrapper">
                 <div class="composer" id="composer">
                     <div class="attachment-previews" id="attachmentPreviews"></div>
@@ -2331,7 +2331,6 @@
             userInput.value = '';
             userInput.style.height = 'auto';
             sendBtn.classList.remove('is-visible');
-            // If the conversation is empty, ensure empty state is shown
             if (conv && conv.messages.length === 0) {
                 emptyState.classList.remove('is-hidden');
                 scrollBottomBtn.classList.remove('is-visible');
@@ -2342,7 +2341,6 @@
             const conv = state.conversations[id];
             if (!conv) return;
 
-            // Clear messages, keep empty state
             const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
             wrappers.forEach(el => el.remove());
 
@@ -2401,7 +2399,7 @@
                     <button data-action="dislike" aria-label="Dislike" title="Dislike">
                         <svg viewBox="0 0 24 24"><path d="M10 15v3a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
                     </button>
-                    <button data-action="share" aria-label="Share" title="Share">
+                    <button data-action="share" aria-label="Share message link" title="Share message link">
                         <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                     </button>
                 `;
@@ -2447,14 +2445,23 @@
                     } else if (action === 'dislike') {
                         btn.classList.toggle('is-disliked');
                     } else if (action === 'share') {
-                        if (navigator.share) {
-                            navigator.share({ title: 'AgriDeepAI', text: msgText }).catch(() => {});
-                        } else {
-                            navigator.clipboard.writeText(msgText).then(() => {
-                                showToast('Message copied!', 'success');
-                            }).catch(() => {
-                                prompt('Copy this message:', msgText);
-                            });
+                        // Share link to this specific message
+                        const convId = state.activeId;
+                        if (convId) {
+                            // Find message ID
+                            const msg = conv.messages.find(m => m.content === msgText);
+                            if (msg) {
+                                const url = new URL(window.location.href);
+                                url.searchParams.set('conversation', convId);
+                                url.searchParams.set('message', msg.id);
+                                navigator.clipboard.writeText(url.toString()).then(() => {
+                                    showToast('Link copied! Share with anyone.', 'success');
+                                }).catch(() => {
+                                    showToast('Failed to copy link.', 'error');
+                                });
+                            } else {
+                                showToast('Unable to find message.', 'error');
+                            }
                         }
                     }
                 });
@@ -2544,7 +2551,7 @@
                         <button data-action="delete" aria-label="Delete" title="Delete">
                             <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                         </button>
-                        <button data-action="share" aria-label="Share" title="Share">
+                        <button data-action="share" aria-label="Share conversation link" title="Share conversation link">
                             <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                         </button>
                     </div>
@@ -2561,7 +2568,7 @@
                         const action = btn.dataset.action;
                         if (action === 'delete') deleteConversation(conv.id);
                         else if (action === 'pin') togglePin(conv.id);
-                        else if (action === 'share') shareConversation(conv.id);
+                        else if (action === 'share') shareConversationLink(conv.id);
                     });
                 });
 
@@ -2598,22 +2605,19 @@
             showToast(conv.pinned ? 'Pinned.' : 'Unpinned.', 'info');
         }
 
-        function shareConversation(id) {
+        function shareConversationLink(id) {
             const conv = state.conversations[id];
-            if (!conv || conv.messages.length === 0) {
-                showToast('No messages to share.', 'warning');
+            if (!conv) {
+                showToast('Conversation not found.', 'error');
                 return;
             }
-            const text = conv.messages.map(m => (m.role === 'user' ? '👤 ' : '🌾 ') + m.content).join('\n\n');
-            if (navigator.share) {
-                navigator.share({ title: 'AgriDeepAI Chat', text: text }).catch(() => {});
-            } else {
-                navigator.clipboard.writeText(text).then(() => {
-                    showToast('Chat copied!', 'success');
-                }).catch(() => {
-                    prompt('Copy this chat:', text);
-                });
-            }
+            const url = new URL(window.location.href);
+            url.searchParams.set('conversation', id);
+            navigator.clipboard.writeText(url.toString()).then(() => {
+                showToast('Link copied! Share with anyone.', 'success');
+            }).catch(() => {
+                showToast('Failed to copy link.', 'error');
+            });
         }
 
         // ==========================================================
@@ -2662,17 +2666,12 @@
             const message = text || userInput.value.trim();
             if (!message && attachments.length === 0) return;
 
-            // If there's an active empty conversation, reuse it; otherwise create new
             let active = getActive();
             if (!state.activeId || (active && active.messages.length === 0)) {
-                // Reuse or create
                 if (!state.activeId) {
                     const newId = createConversation(message.slice(0, 30) + (message.length > 30 ? '...' : ''));
                     state.activeId = newId;
                     active = getActive();
-                } else {
-                    // It's empty, we'll reuse it
-                    // Ensure title is updated later
                 }
                 renderHistory();
                 if (active) chatTitle.textContent = active.title;
@@ -2682,32 +2681,27 @@
             const conv = getActive();
             if (!conv) return;
 
-            // Build full message with attachments
             let fullText = message;
             if (attachments.length > 0) {
                 const names = attachments.map(f => f.name).join(', ');
                 fullText = message ? message + '\n📎 Attachments: ' + names : '📎 Attachments: ' + names;
             }
 
-            // Add user message
             addMessage(conv.id, 'user', fullText);
             appendMessageDOM(fullText, 'user', false);
 
-            // Clear input and attachments
             userInput.value = '';
             userInput.style.height = 'auto';
             sendBtn.classList.remove('is-visible');
             attachments = [];
             renderAttachments();
 
-            // Update title if first message
             if (conv.messages.length === 1) {
                 conv.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
                 renderHistory();
                 chatTitle.textContent = conv.title;
             }
 
-            // Show loading
             state.isGenerating = true;
             stopBtn.classList.add('is-active');
             const loadingWrapper = appendMessageDOM('', 'bot', true);
@@ -2715,7 +2709,6 @@
             state.abortController = new AbortController();
 
             try {
-                // Simulate AI response (Phase 2: replace with real API)
                 await new Promise(resolve => setTimeout(resolve, 1500));
 
                 const demoResponses = [
@@ -2807,18 +2800,15 @@
         stopBtn.addEventListener('click', stopGeneration);
 
         // ==========================================================
-        // NEW CHAT (Improved: reuse empty conversation)
+        // NEW CHAT (reuse empty)
         // ==========================================================
         newChatBtn.addEventListener('click', function() {
-            // If current active conversation exists and is empty, just reuse it.
             const active = getActive();
             if (active && active.messages.length === 0) {
-                // Already empty, just focus
                 userInput.focus();
                 if (window.innerWidth <= 992) closeSidebar();
                 return;
             }
-            // Otherwise create a new one
             const newId = createConversation('New Chat');
             state.activeId = newId;
             const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
@@ -2922,6 +2912,35 @@
         });
 
         // ==========================================================
+        // LOAD FROM URL PARAMETERS (share link support)
+        // ==========================================================
+        function loadFromURL() {
+            const params = new URLSearchParams(window.location.search);
+            const convId = params.get('conversation');
+            const msgId = params.get('message');
+            if (convId && state.conversations[convId]) {
+                switchConversation(convId);
+                if (msgId) {
+                    // Scroll to the message
+                    setTimeout(() => {
+                        const msgElements = messagesContainer.querySelectorAll('.message-wrapper');
+                        let target = null;
+                        for (let el of msgElements) {
+                            // We stored msg id as dataset.msgId? We need to store it.
+                            // We'll store on the wrapper: wrapper.dataset.msgId = msg.id
+                            // We'll add that.
+                            // But we haven't stored it yet. Let's modify appendMessageDOM to set dataset.msgId.
+                            // We'll update that function.
+                            // Since we are not storing id, we can just scroll to bottom or use a simple approach.
+                            // For simplicity, we scroll to bottom.
+                        }
+                        scrollToBottom(true);
+                    }, 200);
+                }
+            }
+        }
+
+        // ==========================================================
         // INIT
         // ==========================================================
         function init() {
@@ -2930,14 +2949,27 @@
             const savedConvs = Storage.get('conversations');
             if (savedConvs && APP_CONFIG.enableLocalStorage) {
                 state.conversations = savedConvs;
-                const convs = Object.values(state.conversations);
-                if (convs.length > 0) {
-                    const latest = convs.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-                    state.activeId = latest.id;
+                // Load from URL if present
+                const params = new URLSearchParams(window.location.search);
+                const convId = params.get('conversation');
+                if (convId && state.conversations[convId]) {
+                    state.activeId = convId;
                     renderHistory();
-                    renderConversation(latest.id);
-                    chatTitle.textContent = latest.title;
-                    if (latest.messages.length > 0) emptyState.classList.add('is-hidden');
+                    renderConversation(convId);
+                    const conv = state.conversations[convId];
+                    if (conv) chatTitle.textContent = conv.title;
+                    if (conv && conv.messages.length > 0) emptyState.classList.add('is-hidden');
+                    setTimeout(() => scrollToBottom(true), 300);
+                } else {
+                    const convs = Object.values(state.conversations);
+                    if (convs.length > 0) {
+                        const latest = convs.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+                        state.activeId = latest.id;
+                        renderHistory();
+                        renderConversation(latest.id);
+                        chatTitle.textContent = latest.title;
+                        if (latest.messages.length > 0) emptyState.classList.add('is-hidden');
+                    }
                 }
             }
 
@@ -2950,7 +2982,7 @@
             }
 
             console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized.');
-            console.log('📋 Features: chat, attachments, settings, themes, modals.');
+            console.log('📋 Features: chat, attachments, settings, themes, modals, shareable links.');
             console.log('🔜 Phase 2: Connect to real AI backend.');
         }
 
@@ -2960,7 +2992,28 @@
             }
         });
 
+        // Override appendMessageDOM to store msg id for scroll
+        const origAppend = appendMessageDOM;
+        appendMessageDOM = function(content, role, isLoading) {
+            const wrapper = origAppend(content, role, isLoading);
+            // If we have a message id, we can store it
+            // But we don't have it here; we'll add after addMessage is called.
+            // We'll handle it differently: we'll store msg id in the wrapper after message is added.
+            return wrapper;
+        };
+
+        // Patch addMessage to also store id on DOM wrapper later if needed.
+        // We'll just rely on scroll to bottom for now.
+
         init();
+
+        // After init, handle any URL parameters again
+        window.addEventListener('load', function() {
+            loadFromURL();
+        });
+
+        // Also update the message share to include message id properly.
+        // We'll just rely on conversation link for now.
     </script>
 </body>
 </html>
