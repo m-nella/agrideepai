@@ -2977,7 +2977,7 @@
         }
 
         // ==========================================================
-        // SEND / STOP with single button
+        // SEND / STOP with single button (BACKEND INTEGRATION)
         // ==========================================================
         let attachments = [];
 
@@ -3033,53 +3033,55 @@
             state.abortController = new AbortController();
 
             try {
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                // Prepare conversation history for the backend
+                const history = conv.messages.slice(0, -1).map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                }));
 
-                const demoResponses = [
-                    "That's a great question about agriculture in Rwanda. Let me provide some insights...",
-                    "For livestock farming in Rwanda, there are several key considerations...",
-                    "Crop diseases can be managed effectively with early detection...",
-                    "Let me share some information about sustainable farming techniques...",
-                    "Agricultural challenges in Rwanda are often addressed through government programs..."
-                ];
-                const demo = demoResponses[Math.floor(Math.random() * demoResponses.length)];
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        history: history,
+                    }),
+                    signal: state.abortController.signal,
+                });
 
-                state.isStreaming = true;
-                let response = '';
-                const words = demo.split(' ');
-                for (let i = 0; i < words.length; i++) {
-                    if (state.abortController.signal.aborted) break;
-                    response += (i === 0 ? '' : ' ') + words[i];
-                    if (loadingWrapper) {
-                        const bubble = loadingWrapper.querySelector('.message-bubble');
-                        if (bubble) bubble.textContent = response + ' ▍';
-                    }
-                    await new Promise(r => setTimeout(r, 25 + Math.random() * 35));
-                }
-                state.isStreaming = false;
-
-                if (state.abortController.signal.aborted) {
-                    if (loadingWrapper) {
-                        const bubble = loadingWrapper.querySelector('.message-bubble');
-                        if (bubble) bubble.textContent = response + ' [stopped]';
-                    }
-                    addMessage(conv.id, 'bot', response + ' [stopped]');
-                } else {
-                    if (loadingWrapper) {
-                        const bubble = loadingWrapper.querySelector('.message-bubble');
-                        if (bubble) bubble.textContent = response;
-                        loadingWrapper.dataset.loading = 'false';
-                    }
-                    addMessage(conv.id, 'bot', response);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'API request failed');
                 }
 
-            } catch (error) {
-                showToast('Error generating response.', 'error');
+                const data = await response.json();
+                const aiResponse = data.response || 'Sorry, I could not generate a response.';
+
                 if (loadingWrapper) {
                     const bubble = loadingWrapper.querySelector('.message-bubble');
-                    if (bubble) bubble.textContent = 'Sorry, an error occurred. Please try again.';
+                    if (bubble) bubble.textContent = aiResponse;
+                    loadingWrapper.dataset.loading = 'false';
                 }
-                addMessage(conv.id, 'bot', 'Sorry, an error occurred. Please try again.');
+                addMessage(conv.id, 'bot', aiResponse);
+
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    // Generation was stopped
+                    if (loadingWrapper) {
+                        const bubble = loadingWrapper.querySelector('.message-bubble');
+                        if (bubble) bubble.textContent = 'Generation stopped.';
+                    }
+                    addMessage(conv.id, 'bot', 'Generation stopped.');
+                } else {
+                    showToast('Error: ' + error.message, 'error');
+                    if (loadingWrapper) {
+                        const bubble = loadingWrapper.querySelector('.message-bubble');
+                        if (bubble) bubble.textContent = 'Sorry, an error occurred. Please try again.';
+                    }
+                    addMessage(conv.id, 'bot', 'Sorry, an error occurred. Please try again.');
+                }
             }
 
             state.isGenerating = false;
@@ -3355,7 +3357,7 @@
 
             console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized.');
             console.log('📋 Features: chat, attachments, settings, themes, modals, shareable links.');
-            console.log('🔜 Phase 2: Connect to real AI backend.');
+            console.log('🔜 Phase 2: Connected to real AI backend.');
         }
 
         window.addEventListener('beforeunload', function() {
