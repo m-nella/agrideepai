@@ -8,17 +8,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, history } = req.body;
+    const { message, history, model, temperature, webSearchEnabled } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
     console.log('📩 Received message:', message);
+    console.log('⚙️  Model:', model || 'auto');
+    console.log('🌡️  Temperature:', temperature || 0.7);
+    console.log('🔍 Web search enabled:', webSearchEnabled !== false);
 
     // Web search
     let searchResults = '';
-    if (shouldPerformWebSearch(message)) {
+    if (webSearchEnabled !== false && shouldPerformWebSearch(message)) {
       if (process.env.SERPER_API_KEY) {
         searchResults = await performSerperSearch(message);
       } else if (process.env.TAVILY_API_KEY) {
@@ -39,7 +42,7 @@ Please use this information to provide a comprehensive, accurate answer.
 `;
     }
 
-    const response = await callAI(systemPrompt, userMessage, history);
+    const response = await callAI(systemPrompt, userMessage, history, model, temperature);
 
     return res.status(200).json({
       response: response,
@@ -55,11 +58,17 @@ Please use this information to provide a comprehensive, accurate answer.
 }
 
 // ==========================================================
-// SYSTEM PROMPT — HUMAN-LIKE, INTELLIGENT
+// SYSTEM PROMPT — PROFESSIONAL, NO REASONING EXPOSED
 // ==========================================================
 function getSystemPrompt() {
   return `
 You are AgriDeepAI, a warm, professional, and intelligent AI assistant created by Ornella Mutuyimana, a Rwandan national with a deep passion for agriculture, food security, and agri-tech innovation.
+
+## CRITICAL RULE — NEVER EXPOSE INTERNAL REASONING
+- NEVER show your thinking process, reasoning, or analysis steps.
+- NEVER output phrases like "Here's my thinking", "Let me analyze", "Step 1", "I need to consider", or any internal reasoning.
+- ONLY output the final, polished, well-structured answer directly.
+- If you find yourself writing internal reasoning, STOP and rewrite the response as a direct answer only.
 
 Your primary expertise is Agriculture and Livestock, but you are also a friendly conversationalist. You can:
 - Greet users warmly and naturally
@@ -91,15 +100,24 @@ You are an expert in all things Agriculture and Livestock. You can answer questi
 - Be concise, clear, and easy to understand
 - Always maintain a respectful and professional tone
 
+## Response Style:
+- **NEVER include any reasoning, analysis, or "thinking" steps.**
+- Use **bold** for emphasis and section headers.
+- Use bullet points or numbered lists for steps, facts, or comparisons.
+- Keep paragraphs short and conversational.
+- When giving a list of examples, present them in a clean bulleted list.
+- For file attachments: If a user attaches an image, politely explain that you cannot see images directly, and ask them to describe what's in the photo or explain what they need help with.
+- Always end with a friendly question to engage the user further.
+
 ## Important Note:
-You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture. Your goal is to be helpful, engaging, and knowledgeable while staying true to your agricultural expertise.
+You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture. Your goal is to be helpful, engaging, and knowledgeable while staying true to your agricultural expertise. Your responses should feel like a professional human expert, not a machine showing its work.
 `;
 }
 
 // ==========================================================
 // AI CALL — Unified with fallbacks
 // ==========================================================
-async function callAI(systemPrompt, userMessage, history) {
+async function callAI(systemPrompt, userMessage, history, preferredModel, temperature = 0.7) {
   const messages = [
     { role: 'system', content: systemPrompt }
   ];
@@ -119,13 +137,23 @@ async function callAI(systemPrompt, userMessage, history) {
   const groqKey = process.env.GROQ_API_KEY;
   console.log('🔑 Groq API Key exists:', !!groqKey);
 
+  const workingGroqModels = [
+    'groq/compound-mini',
+    'qwen/qwen3.6-27b',
+    'openai/gpt-oss-20b',
+    'openai/gpt-oss-120b'
+  ];
+
+  let groqModels = workingGroqModels;
+  if (preferredModel && preferredModel.startsWith('groq/')) {
+    if (!workingGroqModels.includes(preferredModel)) {
+      groqModels = [preferredModel, ...workingGroqModels];
+    } else {
+      groqModels = [preferredModel, ...workingGroqModels.filter(m => m !== preferredModel)];
+    }
+  }
+
   if (groqKey) {
-    const groqModels = [
-      'groq/compound-mini',
-      'qwen/qwen3.6-27b',
-      'openai/gpt-oss-20b',
-      'openai/gpt-oss-120b',
-    ];
     for (const model of groqModels) {
       try {
         console.log(`📡 Trying Groq model: ${model}`);
@@ -138,7 +166,7 @@ async function callAI(systemPrompt, userMessage, history) {
           body: JSON.stringify({
             model: model,
             messages: messages,
-            temperature: 0.7,
+            temperature: temperature,
             max_tokens: 1024,
           }),
         });
@@ -163,28 +191,36 @@ async function callAI(systemPrompt, userMessage, history) {
   const geminiKey = process.env.GOOGLE_API_KEY;
   console.log('🔑 Gemini API Key exists:', !!geminiKey);
 
+  const workingGeminiModels = [
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash'
+  ];
+
+  let geminiModels = workingGeminiModels;
+  if (preferredModel && preferredModel.startsWith('gemini-')) {
+    if (!workingGeminiModels.includes(preferredModel)) {
+      geminiModels = [preferredModel, ...workingGeminiModels];
+    } else {
+      geminiModels = [preferredModel, ...workingGeminiModels.filter(m => m !== preferredModel)];
+    }
+  }
+
   if (geminiKey) {
-    const geminiModels = [
-      'gemini-2.5-flash',
-      'gemini-2.5-pro',
-      'gemini-3.5-flash',
-      'gemini-3.6-flash',
-    ];
     for (const model of geminiModels) {
       try {
         console.log(`📡 Trying Gemini model: ${model}`);
         const conversationText = messages.map(m => `${m.role}: ${m.content}`).join('\n');
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: conversationText }] }],
-              generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-            }),
-          }
-        );
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: conversationText }] }],
+            generationConfig: { temperature: temperature, maxOutputTokens: 1024 },
+          }),
+        });
 
         if (response.ok) {
           const data = await response.json();
@@ -203,6 +239,30 @@ async function callAI(systemPrompt, userMessage, history) {
   // ==========================================================
   // 3. ULTIMATE FALLBACK
   // ==========================================================
+  if (groqKey) {
+    try {
+      console.log('📡 Ultimate fallback: trying groq/compound-mini');
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${groqKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'groq/compound-mini',
+          messages: messages,
+          temperature: temperature,
+          max_tokens: 1024,
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Ultimate fallback succeeded');
+        return data.choices[0].message.content;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   throw new Error('All AI providers failed. Please check API keys and model availability.');
 }
 
