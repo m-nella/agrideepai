@@ -3058,150 +3058,154 @@
         }
 
         // ==========================================================
-        // SEND MESSAGE
-        // ==========================================================
-        let attachments = [];
+// SEND MESSAGE
+// ==========================================================
+let attachments = [];
 
-        async function sendMessage(text) {
-            if (state.isGenerating) return;
-            const message = text || userInput.value.trim();
-            if (!message && attachments.length === 0) return;
+async function sendMessage(text) {
+    if (state.isGenerating) return;
+    const message = text || userInput.value.trim();
+    if (!message && attachments.length === 0) return;
 
-            let active = getActive();
-            if (!state.activeId || (active && active.messages.length === 0)) {
-                if (!state.activeId) {
-                    const newId = createConversation(message.slice(0, 30) + (message.length > 30 ? '...' : ''));
-                    state.activeId = newId;
-                    active = getActive();
-                }
-                renderHistory();
-                if (active) chatTitle.textContent = active.title;
-                emptyState.classList.add('is-hidden');
-            }
+    let active = getActive();
+    if (!state.activeId || (active && active.messages.length === 0)) {
+        if (!state.activeId) {
+            const newId = createConversation(message.slice(0, 30) + (message.length > 30 ? '...' : ''));
+            state.activeId = newId;
+            active = getActive();
+        }
+        renderHistory();
+        if (active) chatTitle.textContent = active.title;
+        emptyState.classList.add('is-hidden');
+    }
 
-            const conv = getActive();
-            if (!conv) return;
+    const conv = getActive();
+    if (!conv) return;
 
-            let fullText = message;
-            if (attachments.length > 0) {
-                const names = attachments.map(f => f.name).join(', ');
-                fullText = message ? message + '\n📎 Attachments: ' + names : '📎 Attachments: ' + names;
-            }
+    let fullText = message;
+    let hasAttachments = attachments.length > 0;
+    let attachmentNames = [];
 
-            // Add user message
-            const userMsg = addMessage(conv.id, 'user', fullText);
-            appendUserMessage(fullText);
+    if (hasAttachments) {
+        attachmentNames = attachments.map(f => f.name);
+        // For images, note that they were attached but we can't process them
+        const hasImages = attachments.some(f => f.type.startsWith('image/'));
+        const hasDocuments = attachments.some(f => !f.type.startsWith('image/'));
+        let attachmentNote = '📎 Attachments: ' + attachmentNames.join(', ');
+        if (hasImages) {
+            attachmentNote += '\n\n⚠️ Note: I cannot see images directly. If you need help with something in the image, please describe what you see or explain your question.';
+        }
+        if (hasDocuments) {
+            attachmentNote += '\n\n📄 For document files, please describe the content or question, as I don't have direct file access.';
+        }
+        fullText = message ? message + '\n\n' + attachmentNote : attachmentNote;
+    }
 
-            userInput.value = '';
-            userInput.style.height = 'auto';
-            sendStopBtn.classList.remove('is-active');
-            attachments = [];
-            renderAttachments();
+    // Add user message
+    const userMsg = addMessage(conv.id, 'user', fullText);
+    appendUserMessage(fullText);
 
-            if (conv.messages.length === 1) {
-                conv.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
-                renderHistory();
-                chatTitle.textContent = conv.title;
-            }
+    userInput.value = '';
+    userInput.style.height = 'auto';
+    sendStopBtn.classList.remove('is-active');
+    attachments = [];
+    renderAttachments();
 
-            // Force scroll to bottom
-            scrollToBottom(true);
+    if (conv.messages.length === 1) {
+        conv.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
+        renderHistory();
+        chatTitle.textContent = conv.title;
+    }
 
-            state.isGenerating = true;
-            sendStopBtn.classList.add('is-generating');
-            sendStopBtn.disabled = false;
-            sendStopBtn.setAttribute('aria-label', 'Stop generating');
-            sendStopBtn.title = 'Stop generating';
+    scrollToBottom(true);
 
-            // Create assistant message with loading state
-            const assistantMsgId = genId();
-            const loadingWrapper = appendAssistantMessage(assistantMsgId, '', true);
+    state.isGenerating = true;
+    sendStopBtn.classList.add('is-generating');
+    sendStopBtn.disabled = false;
+    sendStopBtn.setAttribute('aria-label', 'Stop generating');
+    sendStopBtn.title = 'Stop generating';
 
-            state.abortController = new AbortController();
+    const assistantMsgId = genId();
+    const loadingWrapper = appendAssistantMessage(assistantMsgId, '', true);
 
-            try {
-                const history = conv.messages.slice(0, -1).map(msg => ({
-                    role: msg.role,
-                    content: msg.content
-                }));
+    state.abortController = new AbortController();
 
-                const response = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: message,
-                        history: history,
-                        model: state.selectedModel,
-                        temperature: state.temperature,
-                        webSearchEnabled: state.webSearchEnabled,
-                    }),
-                    signal: state.abortController.signal,
-                });
+    try {
+        const history = conv.messages.slice(0, -1).map(msg => ({
+            role: msg.role,
+            content: msg.content
+        }));
 
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || 'API request failed');
-                }
+        // Clean message for API (remove attachment notes that we added)
+        const cleanMessage = message;
 
-                const data = await response.json();
-                const aiResponse = data.response || 'Sorry, I could not generate a response.';
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: cleanMessage,
+                history: history,
+                model: state.selectedModel,
+                temperature: state.temperature,
+                webSearchEnabled: state.webSearchEnabled,
+            }),
+            signal: state.abortController.signal,
+        });
 
-                // Remove loading wrapper
-                if (loadingWrapper) loadingWrapper.remove();
-
-                // Add final assistant message
-                const botMsg = addMessage(conv.id, 'assistant', aiResponse);
-                appendAssistantMessage(botMsg.id, aiResponse, false);
-
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    if (loadingWrapper) {
-                        const bubble = loadingWrapper.querySelector('.message-bubble');
-                        if (bubble) bubble.innerHTML = '<span style="color:var(--text-muted);">Generation stopped.</span>';
-                        loadingWrapper.dataset.loading = 'false';
-                        // Remove actions if any
-                        const actions = loadingWrapper.querySelector('.message-actions');
-                        if (actions) actions.remove();
-                    }
-                    addMessage(conv.id, 'assistant', 'Generation stopped.');
-                } else {
-                    showToast('Error: ' + error.message, 'error');
-                    if (loadingWrapper) {
-                        const bubble = loadingWrapper.querySelector('.message-bubble');
-                        if (bubble) bubble.innerHTML = '<span style="color:var(--error);">Sorry, an error occurred. Please try again.</span>';
-                        loadingWrapper.dataset.loading = 'false';
-                        const actions = loadingWrapper.querySelector('.message-actions');
-                        if (actions) actions.remove();
-                    }
-                    addMessage(conv.id, 'assistant', 'Sorry, an error occurred. Please try again.');
-                }
-            }
-
-            state.isGenerating = false;
-            state.isStreaming = false;
-            sendStopBtn.classList.remove('is-generating');
-            sendStopBtn.setAttribute('aria-label', 'Send message');
-            sendStopBtn.title = 'Send message';
-            sendStopBtn.disabled = true;
-
-            renderHistory();
-            updateScrollBtn();
-            if (!state.userScrolledUp) scrollToBottom(true);
-            userInput.focus();
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'API request failed');
         }
 
-        function stopGeneration() {
-            if (state.isGenerating && state.abortController) {
-                state.abortController.abort();
-                state.isGenerating = false;
-                state.isStreaming = false;
-                sendStopBtn.classList.remove('is-generating');
-                sendStopBtn.setAttribute('aria-label', 'Send message');
-                sendStopBtn.title = 'Send message';
-                sendStopBtn.disabled = true;
-                showToast('Generation stopped.', 'info');
-            }
+        const data = await response.json();
+        let aiResponse = data.response || 'Sorry, I could not generate a response.';
+
+        // If there were attachments, add a note at the beginning of the response
+        if (hasAttachments) {
+            const fileList = attachmentNames.join(', ');
+            aiResponse = `📎 You attached: ${fileList}\n\n` + aiResponse;
         }
+
+        if (loadingWrapper) loadingWrapper.remove();
+
+        const botMsg = addMessage(conv.id, 'assistant', aiResponse);
+        appendAssistantMessage(botMsg.id, aiResponse, false);
+
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            if (loadingWrapper) {
+                const bubble = loadingWrapper.querySelector('.message-bubble');
+                if (bubble) bubble.innerHTML = '<span style="color:var(--text-muted);">Generation stopped.</span>';
+                loadingWrapper.dataset.loading = 'false';
+                const actions = loadingWrapper.querySelector('.message-actions');
+                if (actions) actions.remove();
+            }
+            addMessage(conv.id, 'assistant', 'Generation stopped.');
+        } else {
+            showToast('Error: ' + error.message, 'error');
+            if (loadingWrapper) {
+                const bubble = loadingWrapper.querySelector('.message-bubble');
+                if (bubble) bubble.innerHTML = '<span style="color:var(--error);">Sorry, an error occurred. Please try again.</span>';
+                loadingWrapper.dataset.loading = 'false';
+                const actions = loadingWrapper.querySelector('.message-actions');
+                if (actions) actions.remove();
+            }
+            addMessage(conv.id, 'assistant', 'Sorry, an error occurred. Please try again.');
+        }
+    }
+
+    state.isGenerating = false;
+    state.isStreaming = false;
+    sendStopBtn.classList.remove('is-generating');
+    sendStopBtn.setAttribute('aria-label', 'Send message');
+    sendStopBtn.title = 'Send message';
+    sendStopBtn.disabled = true;
+
+    renderHistory();
+    updateScrollBtn();
+    if (!state.userScrolledUp) scrollToBottom(true);
+    userInput.focus();
+}
 
         // ==========================================================
         // INPUT HANDLING
