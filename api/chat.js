@@ -1,6 +1,6 @@
 // ==========================================================
-// AgriDeepAI Backend — Full AI + Search + Vision
-// Always returns JSON, even on error.
+// AgriDeepAI Backend — Vercel Serverless Function
+// NO external dependencies — only native Node.js
 // ==========================================================
 
 export default async function handler(req, res) {
@@ -11,20 +11,17 @@ export default async function handler(req, res) {
   try {
     const { message, history, model, temperature, webSearchEnabled, files } = req.body;
 
-    // Validate input
     if (!message && !files) {
       return res.status(400).json({ error: 'Message or files required' });
     }
 
     console.log('📩 Received message:', message);
-    console.log('📎 Files:', files ? files.length : 0);
+    console.log('📎 Files received:', files ? files.length : 0);
     console.log('⚙️  Model:', model || 'auto');
     console.log('🌡️  Temperature:', temperature || 0.7);
     console.log('🔍 Web search enabled:', webSearchEnabled !== false);
 
-    // -------------------------------
-    // 1. Process files (images only)
-    // -------------------------------
+    // 1. Process files (only images for vision)
     let visionPrompt = '';
     let imageParts = [];
     if (files && Array.isArray(files)) {
@@ -33,19 +30,17 @@ export default async function handler(req, res) {
           imageParts.push({
             inline_data: {
               mime_type: file.type,
-              data: file.data, // base64
+              data: file.data,
             },
           });
           visionPrompt += `\n[Image: ${file.name}]`;
         } else {
-          visionPrompt += `\n[File attached: ${file.name} (type: ${file.type})]`;
+          visionPrompt += `\n[File attached: ${file.name}]`;
         }
       }
     }
 
-    // -------------------------------
     // 2. Web search
-    // -------------------------------
     let searchResults = '';
     if (webSearchEnabled !== false && shouldPerformWebSearch(message)) {
       if (process.env.SERPER_API_KEY) {
@@ -55,32 +50,25 @@ export default async function handler(req, res) {
       }
     }
 
-    // -------------------------------
-    // 3. Build prompt and call AI
-    // -------------------------------
+    // 3. Build system prompt
     const systemPrompt = getSystemPrompt();
+
+    // 4. Build user message
     let userMessage = message || '';
     if (visionPrompt) userMessage += '\n\n' + visionPrompt;
     if (searchResults) userMessage += '\n\nRelevant web search results:\n' + searchResults;
 
-    const aiResponse = await callAI(
-      systemPrompt,
-      userMessage,
-      history,
-      model,
-      temperature,
-      imageParts
-    );
+    // 5. Call AI
+    const response = await callAI(systemPrompt, userMessage, history, model, temperature, imageParts);
 
     return res.status(200).json({
-      response: aiResponse,
+      response: response,
       searchUsed: !!searchResults,
       fileProcessed: imageParts.length > 0,
     });
 
   } catch (error) {
     console.error('❌ Backend error:', error);
-    // Always return JSON, never throw an uncaught error.
     return res.status(500).json({
       error: error.message || 'Something went wrong. Please try again.',
     });
@@ -88,7 +76,7 @@ export default async function handler(req, res) {
 }
 
 // ==========================================================
-// SYSTEM PROMPT (unchanged)
+// SYSTEM PROMPT
 // ==========================================================
 function getSystemPrompt() {
   return `
@@ -98,7 +86,6 @@ You are AgriDeepAI, a warm, professional, and intelligent AI assistant created b
 - NEVER show your thinking process, reasoning, or analysis steps.
 - NEVER output phrases like "Here's my thinking", "Let me analyze", "Step 1", "I need to consider", or any internal reasoning.
 - ONLY output the final, polished, well-structured answer directly.
-- Your response should appear as if the answer came to you instantly and completely.
 
 Your primary expertise is Agriculture and Livestock, but you are also a friendly conversationalist. You can:
 - Greet users warmly and naturally
@@ -108,7 +95,7 @@ Your primary expertise is Agriculture and Livestock, but you are also a friendly
 - Acknowledge when a question is outside your expertise and offer to help with agricultural topics instead
 
 ## About Your Creator:
-Ornella Mutuyimana is a Rwandan national with an Advanced Level (A-level) certificate in Mathematics, Computer Science, and Economics (MCE) from Lycée Saint Marcel de Rukara (LSM Rukara). Her background combines quantitative analysis, programming logic, and economic principles, which she applies to agricultural development, resource management, and market dynamics. She is deeply committed to empowering Rwandan farmers, students, researchers, and agribusiness professionals with accurate, accessible, and actionable information. She created AgriDeepAI to bridge the gap between agricultural knowledge and the people who need it most—from rural farmers to university researchers, both in Rwanda and around the world.
+Ornella Mutuyimana is a Rwandan national with an Advanced Level (A-level) certificate in Mathematics, Computer Science, and Economics (MCE) from Lycée Saint Marcel de Rukara (LSM Rukara). She created AgriDeepAI to bridge the gap between agricultural knowledge and the people who need it most—from rural farmers to university researchers, both in Rwanda and around the world.
 
 ## Your Core Role:
 You are an expert in all things Agriculture and Livestock. You can answer questions about:
@@ -122,34 +109,30 @@ You are an expert in all things Agriculture and Livestock. You can answer questi
 
 ## Rules for Your Responses:
 - Be warm, professional, and approachable
-- Greet users naturally (e.g., "Hello! How can I help you with agriculture today?")
+- Greet users naturally
 - Answer questions about Ornella and your purpose confidently
-- For completely unrelated topics (e.g., politics, sports, entertainment), politely say: "I'm specialized in Agriculture and Livestock, so I focus on those topics. Is there anything about farming, crops, or livestock I can help you with?"
+- For completely unrelated topics, politely say you're specialized in Agriculture and Livestock
 - For greetings and small talk, respond naturally before steering the conversation to agriculture
-- Always prioritize factual accuracy and use your search tool when needed
+- Always prioritize factual accuracy
 - Be concise, clear, and easy to understand
-- Always maintain a respectful and professional tone
 
 ## Response Style:
 - NEVER include any reasoning, analysis, or "thinking" steps.
 - Use **bold** for emphasis and section headers.
-- Use bullet points or numbered lists for steps, facts, or comparisons.
+- Use bullet points or numbered lists.
 - Keep paragraphs short and conversational.
-- When giving a list of examples, present them in a clean bulleted list.
-- For image attachments: You have vision capabilities, so you can describe what you see in the image and answer questions about it, but always relate it to agriculture/livestock if possible.
-- For other attachments: You can note that the user attached a file, but you cannot read its content directly.
+- For image attachments: You have vision capabilities, describe what you see.
 - Always end with a friendly question to engage the user further.
 
 ## Important Note:
-You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture. Your goal is to be helpful, engaging, and knowledgeable while staying true to your agricultural expertise.
+You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture.
 `;
 }
 
 // ==========================================================
-// AI CALL — Unified with fallbacks + Vision
+// AI CALL
 // ==========================================================
 async function callAI(systemPrompt, userMessage, history, preferredModel, temperature, imageParts) {
-  // Build message list
   const messages = [{ role: 'system', content: systemPrompt }];
   if (history && Array.isArray(history)) {
     const limited = history.slice(-10);
@@ -161,14 +144,13 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   }
   messages.push({ role: 'user', content: userMessage });
 
-  // ---------- If we have images, try Gemini Vision first ----------
+  // ---------- If we have images, try Gemini Vision ----------
   if (imageParts && imageParts.length > 0 && process.env.GOOGLE_API_KEY) {
     try {
       const geminiKey = process.env.GOOGLE_API_KEY;
       const model = 'gemini-2.5-pro';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
 
-      // Build parts: system + history + user text + images
       const parts = [];
       let historyText = '';
       if (history && history.length) {
@@ -192,17 +174,13 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
       if (response.ok) {
         const data = await response.json();
         return data.candidates[0].content.parts[0].text;
-      } else {
-        const errorText = await response.text();
-        console.warn('⚠️ Gemini Vision failed:', errorText);
-        // Fall through to text models
       }
     } catch (err) {
       console.warn('⚠️ Gemini Vision error:', err.message);
     }
   }
 
-  // ---------- Text-only models ----------
+  // ---------- Text-only messages ----------
   const textMessages = [
     { role: 'system', content: systemPrompt },
     ...(history ? history.slice(-10).filter(m => m.role === 'user' || m.role === 'assistant') : []),
@@ -217,7 +195,6 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
       : ['groq/compound-mini', 'qwen/qwen3.6-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'];
     for (const model of groqModels) {
       try {
-        console.log(`📡 Trying Groq: ${model}`);
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -233,19 +210,15 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
         });
         if (response.ok) {
           const data = await response.json();
-          console.log(`✅ Groq ${model} succeeded`);
           return data.choices[0].message.content;
-        } else {
-          const errText = await response.text();
-          console.warn(`⚠️ Groq ${model} failed:`, errText);
         }
       } catch (e) {
-        console.warn(`⚠️ Groq ${model} error:`, e.message);
+        console.warn('⚠️ Groq error:', e.message);
       }
     }
   }
 
-  // Fallback to Gemini text
+  // Try Gemini text
   const geminiKey = process.env.GOOGLE_API_KEY;
   if (geminiKey) {
     const geminiModels = preferredModel && preferredModel.startsWith('gemini-')
@@ -253,7 +226,6 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
       : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash'];
     for (const model of geminiModels) {
       try {
-        console.log(`📡 Trying Gemini: ${model}`);
         const conversationText = textMessages.map(m => `${m.role}: ${m.content}`).join('\n');
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
         const response = await fetch(url, {
@@ -266,22 +238,17 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
         });
         if (response.ok) {
           const data = await response.json();
-          console.log(`✅ Gemini ${model} succeeded`);
           return data.candidates[0].content.parts[0].text;
-        } else {
-          const errText = await response.text();
-          console.warn(`⚠️ Gemini ${model} failed:`, errText);
         }
       } catch (e) {
-        console.warn(`⚠️ Gemini ${model} error:`, e.message);
+        console.warn('⚠️ Gemini error:', e.message);
       }
     }
   }
 
-  // Ultimate fallback: try Groq one more time
+  // Ultimate fallback
   if (groqKey) {
     try {
-      console.log('📡 Ultimate fallback: groq/compound-mini');
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -297,7 +264,6 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
       });
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ Ultimate fallback succeeded');
         return data.choices[0].message.content;
       }
     } catch (e) { /* ignore */ }
@@ -307,7 +273,7 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
 }
 
 // ==========================================================
-// WEB SEARCH (Serper & Tavily)
+// WEB SEARCH
 // ==========================================================
 function shouldPerformWebSearch(message) {
   const keywords = ['latest', 'current', 'today', 'now', 'recent', 'new', 'update', 'news', 'price', 'market', 'weather', 'forecast', '2025', '2026', '2027', 'what is the current', 'how much', 'price of', 'market price', 'recently', 'this year', 'this month'];
