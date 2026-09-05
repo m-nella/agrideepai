@@ -2127,6 +2127,8 @@
     JAVASCRIPT
     ========================================================== -->
     <script>
+        console.log('🚀 AgriDeepAI script started.');
+
         // ==========================================================
         // CONFIGURATION
         // ==========================================================
@@ -2182,6 +2184,7 @@
             webSearchEnabled: true,
             userScrolledUp: false,
             isAuthenticated: false,
+            dropdownOpen: false,
         };
 
         // ==========================================================
@@ -2328,10 +2331,16 @@
         // ==========================================================
         // MODAL HELPERS
         // ==========================================================
-        function openModal(modal) { modal.classList.add('is-active'); }
-        function closeModal(modal) { modal.classList.remove('is-active'); }
+        function openModal(modal) {
+            if (modal) modal.classList.add('is-active');
+        }
+
+        function closeModal(modal) {
+            if (modal) modal.classList.remove('is-active');
+        }
 
         function openShareModal(title, desc, link, note = 'Anyone with the link can view this content.') {
+            if (!shareModal) return;
             shareModalTitle.textContent = title;
             shareModalDesc.textContent = desc;
             shareLinkInput.value = link;
@@ -2341,6 +2350,7 @@
         }
 
         function openConfirmModal(title, message, onConfirm) {
+            if (!confirmModal) return;
             confirmTitle.textContent = title;
             confirmMessage.textContent = message;
             confirmModal._onConfirm = onConfirm || null;
@@ -2387,12 +2397,12 @@
                 avatarDisplay.textContent = name.charAt(0).toUpperCase();
                 userNameDisplay.textContent = name;
                 userSubDisplay.textContent = user.email || 'signed in';
-                settingsIcon.style.display = 'block';
+                if (settingsIcon) settingsIcon.style.display = 'block';
             } else {
                 avatarDisplay.textContent = '👤';
                 userNameDisplay.textContent = 'Sign In';
                 userSubDisplay.textContent = 'Click to sign in';
-                settingsIcon.style.display = 'none';
+                if (settingsIcon) settingsIcon.style.display = 'none';
             }
         }
 
@@ -2420,13 +2430,13 @@
                     };
                 }
                 state.conversations = convs;
-                renderHistory();
+                if (typeof renderHistory === 'function') renderHistory();
                 const ids = Object.keys(convs);
                 if (ids.length > 0) {
                     const latest = ids.sort((a, b) => new Date(convs[b].updatedAt) - new Date(convs[a].updatedAt))[0];
-                    switchConversation(latest);
+                    if (typeof switchConversation === 'function') switchConversation(latest);
                 } else {
-                    newChat();
+                    if (typeof newChat === 'function') newChat();
                 }
             } catch (e) {
                 console.warn('⚠️ Error loading conversations:', e.message);
@@ -2484,14 +2494,14 @@
                 if (data.user && data.user.confirmation_sent_at) {
                     showToast('Verification email sent. Please check your inbox.', 'success');
                     authMode = 'confirm';
-                    authModalTitle.textContent = 'Confirm Email';
-                    authModalDesc.textContent = 'Enter the confirmation code sent to your email.';
-                    authSubmitBtn.textContent = 'Confirm';
-                    authSwitchBtn.style.display = 'none';
-                    authNameField.style.display = 'none';
-                    authConfirmField.style.display = 'none';
-                    authCodeField.style.display = 'block';
-                    authError.classList.remove('is-visible');
+                    if (authModalTitle) authModalTitle.textContent = 'Confirm Email';
+                    if (authModalDesc) authModalDesc.textContent = 'Enter the confirmation code sent to your email.';
+                    if (authSubmitBtn) authSubmitBtn.textContent = 'Confirm';
+                    if (authSwitchBtn) authSwitchBtn.style.display = 'none';
+                    if (authNameField) authNameField.style.display = 'none';
+                    if (authConfirmField) authConfirmField.style.display = 'none';
+                    if (authCodeField) authCodeField.style.display = 'block';
+                    if (authError) authError.classList.remove('is-visible');
                     return true;
                 }
                 return true;
@@ -2571,9 +2581,9 @@
                 state.activeId = null;
                 const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
                 wrappers.forEach(el => el.remove());
-                emptyState.classList.remove('is-hidden');
-                chatTitle.textContent = APP_CONFIG.name;
-                renderHistory();
+                if (emptyState) emptyState.classList.remove('is-hidden');
+                if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
+                if (typeof renderHistory === 'function') renderHistory();
                 showToast('Logged out.', 'info');
                 closeDropdown();
                 return;
@@ -2587,9 +2597,9 @@
                 updateUIForUser(null);
                 const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
                 wrappers.forEach(el => el.remove());
-                emptyState.classList.remove('is-hidden');
-                chatTitle.textContent = APP_CONFIG.name;
-                renderHistory();
+                if (emptyState) emptyState.classList.remove('is-hidden');
+                if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
+                if (typeof renderHistory === 'function') renderHistory();
                 showToast('Logged out.', 'info');
                 closeDropdown();
             } catch (e) {
@@ -2605,38 +2615,38 @@
 
         function openAuthModal(mode = 'signin') {
             authMode = mode;
-            authError.classList.remove('is-visible');
-            authName.value = '';
-            authEmail.value = '';
-            authPassword.value = '';
-            authConfirmPassword.value = '';
-            authCode.value = '';
-            authNameField.style.display = 'none';
-            authConfirmField.style.display = 'none';
-            authCodeField.style.display = 'none';
-            authSwitchBtn.style.display = 'block';
+            if (authError) authError.classList.remove('is-visible');
+            if (authName) authName.value = '';
+            if (authEmail) authEmail.value = '';
+            if (authPassword) authPassword.value = '';
+            if (authConfirmPassword) authConfirmPassword.value = '';
+            if (authCode) authCode.value = '';
+            if (authNameField) authNameField.style.display = 'none';
+            if (authConfirmField) authConfirmField.style.display = 'none';
+            if (authCodeField) authCodeField.style.display = 'none';
+            if (authSwitchBtn) authSwitchBtn.style.display = 'block';
             if (mode === 'signin') {
-                authModalTitle.textContent = 'Sign In';
-                authModalDesc.textContent = 'Sign in to save your chats across devices.';
-                authSubmitBtn.textContent = 'Sign In';
-                authSwitchBtn.textContent = 'Create Account';
-                authNameField.style.display = 'none';
-                authConfirmField.style.display = 'none';
+                if (authModalTitle) authModalTitle.textContent = 'Sign In';
+                if (authModalDesc) authModalDesc.textContent = 'Sign in to save your chats across devices.';
+                if (authSubmitBtn) authSubmitBtn.textContent = 'Sign In';
+                if (authSwitchBtn) authSwitchBtn.textContent = 'Create Account';
+                if (authNameField) authNameField.style.display = 'none';
+                if (authConfirmField) authConfirmField.style.display = 'none';
             } else if (mode === 'signup') {
-                authModalTitle.textContent = 'Create Account';
-                authModalDesc.textContent = 'Join AgriDeepAI to save your chats.';
-                authSubmitBtn.textContent = 'Sign Up';
-                authSwitchBtn.textContent = 'Already have an account? Sign In';
-                authNameField.style.display = 'block';
-                authConfirmField.style.display = 'block';
+                if (authModalTitle) authModalTitle.textContent = 'Create Account';
+                if (authModalDesc) authModalDesc.textContent = 'Join AgriDeepAI to save your chats.';
+                if (authSubmitBtn) authSubmitBtn.textContent = 'Sign Up';
+                if (authSwitchBtn) authSwitchBtn.textContent = 'Already have an account? Sign In';
+                if (authNameField) authNameField.style.display = 'block';
+                if (authConfirmField) authConfirmField.style.display = 'block';
             } else if (mode === 'confirm') {
-                authModalTitle.textContent = 'Confirm Email';
-                authModalDesc.textContent = 'Enter the confirmation code sent to your email.';
-                authSubmitBtn.textContent = 'Confirm';
-                authSwitchBtn.style.display = 'none';
-                authNameField.style.display = 'none';
-                authConfirmField.style.display = 'none';
-                authCodeField.style.display = 'block';
+                if (authModalTitle) authModalTitle.textContent = 'Confirm Email';
+                if (authModalDesc) authModalDesc.textContent = 'Enter the confirmation code sent to your email.';
+                if (authSubmitBtn) authSubmitBtn.textContent = 'Confirm';
+                if (authSwitchBtn) authSwitchBtn.style.display = 'none';
+                if (authNameField) authNameField.style.display = 'none';
+                if (authConfirmField) authConfirmField.style.display = 'none';
+                if (authCodeField) authCodeField.style.display = 'block';
             }
             openModal(authModal);
         }
@@ -2644,187 +2654,207 @@
         // ==========================================================
         // AUTH BUTTON & DROPDOWN
         // ==========================================================
-        authBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            if (state.isAuthenticated) {
-                if (dropdownOpen) closeDropdown();
-                else openDropdown();
-            } else {
-                openAuthModal('signin');
-            }
-        });
-
-        let dropdownOpen = false;
+        if (authBtn) {
+            authBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (state.isAuthenticated) {
+                    if (state.dropdownOpen) closeDropdown();
+                    else openDropdown();
+                } else {
+                    openAuthModal('signin');
+                }
+            });
+        }
 
         function openDropdown() {
-            dropdownOpen = true;
-            accountDropdown.classList.add('is-open');
+            state.dropdownOpen = true;
+            if (accountDropdown) accountDropdown.classList.add('is-open');
         }
 
         function closeDropdown() {
-            dropdownOpen = false;
-            accountDropdown.classList.remove('is-open');
+            state.dropdownOpen = false;
+            if (accountDropdown) accountDropdown.classList.remove('is-open');
         }
 
         document.addEventListener('click', function(e) {
-            if (dropdownOpen && !accountDropdown.contains(e.target) && e.target !== authBtn) {
+            if (state.dropdownOpen && accountDropdown && !accountDropdown.contains(e.target) && e.target !== authBtn) {
                 closeDropdown();
             }
         });
 
-        accountDropdown.querySelectorAll('.dropdown-item').forEach(item => {
-            item.addEventListener('click', function(e) {
-                const action = this.dataset.action;
-                closeDropdown();
-                if (!state.isAuthenticated) {
-                    showToast('Please sign in first.', 'warning');
+        if (accountDropdown) {
+            accountDropdown.querySelectorAll('.dropdown-item').forEach(item => {
+                item.addEventListener('click', function(e) {
+                    const action = this.dataset.action;
+                    closeDropdown();
+                    if (!state.isAuthenticated) {
+                        showToast('Please sign in first.', 'warning');
+                        openAuthModal('signin');
+                        return;
+                    }
+                    switch (action) {
+                        case 'profile':
+                            if (state.user) {
+                                if (profileName) profileName.value = state.user.user_metadata?.full_name || state.user.email || '';
+                                if (profileEmail) profileEmail.value = state.user.email || '';
+                                openModal(profileModal);
+                            }
+                            break;
+                        case 'account':
+                            openModal(accountSettingsModal);
+                            break;
+                        case 'settings':
+                            openModal(settingsModal);
+                            break;
+                        case 'logout':
+                            openConfirmModal('Logout', 'Logout from your account?', signOut);
+                            break;
+                    }
+                });
+            });
+        }
+
+        if (settingsIcon) {
+            settingsIcon.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (state.isAuthenticated) {
+                    if (state.dropdownOpen) closeDropdown();
+                    else openDropdown();
+                } else {
                     openAuthModal('signin');
-                    return;
-                }
-                switch (action) {
-                    case 'profile':
-                        if (state.user) {
-                            profileName.value = state.user.user_metadata?.full_name || state.user.email || '';
-                            profileEmail.value = state.user.email || '';
-                            openModal(profileModal);
-                        }
-                        break;
-                    case 'account':
-                        openModal(accountSettingsModal);
-                        break;
-                    case 'settings':
-                        openModal(settingsModal);
-                        break;
-                    case 'logout':
-                        openConfirmModal('Logout', 'Logout from your account?', signOut);
-                        break;
                 }
             });
-        });
-
-        settingsIcon.addEventListener('click', function(e) {
-            e.stopPropagation();
-            if (state.isAuthenticated) {
-                if (dropdownOpen) closeDropdown();
-                else openDropdown();
-            } else {
-                openAuthModal('signin');
-            }
-        });
+        }
 
         // ==========================================================
         // AUTH MODAL EVENTS
         // ==========================================================
-        authModalClose.addEventListener('click', () => closeModal(authModal));
-        authModal.addEventListener('click', function(e) {
+        if (authModalClose) authModalClose.addEventListener('click', () => closeModal(authModal));
+        if (authModal) authModal.addEventListener('click', function(e) {
             if (e.target === this) closeModal(authModal);
         });
 
-        authSwitchBtn.addEventListener('click', function() {
-            if (authMode === 'signin') {
-                openAuthModal('signup');
-            } else {
-                openAuthModal('signin');
-            }
-        });
+        if (authSwitchBtn) {
+            authSwitchBtn.addEventListener('click', function() {
+                if (authMode === 'signin') {
+                    openAuthModal('signup');
+                } else {
+                    openAuthModal('signin');
+                }
+            });
+        }
 
-        authGuestBtn.addEventListener('click', function() {
-            closeModal(authModal);
-            state.conversations = {};
-            state.activeId = null;
-            state.isAuthenticated = false;
-            state.user = null;
-            updateUIForUser(null);
-            const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
-            wrappers.forEach(el => el.remove());
-            emptyState.classList.remove('is-hidden');
-            chatTitle.textContent = APP_CONFIG.name;
-            renderHistory();
-            showToast('Continuing as guest. Chats will not be saved.', 'info');
-        });
+        if (authGuestBtn) {
+            authGuestBtn.addEventListener('click', function() {
+                closeModal(authModal);
+                state.conversations = {};
+                state.activeId = null;
+                state.isAuthenticated = false;
+                state.user = null;
+                updateUIForUser(null);
+                const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
+                wrappers.forEach(el => el.remove());
+                if (emptyState) emptyState.classList.remove('is-hidden');
+                if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
+                if (typeof renderHistory === 'function') renderHistory();
+                showToast('Continuing as guest. Chats will not be saved.', 'info');
+            });
+        }
 
-        authSubmitBtn.addEventListener('click', async function() {
-            const email = authEmail.value.trim();
-            const password = authPassword.value.trim();
-            if (!email || !password) {
-                authError.textContent = 'Please fill in all fields.';
-                authError.classList.add('is-visible');
-                return;
-            }
-            if (authMode === 'signin') {
-                await signIn(email, password);
-            } else if (authMode === 'signup') {
-                const name = authName.value.trim() || 'User';
-                const confirm = authConfirmPassword.value.trim();
-                if (password !== confirm) {
-                    authError.textContent = 'Passwords do not match.';
-                    authError.classList.add('is-visible');
+        if (authSubmitBtn) {
+            authSubmitBtn.addEventListener('click', async function() {
+                const email = authEmail.value.trim();
+                const password = authPassword.value.trim();
+                if (!email || !password) {
+                    if (authError) {
+                        authError.textContent = 'Please fill in all fields.';
+                        authError.classList.add('is-visible');
+                    }
                     return;
                 }
-                await signUp(email, password, name);
-            } else if (authMode === 'confirm') {
-                const code = authCode.value.trim();
-                if (!code) {
-                    authError.textContent = 'Please enter the confirmation code.';
-                    authError.classList.add('is-visible');
-                    return;
+                if (authMode === 'signin') {
+                    await signIn(email, password);
+                } else if (authMode === 'signup') {
+                    const name = authName.value.trim() || 'User';
+                    const confirm = authConfirmPassword.value.trim();
+                    if (password !== confirm) {
+                        if (authError) {
+                            authError.textContent = 'Passwords do not match.';
+                            authError.classList.add('is-visible');
+                        }
+                        return;
+                    }
+                    await signUp(email, password, name);
+                } else if (authMode === 'confirm') {
+                    const code = authCode.value.trim();
+                    if (!code) {
+                        if (authError) {
+                            authError.textContent = 'Please enter the confirmation code.';
+                            authError.classList.add('is-visible');
+                        }
+                        return;
+                    }
+                    await confirmEmail(code);
                 }
-                await confirmEmail(code);
-            }
-        });
+            });
+        }
 
         // ==========================================================
         // ACCOUNT SETTINGS
         // ==========================================================
-        accountSettingsCloseBtn.addEventListener('click', () => closeModal(accountSettingsModal));
-        accountSettingsCloseActionBtn.addEventListener('click', () => closeModal(accountSettingsModal));
-        accountSettingsModal.addEventListener('click', function(e) {
+        if (accountSettingsCloseBtn) accountSettingsCloseBtn.addEventListener('click', () => closeModal(accountSettingsModal));
+        if (accountSettingsCloseActionBtn) accountSettingsCloseActionBtn.addEventListener('click', () => closeModal(accountSettingsModal));
+        if (accountSettingsModal) accountSettingsModal.addEventListener('click', function(e) {
             if (e.target === this) closeModal(accountSettingsModal);
         });
 
-        changePassBtn.addEventListener('click', async function() {
-            const curr = currentPass.value;
-            const np = newPass.value;
-            const conf = confirmPass.value;
-            if (!curr || !np || !conf) {
-                showToast('Please fill all fields.', 'error');
-                return;
-            }
-            if (np !== conf) {
-                showToast('New passwords do not match.', 'error');
-                return;
-            }
-            if (!supabaseAvailable || !supabase || !state.user) {
-                showToast('Cannot change password in guest mode.', 'error');
-                return;
-            }
-            try {
-                const { error } = await supabase.auth.updateUser({ password: np });
-                if (error) {
-                    showToast('Error: ' + error.message, 'error');
-                } else {
-                    showToast('Password updated successfully!', 'success');
-                    currentPass.value = '';
-                    newPass.value = '';
-                    confirmPass.value = '';
-                    closeModal(accountSettingsModal);
+        if (changePassBtn) {
+            changePassBtn.addEventListener('click', async function() {
+                const curr = currentPass.value;
+                const np = newPass.value;
+                const conf = confirmPass.value;
+                if (!curr || !np || !conf) {
+                    showToast('Please fill all fields.', 'error');
+                    return;
                 }
-            } catch (e) {
-                showToast('Error: ' + e.message, 'error');
-            }
-        });
-
-        deleteAccountBtn.addEventListener('click', function() {
-            openConfirmModal('Delete Account', 'Are you sure you want to permanently delete your account? This cannot be undone.', async function() {
-                await deleteAccount();
-                closeModal(accountSettingsModal);
+                if (np !== conf) {
+                    showToast('New passwords do not match.', 'error');
+                    return;
+                }
+                if (!supabaseAvailable || !supabase || !state.user) {
+                    showToast('Cannot change password in guest mode.', 'error');
+                    return;
+                }
+                try {
+                    const { error } = await supabase.auth.updateUser({ password: np });
+                    if (error) {
+                        showToast('Error: ' + error.message, 'error');
+                    } else {
+                        showToast('Password updated successfully!', 'success');
+                        currentPass.value = '';
+                        newPass.value = '';
+                        confirmPass.value = '';
+                        closeModal(accountSettingsModal);
+                    }
+                } catch (e) {
+                    showToast('Error: ' + e.message, 'error');
+                }
             });
-        });
+        }
+
+        if (deleteAccountBtn) {
+            deleteAccountBtn.addEventListener('click', function() {
+                openConfirmModal('Delete Account', 'Are you sure you want to permanently delete your account? This cannot be undone.', async function() {
+                    await deleteAccount();
+                    closeModal(accountSettingsModal);
+                });
+            });
+        }
 
         // Profile modal
-        profileCloseBtn.addEventListener('click', () => closeModal(profileModal));
-        profileCloseActionBtn.addEventListener('click', () => closeModal(profileModal));
-        profileModal.addEventListener('click', function(e) { if (e.target === this) closeModal(profileModal); });
+        if (profileCloseBtn) profileCloseBtn.addEventListener('click', () => closeModal(profileModal));
+        if (profileCloseActionBtn) profileCloseActionBtn.addEventListener('click', () => closeModal(profileModal));
+        if (profileModal) profileModal.addEventListener('click', function(e) { if (e.target === this) closeModal(profileModal); });
 
         // ==========================================================
         // SETTINGS
@@ -2839,12 +2869,12 @@
                 state.webSearchEnabled = saved.webSearchEnabled !== undefined ? saved.webSearchEnabled : true;
             }
             applyTheme(state.theme);
-            themeSelect.value = state.theme;
-            enterSendSelect.value = state.enterToSend ? 'true' : 'false';
-            modelSelect.value = state.selectedModel;
-            temperatureSlider.value = state.temperature;
-            tempValue.textContent = state.temperature;
-            webSearchToggle.checked = state.webSearchEnabled;
+            if (themeSelect) themeSelect.value = state.theme;
+            if (enterSendSelect) enterSendSelect.value = state.enterToSend ? 'true' : 'false';
+            if (modelSelect) modelSelect.value = state.selectedModel;
+            if (temperatureSlider) temperatureSlider.value = state.temperature;
+            if (tempValue) tempValue.textContent = state.temperature;
+            if (webSearchToggle) webSearchToggle.checked = state.webSearchEnabled;
         }
 
         function saveSettings() {
@@ -2876,35 +2906,37 @@
             });
         }
 
-        temperatureSlider.addEventListener('input', function() {
-            tempValue.textContent = this.value;
-        });
+        if (temperatureSlider) {
+            temperatureSlider.addEventListener('input', function() {
+                if (tempValue) tempValue.textContent = this.value;
+            });
+        }
 
         document.addEventListener('keydown', function(e) {
-            if (settingsModal.classList.contains('is-active') && e.key === 'Escape') {
+            if (settingsModal && settingsModal.classList.contains('is-active') && e.key === 'Escape') {
                 closeModal(settingsModal);
             }
         });
 
-        settingsCloseBtn.addEventListener('click', () => closeModal(settingsModal));
-        settingsCloseActionBtn.addEventListener('click', () => closeModal(settingsModal));
-        settingsModal.addEventListener('click', function(e) {
+        if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', () => closeModal(settingsModal));
+        if (settingsCloseActionBtn) settingsCloseActionBtn.addEventListener('click', () => closeModal(settingsModal));
+        if (settingsModal) settingsModal.addEventListener('click', function(e) {
             if (e.target === this) closeModal(settingsModal);
         });
-        settingsSaveBtn.addEventListener('click', saveSettings);
+        if (settingsSaveBtn) settingsSaveBtn.addEventListener('click', saveSettings);
 
         // ==========================================================
         // SIDEBAR
         // ==========================================================
         function toggleSidebar() {
             if (window.innerWidth <= 992) {
-                sidebar.classList.toggle('is-open');
-                sidebarOverlay.classList.toggle('is-visible');
+                if (sidebar) sidebar.classList.toggle('is-open');
+                if (sidebarOverlay) sidebarOverlay.classList.toggle('is-visible');
             } else {
-                sidebar.classList.toggle('is-collapsed');
+                if (sidebar) sidebar.classList.toggle('is-collapsed');
             }
-            const nowCollapsed = sidebar.classList.contains('is-collapsed');
-            const svg = sidebarToggle.querySelector('svg');
+            const nowCollapsed = sidebar ? sidebar.classList.contains('is-collapsed') : false;
+            const svg = sidebarToggle ? sidebarToggle.querySelector('svg') : null;
             if (svg) {
                 svg.innerHTML = nowCollapsed ?
                     '<path d="M9 18l6-6-6-6"/>' :
@@ -2914,49 +2946,49 @@
 
         function openSidebar() {
             if (window.innerWidth <= 992) {
-                sidebar.classList.add('is-open');
-                sidebarOverlay.classList.add('is-visible');
+                if (sidebar) sidebar.classList.add('is-open');
+                if (sidebarOverlay) sidebarOverlay.classList.add('is-visible');
             } else {
-                sidebar.classList.remove('is-collapsed');
+                if (sidebar) sidebar.classList.remove('is-collapsed');
             }
-            const svg = sidebarToggle.querySelector('svg');
+            const svg = sidebarToggle ? sidebarToggle.querySelector('svg') : null;
             if (svg) svg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
         }
 
         function closeSidebar() {
             if (window.innerWidth <= 992) {
-                sidebar.classList.remove('is-open');
-                sidebarOverlay.classList.remove('is-visible');
+                if (sidebar) sidebar.classList.remove('is-open');
+                if (sidebarOverlay) sidebarOverlay.classList.remove('is-visible');
             } else {
-                sidebar.classList.add('is-collapsed');
+                if (sidebar) sidebar.classList.add('is-collapsed');
             }
-            const svg = sidebarToggle.querySelector('svg');
+            const svg = sidebarToggle ? sidebarToggle.querySelector('svg') : null;
             if (svg) svg.innerHTML = '<path d="M9 18l6-6-6-6"/>';
         }
 
-        sidebarToggle.addEventListener('click', toggleSidebar);
-        sidebarOpenBtn.addEventListener('click', openSidebar);
-        sidebarOverlay.addEventListener('click', closeSidebar);
+        if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
+        if (sidebarOpenBtn) sidebarOpenBtn.addEventListener('click', openSidebar);
+        if (sidebarOverlay) sidebarOverlay.addEventListener('click', closeSidebar);
 
         let resizeTimer;
         window.addEventListener('resize', function() {
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(() => {
                 if (window.innerWidth > 992) {
-                    sidebar.classList.remove('is-open');
-                    sidebarOverlay.classList.remove('is-visible');
+                    if (sidebar) sidebar.classList.remove('is-open');
+                    if (sidebarOverlay) sidebarOverlay.classList.remove('is-visible');
                 }
             }, 200);
         });
 
         if (window.innerWidth <= 992) {
-            sidebar.classList.remove('is-collapsed');
-            sidebar.classList.remove('is-open');
+            if (sidebar) sidebar.classList.remove('is-collapsed');
+            if (sidebar) sidebar.classList.remove('is-open');
         } else {
-            sidebar.classList.remove('is-collapsed');
+            if (sidebar) sidebar.classList.remove('is-collapsed');
         }
-        const initSvg = sidebarToggle.querySelector('svg');
-        if (initSvg && !sidebar.classList.contains('is-collapsed')) {
+        const initSvg = sidebarToggle ? sidebarToggle.querySelector('svg') : null;
+        if (initSvg && sidebar && !sidebar.classList.contains('is-collapsed')) {
             initSvg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
         }
 
@@ -2996,21 +3028,23 @@
             renderConversation(id);
             renderHistory();
             const conv = state.conversations[id];
-            if (conv) chatTitle.textContent = conv.title;
+            if (conv && chatTitle) chatTitle.textContent = conv.title;
             if (window.innerWidth <= 992) closeSidebar();
             state.attachments = [];
             renderAttachments();
             state.draft = '';
-            userInput.value = '';
-            userInput.style.height = 'auto';
-            sendStopBtn.classList.remove('is-active');
-            sendStopBtn.classList.remove('is-generating');
-            sendStopBtn.disabled = true;
+            if (userInput) userInput.value = '';
+            if (userInput) userInput.style.height = 'auto';
+            if (sendStopBtn) {
+                sendStopBtn.classList.remove('is-active');
+                sendStopBtn.classList.remove('is-generating');
+                sendStopBtn.disabled = true;
+            }
             if (conv && conv.messages.length === 0) {
-                emptyState.classList.remove('is-hidden');
-                scrollBottomBtn.classList.remove('is-visible');
+                if (emptyState) emptyState.classList.remove('is-hidden');
+                if (scrollBottomBtn) scrollBottomBtn.classList.remove('is-visible');
             } else {
-                emptyState.classList.add('is-hidden');
+                if (emptyState) emptyState.classList.add('is-hidden');
             }
         }
 
@@ -3020,11 +3054,11 @@
             wrappers.forEach(el => el.remove());
 
             if (!conv || conv.messages.length === 0) {
-                emptyState.classList.remove('is-hidden');
-                scrollBottomBtn.classList.remove('is-visible');
+                if (emptyState) emptyState.classList.remove('is-hidden');
+                if (scrollBottomBtn) scrollBottomBtn.classList.remove('is-visible');
                 return;
             }
-            emptyState.classList.add('is-hidden');
+            if (emptyState) emptyState.classList.add('is-hidden');
 
             conv.messages.forEach(msg => {
                 if (msg.role === 'user') {
@@ -3299,35 +3333,41 @@
         // ==========================================================
         // SCROLL
         // ==========================================================
-        messagesContainer.addEventListener('scroll', function() {
-            const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 20;
-            if (atBottom) {
-                state.userScrolledUp = false;
-                scrollBottomBtn.classList.remove('is-visible');
-            } else {
-                state.userScrolledUp = true;
-                if (state.isGenerating || state.isStreaming) {
-                    scrollBottomBtn.classList.add('is-visible');
+        if (messagesContainer) {
+            messagesContainer.addEventListener('scroll', function() {
+                const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 20;
+                if (atBottom) {
+                    state.userScrolledUp = false;
+                    if (scrollBottomBtn) scrollBottomBtn.classList.remove('is-visible');
+                } else {
+                    state.userScrolledUp = true;
+                    if (state.isGenerating || state.isStreaming) {
+                        if (scrollBottomBtn) scrollBottomBtn.classList.add('is-visible');
+                    }
                 }
-            }
-        });
+            });
+        }
 
         function scrollToBottom(smooth = true) {
             const el = messagesContainer;
+            if (!el) return;
             if (smooth) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
             else el.scrollTop = el.scrollHeight;
             state.userScrolledUp = false;
-            scrollBottomBtn.classList.remove('is-visible');
+            if (scrollBottomBtn) scrollBottomBtn.classList.remove('is-visible');
         }
 
-        scrollBottomBtn.addEventListener('click', () => scrollToBottom(true));
+        if (scrollBottomBtn) {
+            scrollBottomBtn.addEventListener('click', () => scrollToBottom(true));
+        }
 
         function updateScrollBtn() {
+            if (!messagesContainer) return;
             const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 20;
             if (!atBottom && (state.isGenerating || state.isStreaming)) {
-                scrollBottomBtn.classList.add('is-visible');
+                if (scrollBottomBtn) scrollBottomBtn.classList.add('is-visible');
             } else {
-                scrollBottomBtn.classList.remove('is-visible');
+                if (scrollBottomBtn) scrollBottomBtn.classList.remove('is-visible');
             }
         }
 
@@ -3349,8 +3389,8 @@
                     active = getActive();
                 }
                 renderHistory();
-                if (active) chatTitle.textContent = active.title;
-                emptyState.classList.add('is-hidden');
+                if (active && chatTitle) chatTitle.textContent = active.title;
+                if (emptyState) emptyState.classList.add('is-hidden');
             }
 
             const conv = getActive();
@@ -3381,25 +3421,29 @@
             const userMsg = addMessage(conv.id, 'user', fullText);
             appendUserMessage(fullText);
 
-            userInput.value = '';
-            userInput.style.height = 'auto';
-            sendStopBtn.classList.remove('is-active');
+            if (userInput) {
+                userInput.value = '';
+                userInput.style.height = 'auto';
+            }
+            if (sendStopBtn) sendStopBtn.classList.remove('is-active');
             attachments = [];
             renderAttachments();
 
             if (conv.messages.length === 1) {
                 conv.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
                 renderHistory();
-                chatTitle.textContent = conv.title;
+                if (chatTitle) chatTitle.textContent = conv.title;
             }
 
             scrollToBottom(true);
 
             state.isGenerating = true;
-            sendStopBtn.classList.add('is-generating');
-            sendStopBtn.disabled = false;
-            sendStopBtn.setAttribute('aria-label', 'Stop generating');
-            sendStopBtn.title = 'Stop generating';
+            if (sendStopBtn) {
+                sendStopBtn.classList.add('is-generating');
+                sendStopBtn.disabled = false;
+                sendStopBtn.setAttribute('aria-label', 'Stop generating');
+                sendStopBtn.title = 'Stop generating';
+            }
 
             const assistantMsgId = genId();
             const loadingWrapper = appendAssistantMessage(assistantMsgId, '', true);
@@ -3479,15 +3523,17 @@
 
             state.isGenerating = false;
             state.isStreaming = false;
-            sendStopBtn.classList.remove('is-generating');
-            sendStopBtn.setAttribute('aria-label', 'Send message');
-            sendStopBtn.title = 'Send message';
-            sendStopBtn.disabled = true;
+            if (sendStopBtn) {
+                sendStopBtn.classList.remove('is-generating');
+                sendStopBtn.setAttribute('aria-label', 'Send message');
+                sendStopBtn.title = 'Send message';
+                sendStopBtn.disabled = true;
+            }
 
             renderHistory();
             updateScrollBtn();
             if (!state.userScrolledUp) scrollToBottom(true);
-            userInput.focus();
+            if (userInput) userInput.focus();
         }
 
         function readFileAsDataURL(file) {
@@ -3504,10 +3550,12 @@
                 state.abortController.abort();
                 state.isGenerating = false;
                 state.isStreaming = false;
-                sendStopBtn.classList.remove('is-generating');
-                sendStopBtn.setAttribute('aria-label', 'Send message');
-                sendStopBtn.title = 'Send message';
-                sendStopBtn.disabled = true;
+                if (sendStopBtn) {
+                    sendStopBtn.classList.remove('is-generating');
+                    sendStopBtn.setAttribute('aria-label', 'Send message');
+                    sendStopBtn.title = 'Send message';
+                    sendStopBtn.disabled = true;
+                }
                 showToast('Generation stopped.', 'info');
             }
         }
@@ -3515,35 +3563,41 @@
         // ==========================================================
         // INPUT HANDLING
         // ==========================================================
-        userInput.addEventListener('input', function() {
-            const hasText = this.value.trim().length > 0;
-            if (hasText || attachments.length > 0) {
-                sendStopBtn.classList.add('is-active');
-                sendStopBtn.disabled = false;
-            } else {
-                if (!state.isGenerating) {
-                    sendStopBtn.classList.remove('is-active');
-                    sendStopBtn.disabled = true;
+        if (userInput) {
+            userInput.addEventListener('input', function() {
+                const hasText = this.value.trim().length > 0;
+                if (hasText || attachments.length > 0) {
+                    if (sendStopBtn) {
+                        sendStopBtn.classList.add('is-active');
+                        sendStopBtn.disabled = false;
+                    }
+                } else {
+                    if (!state.isGenerating && sendStopBtn) {
+                        sendStopBtn.classList.remove('is-active');
+                        sendStopBtn.disabled = true;
+                    }
                 }
-            }
-            this.style.height = 'auto';
-            this.style.height = Math.min(this.scrollHeight, 180) + 'px';
-        });
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 180) + 'px';
+            });
 
-        userInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey && state.enterToSend) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
+            userInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey && state.enterToSend) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+        }
 
-        sendStopBtn.addEventListener('click', function() {
-            if (state.isGenerating) {
-                stopGeneration();
-            } else {
-                sendMessage();
-            }
-        });
+        if (sendStopBtn) {
+            sendStopBtn.addEventListener('click', function() {
+                if (state.isGenerating) {
+                    stopGeneration();
+                } else {
+                    sendMessage();
+                }
+            });
+        }
 
         // ==========================================================
         // HISTORY
@@ -3621,11 +3675,11 @@
             delete state.conversations[id];
             if (state.activeId === id) {
                 state.activeId = null;
-                chatTitle.textContent = APP_CONFIG.name;
+                if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
                 const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
                 wrappers.forEach(el => el.remove());
-                emptyState.classList.remove('is-hidden');
-                scrollBottomBtn.classList.remove('is-visible');
+                if (emptyState) emptyState.classList.remove('is-hidden');
+                if (scrollBottomBtn) scrollBottomBtn.classList.remove('is-visible');
             }
             if (state.isAuthenticated) {
                 await deleteConversationFromSupabase(id);
@@ -3653,12 +3707,12 @@
             const emptyConv = Object.values(state.conversations).find(c => c.messages.length === 0);
             if (emptyConv) {
                 if (state.activeId === emptyConv.id) {
-                    userInput.focus();
+                    if (userInput) userInput.focus();
                     if (window.innerWidth <= 992) closeSidebar();
                     return;
                 }
                 switchConversation(emptyConv.id);
-                userInput.focus();
+                if (userInput) userInput.focus();
                 if (window.innerWidth <= 992) closeSidebar();
                 return;
             }
@@ -3666,58 +3720,66 @@
             state.activeId = newId;
             const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
             wrappers.forEach(el => el.remove());
-            emptyState.classList.remove('is-hidden');
-            chatTitle.textContent = 'New Chat';
+            if (emptyState) emptyState.classList.remove('is-hidden');
+            if (chatTitle) chatTitle.textContent = 'New Chat';
             renderHistory();
-            userInput.focus();
-            userInput.value = '';
-            userInput.style.height = 'auto';
-            sendStopBtn.classList.remove('is-active');
-            sendStopBtn.disabled = true;
-            sendStopBtn.classList.remove('is-generating');
+            if (userInput) {
+                userInput.focus();
+                userInput.value = '';
+                userInput.style.height = 'auto';
+            }
+            if (sendStopBtn) {
+                sendStopBtn.classList.remove('is-active');
+                sendStopBtn.disabled = true;
+                sendStopBtn.classList.remove('is-generating');
+            }
             attachments = [];
             renderAttachments();
             if (window.innerWidth <= 992) closeSidebar();
-            scrollBottomBtn.classList.remove('is-visible');
+            if (scrollBottomBtn) scrollBottomBtn.classList.remove('is-visible');
         }
 
-        newChatBtn.addEventListener('click', newChat);
+        if (newChatBtn) newChatBtn.addEventListener('click', newChat);
 
         // ==========================================================
         // ATTACHMENTS
         // ==========================================================
-        attachBtn.addEventListener('click', () => fileInput.click());
+        if (attachBtn) attachBtn.addEventListener('click', () => fileInput.click());
 
-        fileInput.addEventListener('change', function() {
-            if (this.files && this.files.length > 0) {
-                const files = Array.from(this.files);
-                files.forEach(file => {
-                    if (attachments.length >= APP_CONFIG.maxAttachments) {
-                        showToast('Maximum ' + APP_CONFIG.maxAttachments + ' files allowed.', 'warning');
-                        return;
-                    }
-                    if (file.size > APP_CONFIG.maxFileSize) {
-                        showToast('File "' + file.name + '" exceeds size limit.', 'error');
-                        return;
-                    }
-                    const isValid = APP_CONFIG.allowedFileTypes.some(t => {
-                        if (t.endsWith('/*')) return file.type.startsWith(t.replace('/*', ''));
-                        return file.name.endsWith(t.replace('.', ''));
+        if (fileInput) {
+            fileInput.addEventListener('change', function() {
+                if (this.files && this.files.length > 0) {
+                    const files = Array.from(this.files);
+                    files.forEach(file => {
+                        if (attachments.length >= APP_CONFIG.maxAttachments) {
+                            showToast('Maximum ' + APP_CONFIG.maxAttachments + ' files allowed.', 'warning');
+                            return;
+                        }
+                        if (file.size > APP_CONFIG.maxFileSize) {
+                            showToast('File "' + file.name + '" exceeds size limit.', 'error');
+                            return;
+                        }
+                        const isValid = APP_CONFIG.allowedFileTypes.some(t => {
+                            if (t.endsWith('/*')) return file.type.startsWith(t.replace('/*', ''));
+                            return file.name.endsWith(t.replace('.', ''));
+                        });
+                        if (!isValid) {
+                            showToast('File type not supported: "' + file.name + '"', 'error');
+                            return;
+                        }
+                        attachments.push(file);
+                        renderAttachments();
                     });
-                    if (!isValid) {
-                        showToast('File type not supported: "' + file.name + '"', 'error');
-                        return;
+                    this.value = '';
+                    if (userInput.value.trim().length > 0 || attachments.length > 0) {
+                        if (sendStopBtn) {
+                            sendStopBtn.classList.add('is-active');
+                            sendStopBtn.disabled = false;
+                        }
                     }
-                    attachments.push(file);
-                    renderAttachments();
-                });
-                this.value = '';
-                if (userInput.value.trim().length > 0 || attachments.length > 0) {
-                    sendStopBtn.classList.add('is-active');
-                    sendStopBtn.disabled = false;
                 }
-            }
-        });
+            });
+        }
 
         function renderAttachments() {
             attachmentPreviews.innerHTML = '';
@@ -3736,11 +3798,15 @@
                     attachments.splice(idx, 1);
                     renderAttachments();
                     if (userInput.value.trim().length > 0 || attachments.length > 0) {
-                        sendStopBtn.classList.add('is-active');
-                        sendStopBtn.disabled = false;
+                        if (sendStopBtn) {
+                            sendStopBtn.classList.add('is-active');
+                            sendStopBtn.disabled = false;
+                        }
                     } else {
-                        sendStopBtn.classList.remove('is-active');
-                        sendStopBtn.disabled = true;
+                        if (sendStopBtn) {
+                            sendStopBtn.classList.remove('is-active');
+                            sendStopBtn.disabled = true;
+                        }
                     }
                 });
                 attachmentPreviews.appendChild(div);
@@ -3795,8 +3861,8 @@
                 state.activeId = null;
                 renderHistory();
                 renderConversation(null);
-                chatTitle.textContent = APP_CONFIG.name;
-                emptyState.classList.remove('is-hidden');
+                if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
+                if (emptyState) emptyState.classList.remove('is-hidden');
             }
 
             loadFromURL();
@@ -3828,56 +3894,60 @@
         // ==========================================================
         // SHARE MODAL EVENTS
         // ==========================================================
-        shareModalClose.addEventListener('click', () => closeModal(shareModal));
-        shareModalCloseBtn.addEventListener('click', () => closeModal(shareModal));
-        shareModal.addEventListener('click', function(e) {
+        if (shareModalClose) shareModalClose.addEventListener('click', () => closeModal(shareModal));
+        if (shareModalCloseBtn) shareModalCloseBtn.addEventListener('click', () => closeModal(shareModal));
+        if (shareModal) shareModal.addEventListener('click', function(e) {
             if (e.target === this) closeModal(shareModal);
         });
-        shareCopyBtn.addEventListener('click', function() {
-            const text = shareLinkInput.value;
-            navigator.clipboard.writeText(text).then(() => {
-                showToast('Link copied to clipboard!', 'success');
-                const orig = this.textContent;
-                this.textContent = 'Copied!';
-                setTimeout(() => { this.textContent = orig; }, 2000);
-            }).catch(() => {
-                shareLinkInput.select();
-                document.execCommand('copy');
-                showToast('Link copied to clipboard!', 'success');
-                const orig = this.textContent;
-                this.textContent = 'Copied!';
-                setTimeout(() => { this.textContent = orig; }, 2000);
+        if (shareCopyBtn) {
+            shareCopyBtn.addEventListener('click', function() {
+                const text = shareLinkInput.value;
+                navigator.clipboard.writeText(text).then(() => {
+                    showToast('Link copied to clipboard!', 'success');
+                    const orig = this.textContent;
+                    this.textContent = 'Copied!';
+                    setTimeout(() => { this.textContent = orig; }, 2000);
+                }).catch(() => {
+                    shareLinkInput.select();
+                    document.execCommand('copy');
+                    showToast('Link copied to clipboard!', 'success');
+                    const orig = this.textContent;
+                    this.textContent = 'Copied!';
+                    setTimeout(() => { this.textContent = orig; }, 2000);
+                });
             });
-        });
+        }
 
         // ==========================================================
         // CONFIRM MODAL EVENTS
         // ==========================================================
-        confirmCloseBtn.addEventListener('click', () => closeModal(confirmModal));
-        confirmCancelBtn.addEventListener('click', () => closeModal(confirmModal));
-        confirmModal.addEventListener('click', function(e) {
+        if (confirmCloseBtn) confirmCloseBtn.addEventListener('click', () => closeModal(confirmModal));
+        if (confirmCancelBtn) confirmCancelBtn.addEventListener('click', () => closeModal(confirmModal));
+        if (confirmModal) confirmModal.addEventListener('click', function(e) {
             if (e.target === this) closeModal(confirmModal);
         });
-        confirmOkBtn.addEventListener('click', function() {
-            const cb = confirmModal._onConfirm;
-            closeModal(confirmModal);
-            if (typeof cb === 'function') cb();
-        });
+        if (confirmOkBtn) {
+            confirmOkBtn.addEventListener('click', function() {
+                const cb = confirmModal._onConfirm;
+                closeModal(confirmModal);
+                if (typeof cb === 'function') cb();
+            });
+        }
 
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
-                if (authModal.classList.contains('is-active')) closeModal(authModal);
-                if (settingsModal.classList.contains('is-active')) closeModal(settingsModal);
-                if (profileModal.classList.contains('is-active')) closeModal(profileModal);
-                if (accountSettingsModal.classList.contains('is-active')) closeModal(accountSettingsModal);
-                if (shareModal.classList.contains('is-active')) closeModal(shareModal);
-                if (confirmModal.classList.contains('is-active')) closeModal(confirmModal);
-                if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
+                if (authModal && authModal.classList.contains('is-active')) closeModal(authModal);
+                if (settingsModal && settingsModal.classList.contains('is-active')) closeModal(settingsModal);
+                if (profileModal && profileModal.classList.contains('is-active')) closeModal(profileModal);
+                if (accountSettingsModal && accountSettingsModal.classList.contains('is-active')) closeModal(accountSettingsModal);
+                if (shareModal && shareModal.classList.contains('is-active')) closeModal(shareModal);
+                if (confirmModal && confirmModal.classList.contains('is-active')) closeModal(confirmModal);
+                if (window.innerWidth <= 992 && sidebar && sidebar.classList.contains('is-open')) {
                     closeSidebar();
                 }
             }
-            if (e.key === 'Enter' && confirmModal.classList.contains('is-active')) {
-                confirmOkBtn.click();
+            if (e.key === 'Enter' && confirmModal && confirmModal.classList.contains('is-active')) {
+                if (confirmOkBtn) confirmOkBtn.click();
             }
         });
     </script>
