@@ -4,9 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- SEO & DISCOVERABILITY -->
     <title>AgriDeepAI — Professional AI Assistant for Agriculture &amp; Livestock</title>
-    <meta name="description" content="AgriDeepAI is a free, intelligent AI assistant specialized in agriculture, livestock, crop diseases, farming techniques, and agribusiness in Rwanda and globally. No sign-up required." />
+    <meta name="description" content="AgriDeepAI is a free, intelligent AI assistant specialized in agriculture, livestock, crop diseases, farming techniques, and agribusiness in Rwanda and globally." />
     <meta name="keywords" content="agriculture AI, livestock AI, Rwanda agriculture, crop diseases, farming assistant, agribusiness, AI chatbot, free AI" />
     <link rel="canonical" href="https://agrideepai.vercel.app/" />
     <meta property="og:type" content="website" />
@@ -19,34 +18,15 @@
     <meta name="twitter:title" content="AgriDeepAI — Professional AI Assistant for Agriculture &amp; Livestock" />
     <meta name="twitter:description" content="Free, intelligent AI assistant for agriculture, livestock, crop diseases, and agribusiness in Rwanda and beyond." />
     <meta name="twitter:image" content="https://agrideepai.vercel.app/logo.png" />
-    <script type="application/ld+json">
-        {
-            "@context": "https://schema.org",
-            "@type": "WebApplication",
-            "name": "AgriDeepAI",
-            "description": "Free, intelligent AI assistant specialized in agriculture, livestock, crop diseases, farming techniques, and agribusiness in Rwanda and globally.",
-            "applicationCategory": "AI Assistant",
-            "operatingSystem": "All",
-            "browserRequirements": "Requires JavaScript",
-            "offers": {
-                "@type": "Offer",
-                "price": "0",
-                "priceCurrency": "USD"
-            },
-            "author": {
-                "@type": "Person",
-                "name": "Ornella Mutuyimana"
-            }
-        }
-    </script>
 
     <link rel="icon" href="logo.png" type="image/png" />
 
-    <!-- Libraries for Markdown, sanitization, syntax highlighting -->
+    <!-- Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <style>
         /* ==========================================================
@@ -144,7 +124,6 @@
             --msg-bot-bg: #f0f0f2;
         }
 
-        /* Reset & Base */
         *,
         *::before,
         *::after {
@@ -162,7 +141,6 @@
             overflow: hidden;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
-            text-rendering: optimizeLegibility;
         }
 
         .app {
@@ -174,7 +152,7 @@
             overflow: hidden;
         }
 
-        /* SIDEBAR */
+        /* ===== SIDEBAR ===== */
         .sidebar {
             width: var(--sidebar-width);
             height: 100vh;
@@ -188,7 +166,6 @@
             position: relative;
             z-index: 200;
         }
-
         .sidebar.is-collapsed {
             width: var(--sidebar-collapsed);
         }
@@ -275,7 +252,7 @@
             border-top: none;
             margin-top: auto;
         }
-        .sidebar.is-collapsed .account-btn {
+        .sidebar.is-collapsed .auth-btn {
             justify-content: center;
             padding: 4px;
             min-height: 30px;
@@ -283,11 +260,14 @@
             width: 34px;
             margin: 0 auto;
         }
-        .sidebar.is-collapsed .account-btn .avatar {
+        .sidebar.is-collapsed .auth-btn .avatar {
             width: 28px;
             height: 28px;
             font-size: 11px;
             margin: 0;
+        }
+        .sidebar.is-collapsed .account-info {
+            display: none;
         }
         .sidebar.is-collapsed .account-settings-icon {
             display: none;
@@ -495,7 +475,7 @@
             position: relative;
         }
 
-        .account-btn {
+        .auth-btn {
             display: flex;
             align-items: center;
             gap: 10px;
@@ -512,10 +492,10 @@
             text-align: left;
             min-height: 40px;
         }
-        .account-btn:hover {
+        .auth-btn:hover {
             background: var(--bg-hover);
         }
-        .account-btn .avatar {
+        .auth-btn .avatar {
             width: 28px;
             height: 28px;
             border-radius: 50%;
@@ -529,12 +509,17 @@
             flex-shrink: 0;
             overflow: hidden;
         }
-        .account-info {
+        .auth-btn .avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .auth-btn .account-info {
             flex: 1;
             min-width: 0;
             transition: opacity var(--transition-fast), width var(--transition-fast);
         }
-        .account-info .name {
+        .auth-btn .account-info .name {
             font-size: 13px;
             font-weight: 500;
             color: var(--text-primary);
@@ -542,14 +527,14 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .account-info .sub {
+        .auth-btn .account-info .sub {
             font-size: 11px;
             color: var(--text-muted);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .account-settings-icon {
+        .auth-btn .account-settings-icon {
             color: var(--text-muted);
             font-size: 16px;
             transition: var(--transition-fast);
@@ -558,10 +543,10 @@
             align-items: center;
             justify-content: center;
         }
-        .account-btn:hover .account-settings-icon {
+        .auth-btn:hover .account-settings-icon {
             color: var(--text-primary);
         }
-        .account-settings-icon svg {
+        .auth-btn .account-settings-icon svg {
             width: 18px;
             height: 18px;
             fill: none;
@@ -619,7 +604,7 @@
             margin: 4px 12px;
         }
 
-        /* MAIN CHAT */
+        /* ===== MAIN CHAT ===== */
         .main-chat {
             flex: 1;
             display: flex;
@@ -700,7 +685,7 @@
             border-radius: 4px;
         }
 
-        /* EMPTY STATE */
+        /* ===== EMPTY STATE ===== */
         .empty-state {
             flex: 1;
             display: flex;
@@ -765,7 +750,7 @@
             display: none;
         }
 
-        /* MESSAGES — Original bubble style */
+        /* ===== MESSAGES ===== */
         .message-wrapper {
             display: flex;
             flex-direction: column;
@@ -802,7 +787,6 @@
             border-bottom-left-radius: 4px;
         }
 
-        /* Markdown styling inside bot bubble */
         .message-bubble p {
             margin: 0 0 0.8em;
         }
@@ -894,7 +878,6 @@
             margin: 0.5em 0;
         }
 
-        /* Code block wrapper inside bubble */
         .response-code-block {
             background: var(--bg-elevated);
             border-radius: var(--radius-md);
@@ -959,7 +942,6 @@
             white-space: pre;
         }
 
-        /* Loading dots */
         .message-bubble .loading-dots span {
             animation: pulse 1.2s infinite;
             display: inline-block;
@@ -982,7 +964,6 @@
             }
         }
 
-        /* Message actions */
         .message-actions {
             display: flex;
             gap: 2px;
@@ -1029,7 +1010,6 @@
             stroke-linejoin: round;
         }
 
-        /* Edit container */
         .edit-container {
             width: 100%;
             margin-top: 6px;
@@ -1083,7 +1063,6 @@
             background: var(--bg-hover);
         }
 
-        /* Scroll button */
         .scroll-bottom-btn {
             position: absolute;
             bottom: 100px;
@@ -1119,7 +1098,7 @@
             stroke-linejoin: round;
         }
 
-        /* COMPOSER */
+        /* ===== COMPOSER ===== */
         .composer-wrapper {
             position: sticky;
             bottom: 0;
@@ -1326,7 +1305,7 @@
             line-height: 1.4;
         }
 
-        /* MODALS */
+        /* ===== MODALS ===== */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -1565,7 +1544,7 @@
             max-width: 400px;
         }
 
-        /* TOASTS */
+        /* ===== TOASTS ===== */
         .toast-container {
             position: fixed;
             bottom: 24px;
@@ -1834,7 +1813,6 @@
             border-radius: 4px;
         }
 
-        /* Extra for code blocks inside bubble */
         .message-bubble .response-code-block code {
             background: transparent !important;
             padding: 0 !important;
@@ -1847,7 +1825,9 @@
 </head>
 <body>
 
-    <!-- APP -->
+    <!-- ==========================================================
+    APP
+    ========================================================== -->
     <div class="app" id="app">
 
         <!-- SIDEBAR -->
@@ -1872,7 +1852,8 @@
             </div>
 
             <div class="sidebar-footer">
-                <button class="account-btn" id="accountBtn" aria-label="Account menu">
+                <!-- Authentication Button / User Avatar -->
+                <button class="auth-btn" id="authBtn" aria-label="Account">
                     <div class="avatar" id="avatarDisplay">👤</div>
                     <div class="account-info">
                         <div class="name" id="userNameDisplay">Guest</div>
@@ -1885,18 +1866,15 @@
 
                 <!-- Account Dropdown -->
                 <div class="account-dropdown" id="accountDropdown">
-                    <button class="dropdown-item" data-action="account">
-                        <span class="icon">👤</span> Account
-                    </button>
                     <button class="dropdown-item" data-action="profile">
-                        <span class="icon">📝</span> Profile
+                        <span class="icon">👤</span> Profile
                     </button>
-                    <button class="dropdown-item" data-action="security">
-                        <span class="icon">🔒</span> Security
+                    <button class="dropdown-item" data-action="account">
+                        <span class="icon">📧</span> Account Settings
                     </button>
                     <div class="dropdown-divider"></div>
                     <button class="dropdown-item" data-action="settings">
-                        <span class="icon">⚙️</span> Settings
+                        <span class="icon">⚙️</span> App Settings
                     </button>
                     <div class="dropdown-divider"></div>
                     <button class="dropdown-item" data-action="logout" style="color:var(--error);">
@@ -1961,36 +1939,44 @@
         </main>
     </div>
 
-    <!-- MODALS -->
-    <!-- Account Modal -->
-    <div class="modal-overlay" id="accountModal">
+    <!-- ===== MODALS ===== -->
+    <!-- Auth Modal (Sign In / Sign Up / Confirm) -->
+    <div class="modal-overlay" id="authModal">
         <div class="modal-box">
             <div class="modal-header">
-                <h2 id="modalTitle">Sign In</h2>
-                <button class="modal-close" id="modalCloseBtn" aria-label="Close">
+                <h2 id="authModalTitle">Sign In</h2>
+                <button class="modal-close" id="authModalClose" aria-label="Close">
                     <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
-            <p class="modal-desc" id="modalDesc">Sign in to save your chats and access your history.</p>
-            <div id="modalFields">
-                <div class="field" id="nameField" style="display:none;">
-                    <label for="modalName">Full Name</label>
-                    <input type="text" id="modalName" placeholder="Your name" />
+            <p class="modal-desc" id="authModalDesc">Sign in to save your chats across devices.</p>
+            <div id="authFields">
+                <div class="field" id="authNameField" style="display:none;">
+                    <label for="authName">Full Name</label>
+                    <input type="text" id="authName" placeholder="Your name" />
                 </div>
                 <div class="field">
-                    <label for="modalEmail">Email</label>
-                    <input type="email" id="modalEmail" placeholder="you@example.com" />
+                    <label for="authEmail">Email</label>
+                    <input type="email" id="authEmail" placeholder="you@example.com" />
                 </div>
                 <div class="field">
-                    <label for="modalPassword">Password</label>
-                    <input type="password" id="modalPassword" placeholder="••••••••" />
+                    <label for="authPassword">Password</label>
+                    <input type="password" id="authPassword" placeholder="••••••••" />
                 </div>
-                <div class="error-msg" id="modalError">Invalid credentials.</div>
+                <div class="field" id="authConfirmField" style="display:none;">
+                    <label for="authConfirmPassword">Confirm Password</label>
+                    <input type="password" id="authConfirmPassword" placeholder="••••••••" />
+                </div>
+                <div class="field" id="authCodeField" style="display:none;">
+                    <label for="authCode">Confirmation Code</label>
+                    <input type="text" id="authCode" placeholder="Enter code from email" />
+                </div>
+                <div class="error-msg" id="authError">Invalid credentials.</div>
             </div>
             <div class="modal-actions">
-                <button class="btn-primary" id="modalSubmitBtn">Sign In</button>
-                <button class="btn-secondary" id="modalSwitchBtn">Create Account</button>
-                <button class="btn-ghost" id="modalGuestBtn">Continue as Guest</button>
+                <button class="btn-primary" id="authSubmitBtn">Sign In</button>
+                <button class="btn-secondary" id="authSwitchBtn">Create Account</button>
+                <button class="btn-ghost" id="authGuestBtn">Continue as Guest</button>
             </div>
         </div>
     </div>
@@ -2071,31 +2057,27 @@
         </div>
     </div>
 
-    <!-- Security Modal -->
-    <div class="modal-overlay" id="securityModal">
+    <!-- Account Settings Modal (Change Password, Delete Account) -->
+    <div class="modal-overlay" id="accountSettingsModal">
         <div class="modal-box">
             <div class="modal-header">
-                <h2>Security</h2>
-                <button class="modal-close" id="securityCloseBtn" aria-label="Close">
+                <h2>Account Settings</h2>
+                <button class="modal-close" id="accountSettingsCloseBtn" aria-label="Close">
                     <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
-            <p class="modal-desc">Change your password (simulated).</p>
+            <p class="modal-desc">Manage your account.</p>
             <div class="field">
-                <label>Current Password</label>
-                <input type="password" id="currentPass" placeholder="••••••••" />
+                <label>Change Password</label>
+                <input type="password" id="currentPass" placeholder="Current password" style="margin-bottom:8px;" />
+                <input type="password" id="newPass" placeholder="New password" style="margin-bottom:8px;" />
+                <input type="password" id="confirmPass" placeholder="Confirm new password" />
             </div>
-            <div class="field">
-                <label>New Password</label>
-                <input type="password" id="newPass" placeholder="••••••••" />
-            </div>
-            <div class="field">
-                <label>Confirm New Password</label>
-                <input type="password" id="confirmPass" placeholder="••••••••" />
-            </div>
-            <div class="modal-actions">
-                <button class="btn-primary" id="securitySaveBtn">Update Password</button>
-                <button class="btn-secondary" id="securityCloseActionBtn">Close</button>
+            <button class="btn-primary" id="changePassBtn" style="width:100%; margin-bottom:12px;">Update Password</button>
+            <hr style="border-color:var(--border-subtle); margin:12px 0;" />
+            <button class="btn-danger" id="deleteAccountBtn" style="width:100%;">Delete Account</button>
+            <div class="modal-actions" style="margin-top:12px;">
+                <button class="btn-secondary" id="accountSettingsCloseActionBtn">Close</button>
             </div>
         </div>
     </div>
@@ -2148,18 +2130,24 @@
         // ==========================================================
         // CONFIGURATION
         // ==========================================================
+        const SUPABASE_URL = 'https://cfazulpmzvuzwszcoirt.supabase.co';
+        const SUPABASE_ANON_KEY = 'PASTE_YOUR_SUPABASE_ANON_KEY_HERE'; // Replace with your actual key
+
         const APP_CONFIG = {
             name: 'AgriDeepAI',
-            version: '2.0.0',
-            tagline: 'Your AI assistant for agriculture, livestock.',
+            version: '3.0.0',
             apiEndpoint: '/api/chat',
             enableAttachments: true,
-            enableStreaming: false,
-            enableLocalStorage: true,
+            enableLocalStorage: false, // We use Supabase for persistence
             maxFileSize: 10 * 1024 * 1024,
             allowedFileTypes: ['image/*', '.pdf', '.doc', '.docx', '.txt'],
             maxAttachments: 5,
         };
+
+        // ==========================================================
+        // SUPABASE CLIENT
+        // ==========================================================
+        const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
         // ==========================================================
         // STATE
@@ -2179,6 +2167,9 @@
             temperature: 0.7,
             webSearchEnabled: true,
             userScrolledUp: false,
+            session: null,
+            isAuthenticated: false,
+            // Guest mode: chats are not saved
         };
 
         // ==========================================================
@@ -2204,27 +2195,32 @@
         const attachmentPreviews = $('attachmentPreviews');
         const scrollBottomBtn = $('scrollBottomBtn');
         const chatTitle = $('chatTitle');
-        const accountBtn = $('accountBtn');
+        const authBtn = $('authBtn');
         const settingsIcon = $('settingsIcon');
         const avatarDisplay = $('avatarDisplay');
         const userNameDisplay = $('userNameDisplay');
         const userSubDisplay = $('userSubDisplay');
         const accountDropdown = $('accountDropdown');
 
-        // Modals
-        const accountModal = $('accountModal');
-        const modalCloseBtn = $('modalCloseBtn');
-        const modalTitle = $('modalTitle');
-        const modalDesc = $('modalDesc');
-        const modalName = $('modalName');
-        const modalEmail = $('modalEmail');
-        const modalPassword = $('modalPassword');
-        const modalError = $('modalError');
-        const modalSubmitBtn = $('modalSubmitBtn');
-        const modalSwitchBtn = $('modalSwitchBtn');
-        const modalGuestBtn = $('modalGuestBtn');
-        const nameField = $('nameField');
+        // Auth Modal
+        const authModal = $('authModal');
+        const authModalClose = $('authModalClose');
+        const authModalTitle = $('authModalTitle');
+        const authModalDesc = $('authModalDesc');
+        const authName = $('authName');
+        const authEmail = $('authEmail');
+        const authPassword = $('authPassword');
+        const authConfirmPassword = $('authConfirmPassword');
+        const authCode = $('authCode');
+        const authError = $('authError');
+        const authSubmitBtn = $('authSubmitBtn');
+        const authSwitchBtn = $('authSwitchBtn');
+        const authGuestBtn = $('authGuestBtn');
+        const authNameField = $('authNameField');
+        const authConfirmField = $('authConfirmField');
+        const authCodeField = $('authCodeField');
 
+        // Settings Modal
         const settingsModal = $('settingsModal');
         const settingsCloseBtn = $('settingsCloseBtn');
         const settingsCloseActionBtn = $('settingsCloseActionBtn');
@@ -2236,20 +2232,24 @@
         const tempValue = $('tempValue');
         const webSearchToggle = $('webSearchToggle');
 
+        // Profile Modal
         const profileModal = $('profileModal');
         const profileCloseBtn = $('profileCloseBtn');
         const profileCloseActionBtn = $('profileCloseActionBtn');
         const profileName = $('profileName');
         const profileEmail = $('profileEmail');
 
-        const securityModal = $('securityModal');
-        const securityCloseBtn = $('securityCloseBtn');
-        const securityCloseActionBtn = $('securityCloseActionBtn');
+        // Account Settings Modal
+        const accountSettingsModal = $('accountSettingsModal');
+        const accountSettingsCloseBtn = $('accountSettingsCloseBtn');
+        const accountSettingsCloseActionBtn = $('accountSettingsCloseActionBtn');
         const currentPass = $('currentPass');
         const newPass = $('newPass');
         const confirmPass = $('confirmPass');
-        const securitySaveBtn = $('securitySaveBtn');
+        const changePassBtn = $('changePassBtn');
+        const deleteAccountBtn = $('deleteAccountBtn');
 
+        // Share Modal
         const shareModal = $('shareModal');
         const shareModalClose = $('shareModalClose');
         const shareModalCloseBtn = $('shareModalCloseBtn');
@@ -2259,6 +2259,7 @@
         const shareCopyBtn = $('shareCopyBtn');
         const shareNote = $('shareNote');
 
+        // Confirm Modal
         const confirmModal = $('confirmModal');
         const confirmTitle = $('confirmTitle');
         const confirmMessage = $('confirmMessage');
@@ -2269,7 +2270,7 @@
         const toastContainer = $('toastContainer');
 
         // ==========================================================
-        // STORAGE
+        // STORAGE (for settings only)
         // ==========================================================
         const Storage = {
             get(key) {
@@ -2319,28 +2320,6 @@
 
         function closeModal(modal) { modal.classList.remove('is-active'); }
 
-        function openAccountModal(mode) {
-            const isSignUp = mode === 'signup';
-            modalError.classList.remove('is-visible');
-            modalName.value = '';
-            modalEmail.value = '';
-            modalPassword.value = '';
-            if (isSignUp) {
-                modalTitle.textContent = 'Create Account';
-                modalDesc.textContent = 'Join AgriDeepAI to save your chats.';
-                nameField.style.display = 'block';
-                modalSubmitBtn.textContent = 'Sign Up';
-                modalSwitchBtn.textContent = 'Already have an account? Sign In';
-            } else {
-                modalTitle.textContent = 'Sign In';
-                modalDesc.textContent = 'Sign in to save your chats.';
-                nameField.style.display = 'none';
-                modalSubmitBtn.textContent = 'Sign In';
-                modalSwitchBtn.textContent = 'Create Account';
-            }
-            openModal(accountModal);
-        }
-
         function openShareModal(title, desc, link, note = 'Anyone with the link can view this content.') {
             shareModalTitle.textContent = title;
             shareModalDesc.textContent = desc;
@@ -2358,14 +2337,40 @@
         }
 
         // ==========================================================
-        // ACCOUNT SYSTEM
+        // AUTH SYSTEM (Supabase)
         // ==========================================================
+        let authMode = 'signin'; // 'signin', 'signup', 'confirm'
+
+        async function initAuth() {
+            if (!supabase) {
+                console.warn('Supabase not initialized. Auth disabled.');
+                return;
+            }
+            // Check session
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                state.user = session.user;
+                state.isAuthenticated = true;
+                updateUIForUser(session.user);
+                await loadUserConversations(session.user.id);
+            } else {
+                state.isAuthenticated = false;
+                state.user = null;
+                updateUIForUser(null);
+                // Load guest conversations from localStorage (if any) but we won't save them
+                // For guest, we keep in memory only
+                // We'll create a temporary conversation on first message if guest
+            }
+        }
+
         function updateUIForUser(user) {
             if (user) {
-                const initial = user.name ? user.name.charAt(0).toUpperCase() : 'U';
-                avatarDisplay.textContent = initial;
-                userNameDisplay.textContent = user.name || 'User';
+                const name = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+                avatarDisplay.textContent = name.charAt(0).toUpperCase();
+                userNameDisplay.textContent = name;
                 userSubDisplay.textContent = user.email || 'signed in';
+                // Show dropdown items
+                // (already in DOM)
             } else {
                 avatarDisplay.textContent = '👤';
                 userNameDisplay.textContent = 'Guest';
@@ -2373,39 +2378,242 @@
             }
         }
 
-        function loginUser(email, password, name) {
-            const user = { name: name || 'User', email: email };
-            state.user = user;
-            Storage.set('user', user);
-            updateUIForUser(user);
-            closeModal(accountModal);
-            showToast('Signed in successfully!', 'success');
-            return user;
+        async function loadUserConversations(userId) {
+            if (!supabase) return;
+            const { data, error } = await supabase
+                .from('conversations')
+                .select('*')
+                .eq('user_id', userId)
+                .order('updated_at', { ascending: false });
+            if (error) {
+                console.error('Error loading conversations:', error);
+                return;
+            }
+            // Convert to state.conversations format
+            const convs = {};
+            for (const row of data) {
+                convs[row.id] = {
+                    id: row.id,
+                    title: row.title,
+                    messages: row.messages || [],
+                    createdAt: row.created_at,
+                    updatedAt: row.updated_at,
+                    pinned: row.pinned || false,
+                };
+            }
+            state.conversations = convs;
+            renderHistory();
+            // If no active, pick the first
+            const ids = Object.keys(convs);
+            if (ids.length > 0) {
+                // Find the one with last updated_at
+                const latest = ids.sort((a, b) => new Date(convs[b].updatedAt) - new Date(convs[a].updatedAt))[0];
+                switchConversation(latest);
+            } else {
+                // New chat
+                newChat();
+            }
         }
 
-        function logoutUser() {
+        async function saveConversationToSupabase(convId) {
+            if (!supabase || !state.isAuthenticated) return;
+            const conv = state.conversations[convId];
+            if (!conv) return;
+            // Upsert
+            const { error } = await supabase
+                .from('conversations')
+                .upsert({
+                    id: convId,
+                    user_id: state.user.id,
+                    title: conv.title,
+                    messages: conv.messages,
+                    pinned: conv.pinned || false,
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: 'id' });
+            if (error) {
+                console.error('Error saving conversation:', error);
+            }
+        }
+
+        async function deleteConversationFromSupabase(convId) {
+            if (!supabase || !state.isAuthenticated) return;
+            const { error } = await supabase
+                .from('conversations')
+                .delete()
+                .eq('id', convId);
+            if (error) {
+                console.error('Error deleting conversation:', error);
+            }
+        }
+
+        // Authentication functions
+        async function signUp(email, password, name) {
+            if (!supabase) return;
+            const { data, error } = await supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    data: { full_name: name },
+                }
+            });
+            if (error) {
+                showToast('Sign up error: ' + error.message, 'error');
+                return false;
+            }
+            if (data.user && data.user.confirmation_sent_at) {
+                showToast('Verification email sent. Please check your inbox.', 'success');
+                // Show code field for confirmation
+                authMode = 'confirm';
+                authModalTitle.textContent = 'Confirm Email';
+                authModalDesc.textContent = 'Enter the confirmation code sent to your email.';
+                authSubmitBtn.textContent = 'Confirm';
+                authSwitchBtn.style.display = 'none';
+                authNameField.style.display = 'none';
+                authConfirmField.style.display = 'none';
+                authCodeField.style.display = 'block';
+                authError.classList.remove('is-visible');
+                return true;
+            }
+            return true;
+        }
+
+        async function signIn(email, password) {
+            if (!supabase) return;
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+            if (error) {
+                showToast('Sign in error: ' + error.message, 'error');
+                return false;
+            }
+            if (data.user) {
+                state.user = data.user;
+                state.isAuthenticated = true;
+                updateUIForUser(data.user);
+                closeModal(authModal);
+                showToast('Signed in successfully!', 'success');
+                await loadUserConversations(data.user.id);
+                return true;
+            }
+            return false;
+        }
+
+        async function confirmEmail(code) {
+            if (!supabase) return;
+            // For Supabase, confirmation code is actually used in verifyOtp
+            const { data, error } = await supabase.auth.verifyOtp({
+                email: authEmail.value.trim(),
+                token: code,
+                type: 'signup',
+            });
+            if (error) {
+                showToast('Confirmation error: ' + error.message, 'error');
+                return false;
+            }
+            if (data.user) {
+                state.user = data.user;
+                state.isAuthenticated = true;
+                updateUIForUser(data.user);
+                closeModal(authModal);
+                showToast('Email confirmed! You are now signed in.', 'success');
+                await loadUserConversations(data.user.id);
+                return true;
+            }
+            return false;
+        }
+
+        async function signOut() {
+            if (!supabase) return;
+            await supabase.auth.signOut();
+            state.isAuthenticated = false;
             state.user = null;
-            Storage.remove('user');
+            state.conversations = {};
+            state.activeId = null;
             updateUIForUser(null);
-            closeDropdown();
+            // Clear chat UI
+            const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
+            wrappers.forEach(el => el.remove());
+            emptyState.classList.remove('is-hidden');
+            chatTitle.textContent = APP_CONFIG.name;
+            renderHistory();
             showToast('Logged out.', 'info');
+            closeDropdown();
         }
 
-        const savedUser = Storage.get('user');
-        if (savedUser) {
-            state.user = savedUser;
-            updateUIForUser(savedUser);
+        async function deleteAccount() {
+            if (!supabase || !state.user) return;
+            // Delete all conversations first
+            const convIds = Object.keys(state.conversations);
+            for (const id of convIds) {
+                await deleteConversationFromSupabase(id);
+            }
+            // Delete user (requires admin, but we can use .auth.admin.deleteUser which is not available client-side)
+            // Instead, we'll ask user to confirm and then sign out
+            // We can't delete from client side; we'll just sign out and leave the account.
+            // In production, you'd use a server function.
+            showToast('Account deletion is not available from the client. Please contact support.', 'warning');
+            // For demo, we'll just sign out
+            await signOut();
         }
 
-        // ==========================================================
-        // ACCOUNT DROPDOWN
-        // ==========================================================
+        // Auth modal actions
+        function openAuthModal(mode = 'signin') {
+            authMode = mode;
+            authError.classList.remove('is-visible');
+            authName.value = '';
+            authEmail.value = '';
+            authPassword.value = '';
+            authConfirmPassword.value = '';
+            authCode.value = '';
+            authNameField.style.display = 'none';
+            authConfirmField.style.display = 'none';
+            authCodeField.style.display = 'none';
+            authSwitchBtn.style.display = 'block';
+            if (mode === 'signin') {
+                authModalTitle.textContent = 'Sign In';
+                authModalDesc.textContent = 'Sign in to save your chats across devices.';
+                authSubmitBtn.textContent = 'Sign In';
+                authSwitchBtn.textContent = 'Create Account';
+                authNameField.style.display = 'none';
+                authConfirmField.style.display = 'none';
+            } else if (mode === 'signup') {
+                authModalTitle.textContent = 'Create Account';
+                authModalDesc.textContent = 'Join AgriDeepAI to save your chats.';
+                authSubmitBtn.textContent = 'Sign Up';
+                authSwitchBtn.textContent = 'Already have an account? Sign In';
+                authNameField.style.display = 'block';
+                authConfirmField.style.display = 'block';
+            } else if (mode === 'confirm') {
+                authModalTitle.textContent = 'Confirm Email';
+                authModalDesc.textContent = 'Enter the confirmation code sent to your email.';
+                authSubmitBtn.textContent = 'Confirm';
+                authSwitchBtn.style.display = 'none';
+                authNameField.style.display = 'none';
+                authConfirmField.style.display = 'none';
+                authCodeField.style.display = 'block';
+            }
+            openModal(authModal);
+        }
+
+        // Auth button click
+        authBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (state.isAuthenticated) {
+                // Toggle dropdown
+                if (dropdownOpen) closeDropdown();
+                else openDropdown();
+            } else {
+                openAuthModal('signin');
+            }
+        });
+
+        // Dropdown logic
         let dropdownOpen = false;
 
-        function toggleDropdown(e) {
-            e.stopPropagation();
-            dropdownOpen = !dropdownOpen;
-            accountDropdown.classList.toggle('is-open', dropdownOpen);
+        function openDropdown() {
+            dropdownOpen = true;
+            accountDropdown.classList.add('is-open');
         }
 
         function closeDropdown() {
@@ -2413,116 +2621,120 @@
             accountDropdown.classList.remove('is-open');
         }
 
-        accountBtn.addEventListener('click', toggleDropdown);
-
         document.addEventListener('click', function(e) {
-            if (dropdownOpen && !accountDropdown.contains(e.target) && e.target !== accountBtn) {
+            if (dropdownOpen && !accountDropdown.contains(e.target) && e.target !== authBtn) {
                 closeDropdown();
             }
         });
 
+        // Dropdown items
         accountDropdown.querySelectorAll('.dropdown-item').forEach(item => {
             item.addEventListener('click', function(e) {
                 const action = this.dataset.action;
                 closeDropdown();
+                if (!state.isAuthenticated) {
+                    showToast('Please sign in first.', 'warning');
+                    return;
+                }
                 switch (action) {
-                    case 'account':
-                        if (state.user) {
-                            showToast('Account: ' + state.user.email, 'info');
-                        } else {
-                            openAccountModal('signin');
-                        }
-                        break;
                     case 'profile':
                         if (state.user) {
-                            profileName.value = state.user.name || '';
+                            profileName.value = state.user.user_metadata?.full_name || state.user.email || '';
                             profileEmail.value = state.user.email || '';
                             openModal(profileModal);
-                        } else {
-                            showToast('Please sign in first.', 'warning');
                         }
                         break;
-                    case 'security':
-                        if (state.user) {
-                            openModal(securityModal);
-                        } else {
-                            showToast('Please sign in first.', 'warning');
-                        }
+                    case 'account':
+                        openModal(accountSettingsModal);
                         break;
                     case 'settings':
                         openModal(settingsModal);
                         break;
                     case 'logout':
-                        if (state.user) {
-                            openConfirmModal('Logout', 'Logout from your account?', logoutUser);
-                        } else {
-                            showToast('You are not signed in.', 'info');
-                        }
+                        openConfirmModal('Logout', 'Logout from your account?', signOut);
                         break;
                 }
             });
         });
 
-        settingsIcon.addEventListener('click', function(e) {
-            e.stopPropagation();
-            if (state.user) {
-                if (dropdownOpen) closeDropdown();
-                else {
-                    dropdownOpen = true;
-                    accountDropdown.classList.add('is-open');
-                }
+        // Auth modal events
+        authModalClose.addEventListener('click', () => closeModal(authModal));
+        authModal.addEventListener('click', function(e) {
+            if (e.target === this) closeModal(authModal);
+        });
+
+        authSwitchBtn.addEventListener('click', function() {
+            if (authMode === 'signin') {
+                openAuthModal('signup');
             } else {
-                openAccountModal('signin');
+                openAuthModal('signin');
             }
         });
 
-        // Account modal events
-        modalCloseBtn.addEventListener('click', () => closeModal(accountModal));
-        accountModal.addEventListener('click', function(e) {
-            if (e.target === this) closeModal(accountModal);
-        });
-        modalSwitchBtn.addEventListener('click', function() {
-            const isSignUp = modalSubmitBtn.textContent === 'Sign Up';
-            openAccountModal(isSignUp ? 'signin' : 'signup');
-        });
-        modalGuestBtn.addEventListener('click', function() {
-            closeModal(accountModal);
-            if (!state.user) {
-                state.user = null;
-                Storage.remove('user');
-                updateUIForUser(null);
-                showToast('Continuing as guest.', 'info');
+        authGuestBtn.addEventListener('click', function() {
+            closeModal(authModal);
+            if (!state.isAuthenticated) {
+                // Guest mode: clear any existing data, start fresh
+                state.conversations = {};
+                state.activeId = null;
+                const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
+                wrappers.forEach(el => el.remove());
+                emptyState.classList.remove('is-hidden');
+                chatTitle.textContent = APP_CONFIG.name;
+                renderHistory();
+                showToast('Continuing as guest. Chats will not be saved.', 'info');
             }
         });
-        modalSubmitBtn.addEventListener('click', function() {
-            const email = modalEmail.value.trim();
-            const password = modalPassword.value.trim();
+
+        authSubmitBtn.addEventListener('click', async function() {
+            const email = authEmail.value.trim();
+            const password = authPassword.value.trim();
             if (!email || !password) {
-                modalError.textContent = 'Please fill in all fields.';
-                modalError.classList.add('is-visible');
+                authError.textContent = 'Please fill in all fields.';
+                authError.classList.add('is-visible');
                 return;
             }
-            const isSignUp = modalSubmitBtn.textContent === 'Sign Up';
-            const name = isSignUp ? modalName.value.trim() || 'User' : 'User';
-            loginUser(email, password, name);
-        });
-
-        document.addEventListener('keydown', function(e) {
-            if (accountModal.classList.contains('is-active') && e.key === 'Enter') {
-                modalSubmitBtn.click();
+            if (authMode === 'signin') {
+                await signIn(email, password);
+            } else if (authMode === 'signup') {
+                const name = authName.value.trim() || 'User';
+                const confirm = authConfirmPassword.value.trim();
+                if (password !== confirm) {
+                    authError.textContent = 'Passwords do not match.';
+                    authError.classList.add('is-visible');
+                    return;
+                }
+                await signUp(email, password, name);
+            } else if (authMode === 'confirm') {
+                const code = authCode.value.trim();
+                if (!code) {
+                    authError.textContent = 'Please enter the confirmation code.';
+                    authError.classList.add('is-visible');
+                    return;
+                }
+                await confirmEmail(code);
             }
         });
 
-        // Profile modal
-        profileCloseBtn.addEventListener('click', () => closeModal(profileModal));
-        profileCloseActionBtn.addEventListener('click', () => closeModal(profileModal));
-        profileModal.addEventListener('click', function(e) { if (e.target === this) closeModal(profileModal); });
+        // Settings Icon (gear) on auth button - redirect to settings
+        settingsIcon.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (state.isAuthenticated) {
+                if (dropdownOpen) closeDropdown();
+                else openDropdown();
+            } else {
+                openAuthModal('signin');
+            }
+        });
 
-        // Security modal
-        securityCloseBtn.addEventListener('click', () => closeModal(securityModal));
-        securityCloseActionBtn.addEventListener('click', () => closeModal(securityModal));
-        securityModal.addEventListener('click', function(e) { if (e.target === this) closeModal(securityModal); });
-        securitySaveBtn.addEventListener('click', function() {
+        // Account Settings
+        accountSettingsCloseBtn.addEventListener('click', () => closeModal(accountSettingsModal));
+        accountSettingsCloseActionBtn.addEventListener('click', () => closeModal(accountSettingsModal));
+        accountSettingsModal.addEventListener('click', function(e) {
+            if (e.target === this) closeModal(accountSettingsModal);
+        });
+
+        changePassBtn.addEventListener('click', async function() {
             const curr = currentPass.value;
             const np = newPass.value;
             const conf = confirmPass.value;
@@ -2531,15 +2743,33 @@
                 return;
             }
             if (np !== conf) {
-                showToast('Passwords do not match.', 'error');
+                showToast('New passwords do not match.', 'error');
                 return;
             }
-            showToast('Password updated successfully (simulated).', 'success');
-            closeModal(securityModal);
-            currentPass.value = '';
-            newPass.value = '';
-            confirmPass.value = '';
+            if (!supabase || !state.user) return;
+            const { error } = await supabase.auth.updateUser({ password: np });
+            if (error) {
+                showToast('Error: ' + error.message, 'error');
+            } else {
+                showToast('Password updated successfully!', 'success');
+                currentPass.value = '';
+                newPass.value = '';
+                confirmPass.value = '';
+                closeModal(accountSettingsModal);
+            }
         });
+
+        deleteAccountBtn.addEventListener('click', function() {
+            openConfirmModal('Delete Account', 'Are you sure you want to permanently delete your account? This cannot be undone.', async function() {
+                await deleteAccount();
+                closeModal(accountSettingsModal);
+            });
+        });
+
+        // Profile modal
+        profileCloseBtn.addEventListener('click', () => closeModal(profileModal));
+        profileCloseActionBtn.addEventListener('click', () => closeModal(profileModal));
+        profileModal.addEventListener('click', function(e) { if (e.target === this) closeModal(profileModal); });
 
         // ==========================================================
         // SETTINGS
@@ -2586,7 +2816,6 @@
                 theme;
             document.documentElement.setAttribute('data-theme', resolved);
             if (theme !== 'system') Storage.set('theme', theme);
-            // Re-highlight code blocks
             document.querySelectorAll('.response-code-block pre code').forEach(block => {
                 hljs.highlightElement(block);
             });
@@ -2687,8 +2916,8 @@
                 id: id,
                 title: title || 'New Chat',
                 messages: [],
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
                 pinned: false,
             };
             return id;
@@ -2701,9 +2930,9 @@
         function addMessage(convId, role, content) {
             const conv = state.conversations[convId];
             if (!conv) return null;
-            const msg = { id: genId(), role: role, content: content, createdAt: Date.now() };
+            const msg = { id: genId(), role: role, content: content, createdAt: new Date().toISOString() };
             conv.messages.push(msg);
-            conv.updatedAt = Date.now();
+            conv.updatedAt = new Date().toISOString();
             return msg;
         }
 
@@ -2725,6 +2954,8 @@
             if (conv && conv.messages.length === 0) {
                 emptyState.classList.remove('is-hidden');
                 scrollBottomBtn.classList.remove('is-visible');
+            } else {
+                emptyState.classList.add('is-hidden');
             }
         }
 
@@ -2762,7 +2993,6 @@
             bubble.textContent = content;
             wrapper.appendChild(bubble);
 
-            // Actions for user (copy, edit)
             const actions = document.createElement('div');
             actions.className = 'message-actions';
             actions.innerHTML = `
@@ -2841,7 +3071,7 @@
         }
 
         // ==========================================================
-        // ASSISTANT MESSAGE (with Markdown, code blocks, actions)
+        // ASSISTANT MESSAGE
         // ==========================================================
         function appendAssistantMessage(messageId, content, isLoading = false) {
             const wrapper = document.createElement('div');
@@ -2860,7 +3090,6 @@
                 `;
                 wrapper.dataset.loading = 'true';
             } else {
-                // Render Markdown safely
                 let rawHtml = marked.parse(content);
                 const safeHtml = DOMPurify.sanitize(rawHtml, {
                     ALLOWED_TAGS: [
@@ -2907,14 +3136,12 @@
 
                     parentPre.parentNode.replaceChild(wrapperDiv, parentPre);
 
-                    // Syntax highlight
                     const codeEl = wrapperDiv.querySelector('code');
                     if (codeEl && lang !== 'plaintext') {
                         hljs.highlightElement(codeEl);
                     }
                 });
 
-                // Attach copy handlers for code blocks
                 bubble.querySelectorAll('.response-code-copy').forEach(btn => {
                     btn.addEventListener('click', function(e) {
                         const encoded = this.dataset.code;
@@ -3051,7 +3278,7 @@
         }
 
         // ==========================================================
-        // SEND MESSAGE — with attachment handling
+        // SEND MESSAGE — with file handling (base64)
         // ==========================================================
         let attachments = [];
 
@@ -3060,6 +3287,7 @@
             const message = text || userInput.value.trim();
             if (!message && attachments.length === 0) return;
 
+            // If guest, ensure we have a conversation (in-memory)
             let active = getActive();
             if (!state.activeId || (active && active.messages.length === 0)) {
                 if (!state.activeId) {
@@ -3078,19 +3306,26 @@
             let fullText = message;
             let hasAttachments = attachments.length > 0;
             let attachmentNames = [];
+            let fileDataArray = [];
 
             if (hasAttachments) {
                 attachmentNames = attachments.map(f => f.name);
-                const hasImages = attachments.some(f => f.type.startsWith('image/'));
-                const hasDocuments = attachments.some(f => !f.type.startsWith('image/'));
-                let attachmentNote = '📎 Attachments: ' + attachmentNames.join(', ');
-                if (hasImages) {
-                    attachmentNote += '\n\n⚠️ Note: I cannot see images directly. If you need help with something in the image, please describe what you see or explain your question.';
+                // Read files as base64
+                for (const file of attachments) {
+                    const dataUrl = await readFileAsDataURL(file);
+                    // dataUrl format: data:image/png;base64,xxxx
+                    const parts = dataUrl.split(',');
+                    const base64 = parts[1];
+                    const mimeType = parts[0].split(':')[1].split(';')[0];
+                    fileDataArray.push({
+                        name: file.name,
+                        type: mimeType,
+                        data: base64
+                    });
                 }
-                if (hasDocuments) {
-                    attachmentNote += '\n\n📄 For document files, please describe the content or question, as I don\'t have direct file access.';
-                }
-                fullText = message ? message + '\n\n' + attachmentNote : attachmentNote;
+                // Append attachment note in user message (for display)
+                const note = '📎 Attachments: ' + attachmentNames.join(', ');
+                fullText = message ? message + '\n\n' + note : note;
             }
 
             // Add user message
@@ -3128,19 +3363,24 @@
                     content: msg.content
                 }));
 
-                // Clean message for API (remove attachment notes)
-                const cleanMessage = message;
+                const payload = {
+                    message: message,
+                    history: history,
+                    model: state.selectedModel,
+                    temperature: state.temperature,
+                    webSearchEnabled: state.webSearchEnabled,
+                    userId: state.isAuthenticated ? state.user.id : null,
+                };
+
+                // If files exist, include them
+                if (fileDataArray.length > 0) {
+                    payload.files = fileDataArray;
+                }
 
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: cleanMessage,
-                        history: history,
-                        model: state.selectedModel,
-                        temperature: state.temperature,
-                        webSearchEnabled: state.webSearchEnabled,
-                    }),
+                    body: JSON.stringify(payload),
                     signal: state.abortController.signal,
                 });
 
@@ -3162,6 +3402,11 @@
 
                 const botMsg = addMessage(conv.id, 'assistant', aiResponse);
                 appendAssistantMessage(botMsg.id, aiResponse, false);
+
+                // Save conversation to Supabase if authenticated
+                if (state.isAuthenticated) {
+                    await saveConversationToSupabase(conv.id);
+                }
 
             } catch (error) {
                 if (error.name === 'AbortError') {
@@ -3197,6 +3442,15 @@
             updateScrollBtn();
             if (!state.userScrolledUp) scrollToBottom(true);
             userInput.focus();
+        }
+
+        function readFileAsDataURL(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
         }
 
         function stopGeneration() {
@@ -3262,8 +3516,8 @@
 
             const pinned = convs.filter(c => c.pinned);
             const unpinned = convs.filter(c => !c.pinned);
-            pinned.sort((a, b) => b.updatedAt - a.updatedAt);
-            unpinned.sort((a, b) => b.updatedAt - a.updatedAt);
+            pinned.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+            unpinned.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
             const sorted = [...pinned, ...unpinned];
 
             sorted.forEach((conv) => {
@@ -3294,8 +3548,8 @@
                         e.stopPropagation();
                         const action = btn.dataset.action;
                         if (action === 'delete') {
-                            openConfirmModal('Delete Conversation', 'Delete this conversation?', function() {
-                                deleteConversation(conv.id);
+                            openConfirmModal('Delete Conversation', 'Delete this conversation?', async function() {
+                                await deleteConversation(conv.id);
                             });
                         } else if (action === 'pin') {
                             togglePin(conv.id);
@@ -3315,7 +3569,7 @@
             });
         }
 
-        function deleteConversation(id) {
+        async function deleteConversation(id) {
             const conv = state.conversations[id];
             if (!conv) return;
             delete state.conversations[id];
@@ -3327,7 +3581,9 @@
                 emptyState.classList.remove('is-hidden');
                 scrollBottomBtn.classList.remove('is-visible');
             }
-            Storage.set('conversations', state.conversations);
+            if (state.isAuthenticated) {
+                await deleteConversationFromSupabase(id);
+            }
             renderHistory();
             showToast('Conversation deleted.', 'info');
         }
@@ -3342,12 +3598,13 @@
                 if (el) el.classList.add('is-active');
             }
             showToast(conv.pinned ? 'Pinned.' : 'Unpinned.', 'info');
+            // Save pin state if authenticated
+            if (state.isAuthenticated) {
+                saveConversationToSupabase(id);
+            }
         }
 
-        // ==========================================================
-        // NEW CHAT
-        // ==========================================================
-        newChatBtn.addEventListener('click', function() {
+        function newChat() {
             const emptyConv = Object.values(state.conversations).find(c => c.messages.length === 0);
             if (emptyConv) {
                 if (state.activeId === emptyConv.id) {
@@ -3377,7 +3634,9 @@
             renderAttachments();
             if (window.innerWidth <= 992) closeSidebar();
             scrollBottomBtn.classList.remove('is-visible');
-        });
+        }
+
+        newChatBtn.addEventListener('click', newChat);
 
         // ==========================================================
         // ATTACHMENTS
@@ -3421,8 +3680,9 @@
                 const div = document.createElement('div');
                 div.className = 'attachment-preview';
                 const isImage = file.type.startsWith('image/');
+                const url = isImage ? URL.createObjectURL(file) : '';
                 div.innerHTML = `
-                    ${isImage ? `<img src="${URL.createObjectURL(file)}" alt="${file.name}" />` : `<span class="file-icon">📄</span>`}
+                    ${isImage ? `<img src="${url}" alt="${file.name}" />` : `<span class="file-icon">📄</span>`}
                     <span class="file-name">${file.name}</span>
                     <button class="remove-attach" data-index="${index}" aria-label="Remove attachment">✕</button>
                 `;
@@ -3457,7 +3717,7 @@
         });
 
         // ==========================================================
-        // LOAD FROM URL
+        // LOAD FROM URL (sharing)
         // ==========================================================
         function loadFromURL() {
             const params = new URLSearchParams(window.location.search);
@@ -3482,47 +3742,15 @@
         // ==========================================================
         // INIT
         // ==========================================================
-        function init() {
+        async function init() {
             loadSettings();
+            await initAuth();
 
-            const savedConvs = Storage.get('conversations');
-            if (savedConvs && APP_CONFIG.enableLocalStorage) {
-                state.conversations = savedConvs;
-                const params = new URLSearchParams(window.location.search);
-                const convId = params.get('conversation');
-                if (convId && state.conversations[convId]) {
-                    state.activeId = convId;
-                    renderHistory();
-                    renderConversation(convId);
-                    const conv = state.conversations[convId];
-                    if (conv) chatTitle.textContent = conv.title;
-                    if (conv && conv.messages.length > 0) emptyState.classList.add('is-hidden');
-                    setTimeout(() => scrollToBottom(true), 300);
-                } else {
-                    const convs = Object.values(state.conversations);
-                    const withMessages = convs.filter(c => c.messages.length > 0);
-                    if (withMessages.length > 0) {
-                        const latest = withMessages.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-                        state.activeId = latest.id;
-                        renderHistory();
-                        renderConversation(latest.id);
-                        chatTitle.textContent = latest.title;
-                        emptyState.classList.add('is-hidden');
-                    } else if (convs.length > 0) {
-                        state.activeId = null;
-                        renderHistory();
-                        renderConversation(null);
-                        chatTitle.textContent = APP_CONFIG.name;
-                        emptyState.classList.remove('is-hidden');
-                    } else {
-                        state.activeId = null;
-                        renderHistory();
-                        renderConversation(null);
-                        chatTitle.textContent = APP_CONFIG.name;
-                        emptyState.classList.remove('is-hidden');
-                    }
-                }
-            } else {
+            // If not authenticated and no conversations, show empty state
+            if (!state.isAuthenticated && Object.keys(state.conversations).length === 0) {
+                // Create a temporary new chat if guest (in memory only)
+                // But we'll wait for first user message to create one.
+                // Show empty state.
                 state.activeId = null;
                 renderHistory();
                 renderConversation(null);
@@ -3530,33 +3758,34 @@
                 emptyState.classList.remove('is-hidden');
             }
 
-            if (APP_CONFIG.enableLocalStorage) {
+            // Load from URL (after init)
+            loadFromURL();
+
+            // Save conversations periodically for authenticated users
+            if (state.isAuthenticated) {
                 setInterval(() => {
-                    if (Object.keys(state.conversations).length > 0) {
-                        Storage.set('conversations', state.conversations);
-                    } else {
-                        Storage.remove('conversations');
+                    const active = getActive();
+                    if (active && state.isAuthenticated) {
+                        saveConversationToSupabase(active.id);
                     }
-                }, 5000);
+                }, 10000); // every 10 seconds
             }
 
             console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized.');
-            console.log('📋 Features: professional AI response formatting, account system, markdown, code blocks, sharing.');
+            console.log('📋 Features: Supabase auth, vision/file processing, chat sync, sharing.');
         }
 
-        window.addEventListener('beforeunload', function() {
-            if (Object.keys(state.conversations).length > 0) {
-                Storage.set('conversations', state.conversations);
-            } else {
-                Storage.remove('conversations');
+        window.addEventListener('beforeunload', async function() {
+            // Save current conversation if authenticated
+            if (state.isAuthenticated) {
+                const active = getActive();
+                if (active) {
+                    await saveConversationToSupabase(active.id);
+                }
             }
         });
 
         init();
-
-        window.addEventListener('load', function() {
-            loadFromURL();
-        });
 
         // ==========================================================
         // SHARE MODAL EVENTS
@@ -3599,10 +3828,10 @@
 
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
-                if (accountModal.classList.contains('is-active')) closeModal(accountModal);
+                if (authModal.classList.contains('is-active')) closeModal(authModal);
                 if (settingsModal.classList.contains('is-active')) closeModal(settingsModal);
                 if (profileModal.classList.contains('is-active')) closeModal(profileModal);
-                if (securityModal.classList.contains('is-active')) closeModal(securityModal);
+                if (accountSettingsModal.classList.contains('is-active')) closeModal(accountSettingsModal);
                 if (shareModal.classList.contains('is-active')) closeModal(shareModal);
                 if (confirmModal.classList.contains('is-active')) closeModal(confirmModal);
                 if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
