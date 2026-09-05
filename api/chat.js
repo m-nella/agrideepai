@@ -1,15 +1,7 @@
 // ==========================================================
 // AgriDeepAI Backend — Vercel Serverless Function
+// No external dependencies — only native Node.js modules
 // ==========================================================
-
-import { createClient } from '@supabase/supabase-js';
-import { PDFExtract } from 'pdf-parse'; // using pdf-parse for PDFs
-import mammoth from 'mammoth'; // for docx
-
-// Supabase client
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -17,7 +9,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, history, model, temperature, webSearchEnabled, files, userId } = req.body;
+    const { message, history, model, temperature, webSearchEnabled, files } = req.body;
 
     if (!message && !files) {
       return res.status(400).json({ error: 'Message or files required' });
@@ -25,18 +17,28 @@ export default async function handler(req, res) {
 
     console.log('📩 Received message:', message);
     console.log('📎 Files received:', files ? files.length : 0);
-    console.log('👤 User:', userId || 'guest');
     console.log('⚙️  Model:', model || 'auto');
     console.log('🌡️  Temperature:', temperature || 0.7);
     console.log('🔍 Web search enabled:', webSearchEnabled !== false);
 
-    // 1. Process files (if any)
-    let fileContents = '';
+    // 1. Process files: only images are used for vision; other files just provide context
     let visionPrompt = '';
+    let imageParts = [];
     if (files && files.length > 0) {
-      const processed = await processFiles(files);
-      fileContents = processed.text;
-      visionPrompt = processed.visionPrompt;
+      for (const file of files) {
+        if (file.type && file.type.startsWith('image/')) {
+          imageParts.push({
+            inline_data: {
+              mime_type: file.type,
+              data: file.data // base64
+            }
+          });
+          visionPrompt += `\n[Image: ${file.name}]`;
+        } else {
+          // For non‑images, we just note the attachment (no parsing)
+          visionPrompt += `\n[File attached: ${file.name} (type: ${file.type})]`;
+        }
+      }
     }
 
     // 2. Web search (if enabled)
@@ -57,27 +59,17 @@ export default async function handler(req, res) {
     if (visionPrompt) {
       userMessage += '\n\n' + visionPrompt;
     }
-    if (fileContents) {
-      userMessage += '\n\nFile content:\n' + fileContents;
-    }
     if (searchResults) {
       userMessage += '\n\nRelevant web search results:\n' + searchResults;
     }
 
-    // 5. Call AI (with multimodal support if vision is needed)
-    const response = await callAI(systemPrompt, userMessage, history, model, temperature, files);
-
-    // 6. If user is authenticated, save conversation to Supabase
-    if (userId && supabase) {
-      // Save chat history (we'll implement a simple store)
-      // For simplicity, we're not saving here but we'll save from frontend.
-      // Actually we'll handle saving on frontend via Supabase directly.
-    }
+    // 5. Call AI (with multimodal support if images provided)
+    const response = await callAI(systemPrompt, userMessage, history, model, temperature, imageParts);
 
     return res.status(200).json({
       response: response,
       searchUsed: !!searchResults,
-      fileProcessed: !!fileContents || !!visionPrompt,
+      fileProcessed: imageParts.length > 0,
     });
 
   } catch (error) {
@@ -86,47 +78,6 @@ export default async function handler(req, res) {
       error: error.message || 'Something went wrong. Please try again.'
     });
   }
-}
-
-// ==========================================================
-// FILE PROCESSING
-// ==========================================================
-async function processFiles(files) {
-  let text = '';
-  let visionPrompt = '';
-  for (const file of files) {
-    const { name, type, data } = file; // data is base64 string
-    if (type.startsWith('image/')) {
-      // For images, we'll use Gemini Vision; store base64
-      visionPrompt += `\n[Image: ${name}]`;
-      // We'll pass the base64 to the AI call
-    } else if (type === 'application/pdf') {
-      // Parse PDF
-      try {
-        const buffer = Buffer.from(data, 'base64');
-        const result = await PDFExtract(buffer);
-        text += `\n--- Content of ${name} ---\n${result.text}\n---\n`;
-      } catch (e) {
-        text += `\n[Could not parse PDF: ${name}]\n`;
-      }
-    } else if (type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-               type === 'application/msword') {
-      // Parse DOCX/DOC
-      try {
-        const buffer = Buffer.from(data, 'base64');
-        const result = await mammoth.extractRawText({ buffer });
-        text += `\n--- Content of ${name} ---\n${result.value}\n---\n`;
-      } catch (e) {
-        text += `\n[Could not parse document: ${name}]\n`;
-      }
-    } else if (type === 'text/plain') {
-      const content = Buffer.from(data, 'base64').toString('utf-8');
-      text += `\n--- Content of ${name} ---\n${content}\n---\n`;
-    } else {
-      text += `\n[Unsupported file type: ${name}]\n`;
-    }
-  }
-  return { text, visionPrompt };
 }
 
 // ==========================================================
@@ -140,7 +91,6 @@ You are AgriDeepAI, a warm, professional, and intelligent AI assistant created b
 - NEVER show your thinking process, reasoning, or analysis steps.
 - NEVER output phrases like "Here's my thinking", "Let me analyze", "Step 1", "I need to consider", or any internal reasoning.
 - ONLY output the final, polished, well-structured answer directly.
-- If you find yourself writing internal reasoning, STOP and rewrite the response as a direct answer only.
 - Your response should appear as if the answer came to you instantly and completely.
 
 Your primary expertise is Agriculture and Livestock, but you are also a friendly conversationalist. You can:
@@ -180,18 +130,18 @@ You are an expert in all things Agriculture and Livestock. You can answer questi
 - Keep paragraphs short and conversational.
 - When giving a list of examples, present them in a clean bulleted list.
 - For image attachments: You have vision capabilities, so you can describe what you see in the image and answer questions about it, but always relate it to agriculture/livestock if possible.
-- For document attachments: You can read text from PDF, DOCX, and TXT files and use that information in your response.
+- For other attachments: You can note that the user attached a file, but you cannot read its content directly.
 - Always end with a friendly question to engage the user further.
 
 ## Important Note:
-You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture. Your goal is to be helpful, engaging, and knowledgeable while staying true to your agricultural expertise. Your responses should feel like a professional human expert, not a machine showing its work.
+You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture. Your goal is to be helpful, engaging, and knowledgeable while staying true to your agricultural expertise.
 `;
 }
 
 // ==========================================================
 // AI CALL — Unified with fallbacks + Vision support
 // ==========================================================
-async function callAI(systemPrompt, userMessage, history, preferredModel, temperature, files) {
+async function callAI(systemPrompt, userMessage, history, preferredModel, temperature, imageParts) {
   const messages = [
     { role: 'system', content: systemPrompt }
   ];
@@ -204,58 +154,31 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
     }
   }
 
-  // Prepare user message with possible image attachments for Gemini Vision
-  let userContent = userMessage;
-  let hasVision = false;
-  let imageParts = [];
-
-  if (files && files.length > 0) {
-    for (const file of files) {
-      if (file.type && file.type.startsWith('image/')) {
-        hasVision = true;
-        imageParts.push({
-          inline_data: {
-            mime_type: file.type,
-            data: file.data // base64
-          }
-        });
-      }
-    }
-  }
-
-  // If vision is needed, we'll use Gemini 2.5 Pro which supports multimodal
-  if (hasVision && process.env.GOOGLE_API_KEY) {
-    // Use Gemini Vision
+  // If there are images, try Gemini Vision first
+  if (imageParts && imageParts.length > 0 && process.env.GOOGLE_API_KEY) {
     try {
       const geminiKey = process.env.GOOGLE_API_KEY;
-      const model = 'gemini-2.5-pro'; // or gemini-2.5-flash if available
+      const model = 'gemini-2.5-pro'; // or gemini-2.5-flash
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
 
-      // Build contents array
-      const contents = [];
-      // System instruction (as first part)
-      const systemText = systemPrompt;
-      // Combine conversation history into a single text
+      // Build parts: system + history + user text + images
+      const parts = [];
+
+      // Combine system and history into a single text block
       let historyText = '';
       if (history && history.length) {
         historyText = history.map(m => `${m.role}: ${m.content}`).join('\n');
       }
-      const userText = userMessage;
+      const fullText = `System: ${systemPrompt}\n\nHistory:\n${historyText}\n\nUser: ${userMessage}`;
+      parts.push({ text: fullText });
 
-      // Build parts: system + history + user text + images
-      const parts = [];
-      parts.push({ text: `System: ${systemText}\n\nHistory:\n${historyText}\n\nUser: ${userText}` });
       // Add images
       for (const imgPart of imageParts) {
         parts.push({ inline_data: imgPart.inline_data });
       }
 
       const requestBody = {
-        contents: [
-          {
-            parts: parts
-          }
-        ],
+        contents: [{ parts }],
         generationConfig: {
           temperature: temperature || 0.7,
           maxOutputTokens: 1024,
@@ -275,15 +198,15 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
       } else {
         const errorText = await response.text();
         console.warn('⚠️ Gemini Vision failed:', errorText);
-        // Fall through to regular text
+        // Fall through to text‑only models
       }
     } catch (err) {
       console.warn('⚠️ Gemini Vision error:', err.message);
     }
   }
 
-  // If no vision or vision failed, use regular text models (Groq or Gemini text)
-  // Build messages for text-only
+  // If no vision or vision failed, use text‑only models (Groq or Gemini text)
+  // Build messages for text‑only
   const textMessages = [
     { role: 'system', content: systemPrompt }
   ];
@@ -297,7 +220,6 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   }
   textMessages.push({ role: 'user', content: userMessage });
 
-  // Now try Groq and Gemini text
   // ==========================================================
   // 1. TRY GROQ
   // ==========================================================
