@@ -1,6 +1,6 @@
 // ==========================================================
 // AgriDeepAI Backend — Vercel Serverless Function
-// NO external dependencies — only native Node.js
+// NO external dependencies — pure Node.js
 // ==========================================================
 
 export default async function handler(req, res) {
@@ -15,9 +15,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Message or files required' });
     }
 
-    console.log('📩 Received message:', message);
+    console.log('📩 Message:', message);
+    console.log('📎 Files:', files ? files.length : 0);
+    console.log('⚙️ Model:', model || 'auto');
 
-    // 1. Process files (only images for vision)
+    // ----- Process files (images for vision) -----
     let visionPrompt = '';
     let imageParts = [];
     if (files && Array.isArray(files)) {
@@ -31,12 +33,12 @@ export default async function handler(req, res) {
           });
           visionPrompt += `\n[Image: ${file.name}]`;
         } else {
-          visionPrompt += `\n[File attached: ${file.name}]`;
+          visionPrompt += `\n[File: ${file.name}]`;
         }
       }
     }
 
-    // 2. Web search
+    // ----- Web search -----
     let searchResults = '';
     if (webSearchEnabled !== false && shouldPerformWebSearch(message)) {
       if (process.env.SERPER_API_KEY) {
@@ -46,15 +48,13 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3. Build system prompt
+    // ----- Build prompt -----
     const systemPrompt = getSystemPrompt();
-
-    // 4. Build user message
     let userMessage = message || '';
     if (visionPrompt) userMessage += '\n\n' + visionPrompt;
-    if (searchResults) userMessage += '\n\nRelevant web search results:\n' + searchResults;
+    if (searchResults) userMessage += '\n\nSearch results:\n' + searchResults;
 
-    // 5. Call AI
+    // ----- Call AI -----
     const response = await callAI(systemPrompt, userMessage, history, model, temperature, imageParts);
 
     return res.status(200).json({
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('❌ Backend error:', error);
+    console.error('❌ Error:', error);
     return res.status(500).json({
       error: error.message || 'Something went wrong. Please try again.',
     });
@@ -76,44 +76,48 @@ export default async function handler(req, res) {
 // ==========================================================
 function getSystemPrompt() {
   return `
-You are AgriDeepAI, a warm, professional, and intelligent AI assistant created by Ornella Mutuyimana, a Rwandan national with a deep passion for agriculture, food security, and agri-tech innovation.
+You are AgriDeepAI, a warm, professional AI assistant created by Ornella Mutuyimana, a Rwandan national passionate about agriculture and food security.
 
 ## CRITICAL RULE — NEVER EXPOSE INTERNAL REASONING
 - NEVER show your thinking process, reasoning, or analysis steps.
-- NEVER output phrases like "Here's my thinking", "Let me analyze", "Step 1", "I need to consider", or any internal reasoning.
-- ONLY output the final, polished, well-structured answer directly.
+- ONLY output the final, polished answer directly.
 
-Your primary expertise is Agriculture and Livestock, but you are also a friendly conversationalist. You can:
+Your primary expertise is Agriculture and Livestock. You can:
 - Greet users warmly and naturally
-- Answer questions about yourself, your creator (Ornella Mutuyimana), and your purpose
-- Have natural small talk while gently steering conversations back to agriculture when appropriate
-- Handle questions about Ornella's background, education, and mission
+- Answer questions about yourself and your creator (Ornella Mutuyimana)
+- Have natural small talk while steering back to agriculture
+- Acknowledge when a question is outside your expertise
 
 ## About Your Creator:
 Ornella Mutuyimana is a Rwandan national with an Advanced Level (A-level) certificate in Mathematics, Computer Science, and Economics (MCE) from Lycée Saint Marcel de Rukara (LSM Rukara). She created AgriDeepAI to bridge the gap between agricultural knowledge and the people who need it most.
 
 ## Your Core Role:
-You are an expert in all things Agriculture and Livestock.
+You are an expert in:
+- Crop Diseases & Treatments (Global & Rwanda)
+- Livestock Health & Management (Global & Rwanda)
+- Farming Techniques (Global & Rwanda)
+- Agricultural Challenges & Solutions
+- Agribusiness & Markets
+- Agricultural Research & Innovations
 
-## Rules for Your Responses:
+## Rules:
 - Be warm, professional, and approachable
 - Greet users naturally
-- Answer questions about Ornella and your purpose confidently
-- For completely unrelated topics, politely say you're specialized in Agriculture and Livestock
-- For greetings and small talk, respond naturally before steering the conversation to agriculture
+- Answer questions about Ornella confidently
+- For unrelated topics, politely say you specialize in Agriculture
+- For greetings and small talk, respond naturally
 - Always prioritize factual accuracy
-- Be concise, clear, and easy to understand
 
 ## Response Style:
-- NEVER include any reasoning, analysis, or "thinking" steps.
-- Use **bold** for emphasis and section headers.
-- Use bullet points or numbered lists.
-- Keep paragraphs short and conversational.
-- For image attachments: You have vision capabilities, describe what you see.
-- Always end with a friendly question to engage the user further.
+- NEVER include reasoning or "thinking" steps
+- Use **bold** for emphasis and section headers
+- Use bullet points or numbered lists
+- Keep paragraphs short
+- For image attachments: describe what you see
+- Always end with a friendly question
 
 ## Important Note:
-You are not just a rigid agricultural chatbot — you are a friendly, intelligent assistant who happens to specialize in agriculture.
+You are a friendly, intelligent assistant who happens to specialize in agriculture.
 `;
 }
 
@@ -132,20 +136,18 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   }
   messages.push({ role: 'user', content: userMessage });
 
-  // ---------- If we have images, try Gemini Vision ----------
+  // Try Gemini Vision for images
   if (imageParts && imageParts.length > 0 && process.env.GOOGLE_API_KEY) {
     try {
       const geminiKey = process.env.GOOGLE_API_KEY;
-      const model = 'gemini-2.5-pro';
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${geminiKey}`;
 
       const parts = [];
       let historyText = '';
       if (history && history.length) {
         historyText = history.map(m => `${m.role}: ${m.content}`).join('\n');
       }
-      const fullText = `System: ${systemPrompt}\n\nHistory:\n${historyText}\n\nUser: ${userMessage}`;
-      parts.push({ text: fullText });
+      parts.push({ text: `System: ${systemPrompt}\n\nHistory:\n${historyText}\n\nUser: ${userMessage}` });
       for (const img of imageParts) {
         parts.push({ inline_data: img.inline_data });
       }
@@ -164,11 +166,11 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
         return data.candidates[0].content.parts[0].text;
       }
     } catch (err) {
-      console.warn('⚠️ Gemini Vision error:', err.message);
+      console.warn('⚠️ Vision error:', err.message);
     }
   }
 
-  // ---------- Text-only messages ----------
+  // Text-only messages
   const textMessages = [
     { role: 'system', content: systemPrompt },
     ...(history ? history.slice(-10).filter(m => m.role === 'user' || m.role === 'assistant') : []),
@@ -178,10 +180,10 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   // Try Groq
   const groqKey = process.env.GROQ_API_KEY;
   if (groqKey) {
-    const groqModels = preferredModel && preferredModel.startsWith('groq/')
+    const models = preferredModel && preferredModel.startsWith('groq/')
       ? [preferredModel, 'groq/compound-mini', 'qwen/qwen3.6-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b']
       : ['groq/compound-mini', 'qwen/qwen3.6-27b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'];
-    for (const model of groqModels) {
+    for (const model of models) {
       try {
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
@@ -209,10 +211,10 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
   // Try Gemini text
   const geminiKey = process.env.GOOGLE_API_KEY;
   if (geminiKey) {
-    const geminiModels = preferredModel && preferredModel.startsWith('gemini-')
+    const models = preferredModel && preferredModel.startsWith('gemini-')
       ? [preferredModel, 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash']
       : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3.5-flash', 'gemini-3.6-flash'];
-    for (const model of geminiModels) {
+    for (const model of models) {
       try {
         const conversationText = textMessages.map(m => `${m.role}: ${m.content}`).join('\n');
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
@@ -239,10 +241,7 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
     try {
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${groqKey}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'groq/compound-mini',
           messages: textMessages,
@@ -257,14 +256,14 @@ async function callAI(systemPrompt, userMessage, history, preferredModel, temper
     } catch (e) { /* ignore */ }
   }
 
-  throw new Error('All AI providers failed. Please check API keys.');
+  throw new Error('All AI providers failed. Check API keys.');
 }
 
 // ==========================================================
 // WEB SEARCH
 // ==========================================================
 function shouldPerformWebSearch(message) {
-  const keywords = ['latest', 'current', 'today', 'now', 'recent', 'new', 'update', 'news', 'price', 'market', 'weather', 'forecast', '2025', '2026', '2027', 'what is the current', 'how much', 'price of', 'market price', 'recently', 'this year', 'this month'];
+  const keywords = ['latest', 'current', 'today', 'now', 'recent', 'new', 'update', 'news', 'price', 'market', 'weather', 'forecast', '2025', '2026', '2027', 'what is', 'how much', 'price of', 'market price', 'recently', 'this year'];
   const lower = message.toLowerCase();
   return keywords.some(kw => lower.includes(kw));
 }
@@ -283,7 +282,7 @@ async function performSerperSearch(query) {
     const results = data.organic || [];
     if (results.length === 0) return '';
     return results.slice(0, 5).map((r, i) =>
-      `\n${i+1}. ${r.title || 'Untitled'}\n   ${r.snippet || r.description || 'No description'}\n   Source: ${r.link || 'Unknown'}`
+      `\n${i+1}. ${r.title || 'Untitled'}\n   ${r.snippet || 'No description'}\n   Source: ${r.link || 'Unknown'}`
     ).join('');
   } catch { return ''; }
 }
@@ -302,7 +301,7 @@ async function performTavilySearch(query) {
     const results = data.results || [];
     if (results.length === 0) return '';
     return results.slice(0, 5).map((r, i) =>
-      `\n${i+1}. ${r.title || 'Untitled'}\n   ${r.content || r.snippet || 'No description'}\n   Source: ${r.url || 'Unknown'}`
+      `\n${i+1}. ${r.title || 'Untitled'}\n   ${r.content || 'No description'}\n   Source: ${r.url || 'Unknown'}`
     ).join('');
   } catch { return ''; }
 }
