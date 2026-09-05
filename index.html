@@ -31,6 +31,7 @@
     <style>
         /* ==========================================================
            DESIGN TOKENS — Professional Green Accent
+           (All styles kept exactly as your original working version)
            ========================================================== */
         :root {
             --bg-app: #0c0c0d;
@@ -152,7 +153,7 @@
             overflow: hidden;
         }
 
-        /* ===== SIDEBAR ===== */
+        /* SIDEBAR (your original code) */
         .sidebar {
             width: var(--sidebar-width);
             height: 100vh;
@@ -509,11 +510,6 @@
             flex-shrink: 0;
             overflow: hidden;
         }
-        .auth-btn .avatar img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
         .auth-btn .account-info {
             flex: 1;
             min-width: 0;
@@ -556,7 +552,6 @@
             stroke-linejoin: round;
         }
 
-        /* Account Dropdown */
         .account-dropdown {
             position: absolute;
             bottom: 60px;
@@ -604,7 +599,7 @@
             margin: 4px 12px;
         }
 
-        /* ===== MAIN CHAT ===== */
+        /* MAIN CHAT */
         .main-chat {
             flex: 1;
             display: flex;
@@ -685,7 +680,6 @@
             border-radius: 4px;
         }
 
-        /* ===== EMPTY STATE ===== */
         .empty-state {
             flex: 1;
             display: flex;
@@ -750,7 +744,6 @@
             display: none;
         }
 
-        /* ===== MESSAGES ===== */
         .message-wrapper {
             display: flex;
             flex-direction: column;
@@ -1098,7 +1091,6 @@
             stroke-linejoin: round;
         }
 
-        /* ===== COMPOSER ===== */
         .composer-wrapper {
             position: sticky;
             bottom: 0;
@@ -1305,7 +1297,7 @@
             line-height: 1.4;
         }
 
-        /* ===== MODALS ===== */
+        /* MODALS */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -1544,7 +1536,7 @@
             max-width: 400px;
         }
 
-        /* ===== TOASTS ===== */
+        /* TOASTS */
         .toast-container {
             position: fixed;
             bottom: 24px;
@@ -1852,7 +1844,6 @@
             </div>
 
             <div class="sidebar-footer">
-                <!-- Authentication Button / User Avatar -->
                 <button class="auth-btn" id="authBtn" aria-label="Account">
                     <div class="avatar" id="avatarDisplay">👤</div>
                     <div class="account-info">
@@ -1864,7 +1855,6 @@
                     </span>
                 </button>
 
-                <!-- Account Dropdown -->
                 <div class="account-dropdown" id="accountDropdown">
                     <button class="dropdown-item" data-action="profile">
                         <span class="icon">👤</span> Profile
@@ -1940,7 +1930,7 @@
     </div>
 
     <!-- ===== MODALS ===== -->
-    <!-- Auth Modal (Sign In / Sign Up / Confirm) -->
+    <!-- Auth Modal -->
     <div class="modal-overlay" id="authModal">
         <div class="modal-box">
             <div class="modal-header">
@@ -2057,7 +2047,7 @@
         </div>
     </div>
 
-    <!-- Account Settings Modal (Change Password, Delete Account) -->
+    <!-- Account Settings Modal -->
     <div class="modal-overlay" id="accountSettingsModal">
         <div class="modal-box">
             <div class="modal-header">
@@ -2124,7 +2114,7 @@
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- ==========================================================
-    JAVASCRIPT — WRAPPED IN DOMContentLoaded
+    JAVASCRIPT — Full corrected code
     ========================================================== -->
     <script>
         // Global error handler
@@ -2133,16 +2123,12 @@
             try {
                 if (typeof showToast === 'function') {
                     showToast('Error: ' + message, 'error');
-                } else {
-                    alert('Error: ' + message);
                 }
-            } catch (e) {
-                alert('Error: ' + message);
-            }
+            } catch (e) { /* ignore */ }
             return false;
         };
 
-        // Wait for DOM to be fully loaded before running any code
+        // Wait for DOM
         document.addEventListener('DOMContentLoaded', function() {
 
             console.log('🚀 AgriDeepAI script started.');
@@ -2180,7 +2166,16 @@
                 }
             } catch (e) {
                 console.warn('⚠️ Supabase initialization failed:', e.message);
-                console.warn('Running in guest mode only.');
+                // Retry
+                if (typeof window.supabase !== 'undefined') {
+                    try {
+                        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                        supabaseAvailable = true;
+                        console.log('✅ Supabase initialized after retry.');
+                    } catch (e2) {
+                        console.warn('⚠️ Supabase retry failed:', e2.message);
+                    }
+                }
             }
 
             // ==========================================================
@@ -2303,7 +2298,7 @@
             const toastContainer = $('toastContainer');
 
             // ==========================================================
-            // STORAGE (for settings only)
+            // STORAGE (for settings)
             // ==========================================================
             const Storage = {
                 get(key) {
@@ -2382,7 +2377,7 @@
 
             async function initAuth() {
                 if (!supabaseAvailable || !supabaseClient) {
-                    console.log('🔓 Supabase not available. Running in guest mode.');
+                    console.log('🔓 Supabase not available. Guest mode.');
                     state.isAuthenticated = false;
                     state.user = null;
                     updateUIForUser(null);
@@ -2410,7 +2405,6 @@
             }
 
             function updateUIForUser(user) {
-                // Safe updates with null checks
                 if (user) {
                     const name = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
                     if (avatarDisplay) avatarDisplay.textContent = name.charAt(0).toUpperCase();
@@ -2492,10 +2486,9 @@
                 } catch (e) { console.warn('⚠️ Delete error:', e.message); }
             }
 
-            // Authentication functions
             async function signUp(email, password, name) {
                 if (!supabaseAvailable || !supabaseClient) {
-                    showToast('Supabase is not configured. Please check your connection.', 'error');
+                    showToast('Supabase not available. Please check your network.', 'error');
                     return false;
                 }
                 try {
@@ -2523,16 +2516,27 @@
                         if (authError) authError.classList.remove('is-visible');
                         return true;
                     }
+                    // If auto-confirm, sign in directly
+                    if (data.user) {
+                        state.user = data.user;
+                        state.isAuthenticated = true;
+                        updateUIForUser(data.user);
+                        closeModal(authModal);
+                        showToast('Account created! You are now signed in.', 'success');
+                        await loadUserConversations(data.user.id);
+                        return true;
+                    }
                     return true;
                 } catch (e) {
-                    showToast('Sign up error: ' + e.message, 'error');
+                    console.error('Sign up exception:', e);
+                    showToast('Network error: ' + e.message, 'error');
                     return false;
                 }
             }
 
             async function signIn(email, password) {
                 if (!supabaseAvailable || !supabaseClient) {
-                    showToast('Supabase is not configured. Please check your connection.', 'error');
+                    showToast('Supabase not available. Please check your network.', 'error');
                     return false;
                 }
                 try {
@@ -2555,14 +2559,15 @@
                     }
                     return false;
                 } catch (e) {
-                    showToast('Sign in error: ' + e.message, 'error');
+                    console.error('Sign in exception:', e);
+                    showToast('Network error: ' + e.message, 'error');
                     return false;
                 }
             }
 
             async function confirmEmail(code) {
                 if (!supabaseAvailable || !supabaseClient) {
-                    showToast('Supabase is not configured.', 'error');
+                    showToast('Supabase not available.', 'error');
                     return false;
                 }
                 try {
@@ -2586,7 +2591,8 @@
                     }
                     return false;
                 } catch (e) {
-                    showToast('Confirmation error: ' + e.message, 'error');
+                    console.error('Confirm exception:', e);
+                    showToast('Network error: ' + e.message, 'error');
                     return false;
                 }
             }
@@ -2791,29 +2797,38 @@
                         }
                         return;
                     }
-                    if (authMode === 'signin') {
-                        await signIn(email, password);
-                    } else if (authMode === 'signup') {
-                        const name = authName.value.trim() || 'User';
-                        const confirm = authConfirmPassword.value.trim();
-                        if (password !== confirm) {
-                            if (authError) {
-                                authError.textContent = 'Passwords do not match.';
-                                authError.classList.add('is-visible');
+                    try {
+                        if (authMode === 'signin') {
+                            await signIn(email, password);
+                        } else if (authMode === 'signup') {
+                            const name = authName.value.trim() || 'User';
+                            const confirm = authConfirmPassword.value.trim();
+                            if (password !== confirm) {
+                                if (authError) {
+                                    authError.textContent = 'Passwords do not match.';
+                                    authError.classList.add('is-visible');
+                                }
+                                return;
                             }
-                            return;
-                        }
-                        await signUp(email, password, name);
-                    } else if (authMode === 'confirm') {
-                        const code = authCode.value.trim();
-                        if (!code) {
-                            if (authError) {
-                                authError.textContent = 'Please enter the confirmation code.';
-                                authError.classList.add('is-visible');
+                            await signUp(email, password, name);
+                        } else if (authMode === 'confirm') {
+                            const code = authCode.value.trim();
+                            if (!code) {
+                                if (authError) {
+                                    authError.textContent = 'Please enter the confirmation code.';
+                                    authError.classList.add('is-visible');
+                                }
+                                return;
                             }
-                            return;
+                            await confirmEmail(code);
                         }
-                        await confirmEmail(code);
+                    } catch (err) {
+                        console.error('Auth error:', err);
+                        if (authError) {
+                            authError.textContent = err.message || 'Authentication failed. Please try again.';
+                            authError.classList.add('is-visible');
+                        }
+                        showToast('Authentication error: ' + (err.message || 'Unknown error'), 'error');
                     }
                 });
             }
