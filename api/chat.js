@@ -1,24 +1,29 @@
 // ==========================================================
-// AgriDeepAI Backend — Self-contained (No external imports)
+// AgriDeepAI Backend — Single handler for all API routes
 // ==========================================================
 
-// Use native Node.js crypto for hashing
 import crypto from 'crypto';
 
-// In-memory storage (for codes and users)
-const codeStore = {}; // email -> { code, expiry, userId }
-const userStore = {}; // email -> { id, email, name, passwordHash }
+// In-memory storage
+const codeStore = {};
+const userStore = {};
+const conversationStore = {};
 
-// Brevo config
 const BREVO_API_KEY = process.env.BREVO_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'mutuyimanaornella00@gmail.com';
 
-// Helper: generate random ID
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function generateCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 function generateId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// Helper: hash password (simple SHA-256 + salt — not as secure as bcrypt, but works for demo)
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.createHash('sha256').update(salt + password).digest('hex');
@@ -30,19 +35,8 @@ function verifyPassword(password, salt, hash) {
   return computed === hash;
 }
 
-// Helper: validate email
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-// Helper: generate 6-digit code
-function generateCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-// Helper: send email via Brevo
 async function sendVerificationEmail(email, code) {
-  if (!BREVO_API_KEY) throw new Error('BREVO_API_KEY not set');
+  if (!BREVO_API_KEY) throw new Error('BREVO_API_KEY is not set');
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
@@ -98,7 +92,7 @@ async function sendVerificationEmail(email, code) {
 }
 
 // ==========================================================
-// Handler
+// Main handler
 // ==========================================================
 export default async function handler(req, res) {
   // Always JSON
@@ -114,161 +108,99 @@ export default async function handler(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const path = url.pathname;
 
-  // ---- ROUTING ----
   try {
+    // ---- SEND VERIFICATION (sign-up flow) ----
     if (req.method === 'POST' && path === '/api/send-verification') {
-      return handleSendVerification(req, res);
+      const { email, code } = req.body;
+      if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+      if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+      codeStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000 };
+      try {
+        await sendVerificationEmail(email, code);
+        return res.status(200).json({ success: true, message: 'Verification code sent' });
+      } catch (err) {
+        return res.status(500).json({ error: 'Failed to send email: ' + err.message });
+      }
     }
+
+    // ---- SIGNUP ----
     if (req.method === 'POST' && path === '/api/auth/signup') {
-      return handleSignup(req, res);
+      const { email, password, name, verificationCode } = req.body;
+      if (!email || !password || !name || !verificationCode) {
+        return res.status(400).json({ error: 'All fields required' });
+      }
+      if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+      const stored = codeStore[email];
+      if (!stored) return res.status(400).json({ error: 'No code found. Please request a new code.' });
+      if (stored.code !== verificationCode) return res.status(400).json({ error: 'Invalid verification code' });
+      if (stored.expiry < Date.now()) return res.status(400).json({ error: 'Verification code expired. Please request a new code.' });
+      if (userStore[email]) return res.status(400).json({ error: 'Email already registered' });
+      const { salt, hash } = hashPassword(password);
+      const userId = generateId();
+      userStore[email] = { id: userId, email, name, passwordHash: hash, salt };
+      delete codeStore[email];
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      return res.status(200).json({ user: { id: userId, email, name }, sessionToken });
     }
+
+    // ---- LOGIN (send code) ----
     if (req.method === 'POST' && path === '/api/auth/login') {
-      return handleLogin(req, res);
+      const { email, password } = req.body;
+      if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+      if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+      const user = userStore[email];
+      if (!user) return res.status(400).json({ error: 'Invalid email or password' });
+      if (!verifyPassword(password, user.salt, user.passwordHash)) {
+        return res.status(400).json({ error: 'Invalid email or password' });
+      }
+      const code = generateCode();
+      codeStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000, userId: user.id };
+      try {
+        await sendVerificationEmail(email, code);
+        return res.status(200).json({ message: 'Verification code sent', userId: user.id });
+      } catch (err) {
+        return res.status(500).json({ error: 'Failed to send email: ' + err.message });
+      }
     }
+
+    // ---- VERIFY LOGIN ----
     if (req.method === 'POST' && path === '/api/auth/verify-login') {
-      return handleVerifyLogin(req, res);
+      const { email, code } = req.body;
+      if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+      if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+      const stored = codeStore[email];
+      if (!stored) return res.status(400).json({ error: 'No code found. Please request a new code.' });
+      if (stored.code !== code) return res.status(400).json({ error: 'Invalid verification code' });
+      if (stored.expiry < Date.now()) return res.status(400).json({ error: 'Verification code expired. Please request a new code.' });
+      const user = userStore[email];
+      if (!user) return res.status(400).json({ error: 'User not found' });
+      delete codeStore[email];
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      return res.status(200).json({ user: { id: user.id, email: user.email, name: user.name }, sessionToken });
     }
+
+    // ---- CONVERSATIONS ----
     if (req.method === 'GET' && path === '/api/conversations') {
-      return handleGetConversations(req, res);
+      const { userId } = req.query;
+      if (!userId) return res.status(400).json({ error: 'userId required' });
+      return res.status(200).json({ conversations: conversationStore[userId] || [] });
     }
     if (req.method === 'POST' && path === '/api/conversations') {
-      return handleSaveConversations(req, res);
+      const { userId, conversations } = req.body;
+      if (!userId || !conversations) return res.status(400).json({ error: 'userId and conversations required' });
+      conversationStore[userId] = conversations;
+      return res.status(200).json({ success: true });
     }
-    // Chat endpoint (placeholder)
+
+    // ---- CHAT (placeholder) ----
     if (req.method === 'POST' && path === '/api/chat') {
-      return res.status(200).json({ response: 'AI placeholder' });
+      return res.status(200).json({ response: 'AI placeholder – replace with your Groq/Gemini logic' });
     }
-    // 404
+
+    // ---- 404 ----
     res.status(404).json({ error: 'Not found' });
   } catch (error) {
-    console.error('Error:', error.message);
-    res.status(500).json({ error: error.message || 'Internal error' });
+    console.error('Handler error:', error.message);
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
-}
-
-// ==========================================================
-// Handlers
-// ==========================================================
-
-// --- Send verification code (sign-up flow) ---
-async function handleSendVerification(req, res) {
-  const { email, code } = req.body;
-  if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
-  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
-
-  // Store code in memory
-  codeStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000 };
-
-  // Send email
-  try {
-    await sendVerificationEmail(email, code);
-    return res.status(200).json({ success: true, message: 'Verification code sent' });
-  } catch (err) {
-    console.error('Send email error:', err.message);
-    return res.status(500).json({ error: 'Failed to send email: ' + err.message });
-  }
-}
-
-// --- Sign up ---
-async function handleSignup(req, res) {
-  const { email, password, name, verificationCode } = req.body;
-  if (!email || !password || !name || !verificationCode) {
-    return res.status(400).json({ error: 'All fields required' });
-  }
-  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
-
-  // Verify code
-  const stored = codeStore[email];
-  if (!stored) return res.status(400).json({ error: 'No code found. Please request a new code.' });
-  if (stored.code !== verificationCode) return res.status(400).json({ error: 'Invalid verification code' });
-  if (stored.expiry < Date.now()) return res.status(400).json({ error: 'Verification code expired. Please request a new code.' });
-
-  // Check if user already exists
-  if (userStore[email]) return res.status(400).json({ error: 'Email already registered' });
-
-  // Hash password
-  const { salt, hash } = hashPassword(password);
-  const userId = generateId();
-
-  // Save user
-  userStore[email] = { id: userId, email, name, passwordHash: hash, salt };
-
-  // Delete used code
-  delete codeStore[email];
-
-  // Generate session token
-  const sessionToken = crypto.randomBytes(32).toString('hex');
-
-  return res.status(200).json({
-    user: { id: userId, email, name },
-    sessionToken,
-  });
-}
-
-// --- Login (send code) ---
-async function handleLogin(req, res) {
-  const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
-
-  const user = userStore[email];
-  if (!user) return res.status(400).json({ error: 'Invalid email or password' });
-
-  // Verify password
-  if (!verifyPassword(password, user.salt, user.passwordHash)) {
-    return res.status(400).json({ error: 'Invalid email or password' });
-  }
-
-  // Generate and store code
-  const code = generateCode();
-  codeStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000, userId: user.id };
-
-  // Send email
-  try {
-    await sendVerificationEmail(email, code);
-    return res.status(200).json({ message: 'Verification code sent', userId: user.id });
-  } catch (err) {
-    return res.status(500).json({ error: 'Failed to send email: ' + err.message });
-  }
-}
-
-// --- Verify login (confirm code) ---
-async function handleVerifyLogin(req, res) {
-  const { email, code } = req.body;
-  if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
-  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
-
-  const stored = codeStore[email];
-  if (!stored) return res.status(400).json({ error: 'No code found. Please request a new code.' });
-  if (stored.code !== code) return res.status(400).json({ error: 'Invalid verification code' });
-  if (stored.expiry < Date.now()) return res.status(400).json({ error: 'Verification code expired. Please request a new code.' });
-
-  const user = userStore[email];
-  if (!user) return res.status(400).json({ error: 'User not found' });
-
-  delete codeStore[email];
-
-  const sessionToken = crypto.randomBytes(32).toString('hex');
-
-  return res.status(200).json({
-    user: { id: user.id, email: user.email, name: user.name },
-    sessionToken,
-  });
-}
-
-// --- Conversations (simple in-memory) ---
-const conversationStore = {};
-
-async function handleGetConversations(req, res) {
-  const { userId } = req.query;
-  if (!userId) return res.status(400).json({ error: 'userId required' });
-  const convs = conversationStore[userId] || [];
-  return res.status(200).json({ conversations: convs });
-}
-
-async function handleSaveConversations(req, res) {
-  const { userId, conversations } = req.body;
-  if (!userId || !conversations) return res.status(400).json({ error: 'userId and conversations required' });
-  conversationStore[userId] = conversations;
-  return res.status(200).json({ success: true });
 }
