@@ -14,7 +14,7 @@ const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 if (!supabase) {
-  console.warn('⚠️ Supabase not configured. Auth will fail.');
+  console.warn('⚠️ Supabase not configured.');
 }
 
 // ------------------------------
@@ -33,51 +33,53 @@ function generateCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Helper: send verification email via Brevo (always throws on error)
+// Helper: send verification email via Brevo
 async function sendVerificationEmail(email, code) {
   if (!brevoApiKey) throw new Error('BREVO_API_KEY is not set');
+  
+  const payload = {
+    sender: { email: emailFrom, name: 'AgriDeepAI' },
+    to: [{ email }],
+    subject: 'AgriDeepAI — Your Verification Code',
+    htmlContent: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"><style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0c0c0d; color: #ececf0; padding: 40px 20px; }
+        .container { max-width: 500px; margin: 0 auto; background: #141416; border-radius: 12px; padding: 40px; border: 1px solid #262628; }
+        .logo { text-align: center; margin-bottom: 16px; }
+        .logo img { width: 60px; height: 60px; border-radius: 12px; }
+        h1 { color: #2b7d4b; font-size: 28px; margin: 0 0 8px 0; text-align: center; }
+        .subtitle { color: #9a9aa2; font-size: 16px; margin: 0 0 24px 0; text-align: center; }
+        .code-box { background: #1a1a1c; border: 1px solid #2b7d4b; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0; }
+        .code { font-size: 36px; letter-spacing: 8px; color: #ececf0; font-weight: 700; }
+        .expiry { color: #5c5c62; font-size: 14px; margin-top: 16px; }
+        .footer { border-top: 1px solid #262628; padding-top: 20px; margin-top: 24px; color: #5c5c62; font-size: 13px; text-align: center; }
+      </style></head>
+      <body>
+        <div class="container">
+          <div class="logo"><img src="https://agrideepai.vercel.app/logo.png" alt="AgriDeepAI Logo" /></div>
+          <h1>AgriDeepAI</h1>
+          <p class="subtitle">Your verification code</p>
+          <div class="code-box"><div class="code">${code}</div></div>
+          <p style="color:#9a9aa2; text-align:center;">Enter this code to verify your email address.</p>
+          <p class="expiry">⏱ This code expires in <strong>5 minutes</strong>.</p>
+          <div class="footer">If you didn't request this, please ignore this email.<br>&copy; AgriDeepAI — Your AI assistant for agriculture &amp; livestock</div>
+        </div>
+      </body>
+      </html>
+    `,
+  };
+
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
       'api-key': brevoApiKey,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      // Added User-Agent to avoid Brevo browser detection issues
       'User-Agent': 'AgriDeepAI-Backend/2.0',
     },
-    body: JSON.stringify({
-      sender: { email: emailFrom, name: 'AgriDeepAI' },
-      to: [{ email }],
-      subject: 'AgriDeepAI — Your Verification Code',
-      htmlContent: `
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="UTF-8"><style>
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0c0c0d; color: #ececf0; padding: 40px 20px; }
-          .container { max-width: 500px; margin: 0 auto; background: #141416; border-radius: 12px; padding: 40px; border: 1px solid #262628; }
-          .logo { text-align: center; margin-bottom: 16px; }
-          .logo img { width: 60px; height: 60px; border-radius: 12px; }
-          h1 { color: #2b7d4b; font-size: 28px; margin: 0 0 8px 0; text-align: center; }
-          .subtitle { color: #9a9aa2; font-size: 16px; margin: 0 0 24px 0; text-align: center; }
-          .code-box { background: #1a1a1c; border: 1px solid #2b7d4b; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0; }
-          .code { font-size: 36px; letter-spacing: 8px; color: #ececf0; font-weight: 700; }
-          .expiry { color: #5c5c62; font-size: 14px; margin-top: 16px; }
-          .footer { border-top: 1px solid #262628; padding-top: 20px; margin-top: 24px; color: #5c5c62; font-size: 13px; text-align: center; }
-        </style></head>
-        <body>
-          <div class="container">
-            <div class="logo"><img src="https://agrideepai.vercel.app/logo.png" alt="AgriDeepAI Logo" /></div>
-            <h1>AgriDeepAI</h1>
-            <p class="subtitle">Your verification code</p>
-            <div class="code-box"><div class="code">${code}</div></div>
-            <p style="color:#9a9aa2; text-align:center;">Enter this code to verify your email address.</p>
-            <p class="expiry">⏱ This code expires in <strong>5 minutes</strong>.</p>
-            <div class="footer">If you didn't request this, please ignore this email.<br>&copy; AgriDeepAI — Your AI assistant for agriculture &amp; livestock</div>
-          </div>
-        </body>
-        </html>
-      `,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -95,13 +97,15 @@ async function sendVerificationEmail(email, code) {
 }
 
 // ==========================================================
-// ROUTER (global try-catch ensures JSON)
+// ROUTER (guaranteed JSON)
 // ==========================================================
 export default async function handler(req, res) {
-  // CORS
+  // Always set JSON content type
+  res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
@@ -140,12 +144,11 @@ export default async function handler(req, res) {
 }
 
 // ==========================================================
-// HANDLERS (all return JSON)
+// HANDLERS (always return JSON)
 // ==========================================================
 
-// ----- CHAT (placeholder – replace with your real AI) -----
+// ----- CHAT (placeholder) -----
 async function handleChat(req, res) {
-  // Temporary dummy response
   res.status(200).json({ response: 'AI response placeholder – replace with your Groq/Gemini logic' });
 }
 
