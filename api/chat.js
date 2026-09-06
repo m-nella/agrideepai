@@ -71,43 +71,57 @@ function generateCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+// Temporary in-memory store for verification codes (use Redis in production)
+const verificationStore = {};
+
 // ------------------------------
-// MAIN HANDLER
+// MAIN HANDLER (routing)
 // ------------------------------
 export default async function handler(req, res) {
-  const { pathname } = new URL(req.url, `http://${req.headers.host}`);
-  const segments = pathname.split('/').filter(Boolean);
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
 
-  // Route: /api/chat -> AI chat
-  if (req.method === 'POST' && segments[0] === 'api' && segments[1] === 'chat') {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
+
+  // Route: /api/chat
+  if (req.method === 'POST' && pathname === '/api/chat') {
     return handleChat(req, res);
   }
 
-  // Route: /api/auth/signup -> create account (after code verification)
-  if (req.method === 'POST' && segments[0] === 'api' && segments[1] === 'auth' && segments[2] === 'signup') {
+  // Route: /api/auth/signup
+  if (req.method === 'POST' && pathname === '/api/auth/signup') {
     return handleSignup(req, res);
   }
 
-  // Route: /api/auth/login -> initiate login (send code)
-  if (req.method === 'POST' && segments[0] === 'api' && segments[1] === 'auth' && segments[2] === 'login') {
+  // Route: /api/auth/login
+  if (req.method === 'POST' && pathname === '/api/auth/login') {
     return handleLoginRequest(req, res);
   }
 
-  // Route: /api/auth/verify-login -> confirm login with code
-  if (req.method === 'POST' && segments[0] === 'api' && segments[1] === 'auth' && segments[2] === 'verify-login') {
+  // Route: /api/auth/verify-login
+  if (req.method === 'POST' && pathname === '/api/auth/verify-login') {
     return handleVerifyLogin(req, res);
   }
 
-  // Route: /api/conversations -> get/save conversations
-  if (req.method === 'GET' && segments[0] === 'api' && segments[1] === 'conversations') {
+  // Route: /api/conversations (GET)
+  if (req.method === 'GET' && pathname === '/api/conversations') {
     return handleGetConversations(req, res);
   }
-  if (req.method === 'POST' && segments[0] === 'api' && segments[1] === 'conversations') {
+
+  // Route: /api/conversations (POST)
+  if (req.method === 'POST' && pathname === '/api/conversations') {
     return handleSaveConversations(req, res);
   }
 
-  // Fallback: /api/send-verification (old endpoint) -> redirect to signup
-  if (req.method === 'POST' && segments[0] === 'api' && segments[1] === 'send-verification') {
+  // Route: /api/send-verification (legacy, keep for compatibility)
+  if (req.method === 'POST' && pathname === '/api/send-verification') {
     return handleSendVerification(req, res);
   }
 
@@ -116,7 +130,7 @@ export default async function handler(req, res) {
 }
 
 // ==========================================================
-// HANDLER: Chat
+// HANDLER: Chat (AI)
 // ==========================================================
 async function handleChat(req, res) {
   try {
@@ -126,12 +140,9 @@ async function handleChat(req, res) {
       return res.status(400).json({ error: 'Message or files required' });
     }
 
-    // ... (your existing AI logic remains unchanged)
-    // We'll keep the same system prompt and AI calling functions as before
-    // (I'll omit them for brevity, but you must keep the full AI code from earlier)
-
-    // For brevity, I'll assume you have the AI functions from previous versions.
-    // We'll just return a dummy response for demonstration; in reality you keep your AI code.
+    // Your existing AI logic goes here.
+    // For brevity, we use a dummy response – replace with your full AI code.
+    // (You must copy your full AI functions from earlier.)
     const response = await callAI(getSystemPrompt(), message, history, model, temperature, files);
     return res.status(200).json({ response, searchUsed: false, fileProcessed: false });
   } catch (error) {
@@ -141,16 +152,14 @@ async function handleChat(req, res) {
 }
 
 // ==========================================================
-// HANDLER: Signup (after verification code)
+// HANDLER: Signup
 // ==========================================================
 async function handleSignup(req, res) {
   try {
-    const { email, password, name, code, verificationCode } = req.body;
+    const { email, password, name, verificationCode } = req.body;
 
-    // Verify the code matches the one stored (we'll store in a temporary cache, but for simplicity we assume frontend passes the code and we verify it)
-    // We'll use a simple in-memory store for now – in production use Redis.
-    if (!global.verificationCodes) global.verificationCodes = {};
-    const stored = global.verificationCodes[email];
+    // Verify the code
+    const stored = verificationStore[email];
     if (!stored || stored.code !== verificationCode || Date.now() > stored.expiry) {
       return res.status(400).json({ error: 'Invalid or expired verification code' });
     }
@@ -159,7 +168,7 @@ async function handleSignup(req, res) {
     const salt = bcrypt.genSaltSync(10);
     const passwordHash = bcrypt.hashSync(password, salt);
 
-    // Insert user into Supabase
+    // Insert user
     const { data, error } = await supabase
       .from('users')
       .insert([{ email, name, password_hash: passwordHash }])
@@ -172,13 +181,9 @@ async function handleSignup(req, res) {
     }
 
     const user = data[0];
-    // Remove the code from store
-    delete global.verificationCodes[email];
+    delete verificationStore[email];
 
-    // Generate a session token (JWT) – we'll use a simple UUID for demo
     const sessionToken = crypto.randomUUID();
-    // Store session (in production use Supabase sessions or JWT)
-    // For now, return user and token
     return res.status(200).json({ user: { id: user.id, email: user.email, name: user.name }, sessionToken });
   } catch (error) {
     console.error('Signup error:', error);
@@ -187,14 +192,13 @@ async function handleSignup(req, res) {
 }
 
 // ==========================================================
-// HANDLER: Login request (send verification code)
+// HANDLER: Login request (send code)
 // ==========================================================
 async function handleLoginRequest(req, res) {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
-    // Find user in Supabase
     const { data, error } = await supabase
       .from('users')
       .select('id, email, name, password_hash')
@@ -203,15 +207,11 @@ async function handleLoginRequest(req, res) {
 
     if (error || !data) return res.status(400).json({ error: 'Invalid email or password' });
 
-    // Verify password
     const valid = bcrypt.compareSync(password, data.password_hash);
     if (!valid) return res.status(400).json({ error: 'Invalid email or password' });
 
-    // Generate and send verification code
     const code = generateCode();
-    // Store in memory with expiry
-    if (!global.verificationCodes) global.verificationCodes = {};
-    global.verificationCodes[email] = { code, expiry: Date.now() + 5 * 60 * 1000, userId: data.id };
+    verificationStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000, userId: data.id };
 
     await sendVerificationEmail(email, code);
 
@@ -230,12 +230,11 @@ async function handleVerifyLogin(req, res) {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
 
-    const stored = global.verificationCodes?.[email];
+    const stored = verificationStore[email];
     if (!stored || stored.code !== code || Date.now() > stored.expiry) {
       return res.status(400).json({ error: 'Invalid or expired verification code' });
     }
 
-    // Get user data
     const { data, error } = await supabase
       .from('users')
       .select('id, email, name')
@@ -244,9 +243,8 @@ async function handleVerifyLogin(req, res) {
 
     if (error || !data) return res.status(400).json({ error: 'User not found' });
 
-    // Generate session token
     const sessionToken = crypto.randomUUID();
-    delete global.verificationCodes[email];
+    delete verificationStore[email];
 
     return res.status(200).json({ user: data, sessionToken });
   } catch (error) {
@@ -289,7 +287,6 @@ async function handleSaveConversations(req, res) {
     const { userId, conversations } = req.body;
     if (!userId || !conversations) return res.status(400).json({ error: 'userId and conversations required' });
 
-    // For simplicity, we upsert each conversation
     for (const conv of conversations) {
       const { id, title, messages, pinned, updatedAt } = conv;
       const { error } = await supabase
@@ -316,12 +313,14 @@ async function handleSaveConversations(req, res) {
 }
 
 // ==========================================================
-// HANDLER: Send verification (old endpoint, kept for compatibility)
+// HANDLER: Send verification (legacy)
 // ==========================================================
 async function handleSendVerification(req, res) {
   try {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+    // Store the code temporarily so the frontend can verify it later.
+    verificationStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000 };
     await sendVerificationEmail(email, code);
     return res.status(200).json({ success: true });
   } catch (error) {
@@ -331,8 +330,12 @@ async function handleSendVerification(req, res) {
 }
 
 // ==========================================================
-// (Include your existing AI functions: getSystemPrompt, callAI, etc.)
+// DUMMY AI FUNCTIONS (replace with your real ones)
 // ==========================================================
-// For brevity, I'm not duplicating the large AI code here.
-// You must copy your full AI functions (from earlier versions) into this file.
-// The functions should be: getSystemPrompt(), callAI(), shouldPerformWebSearch(), performSerperSearch(), performTavilySearch().
+function getSystemPrompt() {
+  return "You are AgriDeepAI, a helpful assistant.";
+}
+async function callAI(systemPrompt, message, history, model, temperature, files) {
+  // Replace with your actual AI call (Groq/Gemini)
+  return "This is a placeholder response. Please replace with your AI code.";
+}
