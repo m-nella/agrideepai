@@ -1,10 +1,11 @@
 {
   "name": "agrideepai",
   "version": "3.0.0",
-  "description": "AgriDeepAI with Supabase Auth",
+  "description": "AgriDeepAI with custom auth (like Online File Converter)",
   "main": "api/chat.js",
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.6"
+    "@supabase/supabase-js": "^2.45.6",
+    "bcryptjs": "^2.4.3"
   },
   "engines": {
     "node": "24.x"
