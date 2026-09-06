@@ -1,97 +1,58 @@
 // ==========================================================
-// AgriDeepAI Backend — Vercel Serverless
+// AgriDeepAI Backend — Self-contained (No external imports)
 // ==========================================================
 
-// Try to import Supabase, but fall back to in‑memory if not available
-let supabase = null;
-let supabaseAvailable = false;
+// Use native Node.js crypto for hashing
+import crypto from 'crypto';
 
-try {
-  const { createClient } = await import('@supabase/supabase-js');
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY;
-  if (supabaseUrl && supabaseKey) {
-    supabase = createClient(supabaseUrl, supabaseKey);
-    supabaseAvailable = true;
-  }
-} catch (e) {
-  console.warn('⚠️ Supabase not available, using in‑memory storage');
-}
-
-// In‑memory storage (not persistent across function calls)
-const memoryStore = {};
-
-// Helper: get storage
-function getStorage() {
-  if (supabaseAvailable) return supabase;
-  return {
-    from: (table) => ({
-      select: () => ({
-        eq: (field, value) => ({
-          maybeSingle: async () => {
-            if (table === 'verification_codes') {
-              const data = memoryStore[value];
-              return { data: data || null, error: null };
-            }
-            return { data: null, error: null };
-          }
-        })
-      }),
-      insert: (obj) => ({
-        select: () => ({
-          maybeSingle: async () => {
-            const key = obj[0].email;
-            memoryStore[key] = { code: obj[0].code, expiry: obj[0].expiry };
-            return { data: [{ id: 'mock', email: key, name: obj[0].name }], error: null };
-          }
-        })
-      }),
-      upsert: (obj, options) => ({
-        then: (cb) => {
-          const key = obj.email;
-          memoryStore[key] = { code: obj.code, expiry: obj.expiry, user_id: obj.user_id };
-          cb({ error: null });
-        }
-      }),
-      delete: () => ({
-        eq: (field, value) => ({
-          then: (cb) => {
-            delete memoryStore[value];
-            cb({ error: null });
-          }
-        })
-      })
-    })
-  };
-}
-
-const storage = getStorage();
+// In-memory storage (for codes and users)
+const codeStore = {}; // email -> { code, expiry, userId }
+const userStore = {}; // email -> { id, email, name, passwordHash }
 
 // Brevo config
-const brevoApiKey = process.env.BREVO_API_KEY;
-const emailFrom = process.env.EMAIL_FROM || 'mutuyimanaornella00@gmail.com';
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+const EMAIL_FROM = process.env.EMAIL_FROM || 'mutuyimanaornella00@gmail.com';
 
-// Helpers
+// Helper: generate random ID
+function generateId() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+// Helper: hash password (simple SHA-256 + salt — not as secure as bcrypt, but works for demo)
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.createHash('sha256').update(salt + password).digest('hex');
+  return { salt, hash };
+}
+
+function verifyPassword(password, salt, hash) {
+  const computed = crypto.createHash('sha256').update(salt + password).digest('hex');
+  return computed === hash;
+}
+
+// Helper: validate email
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// Helper: generate 6-digit code
 function generateCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+// Helper: send email via Brevo
 async function sendVerificationEmail(email, code) {
-  if (!brevoApiKey) throw new Error('BREVO_API_KEY is not set');
+  if (!BREVO_API_KEY) throw new Error('BREVO_API_KEY not set');
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
-      'api-key': brevoApiKey,
+      'api-key': BREVO_API_KEY,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'User-Agent': 'AgriDeepAI/2.0',
     },
     body: JSON.stringify({
-      sender: { email: emailFrom, name: 'AgriDeepAI' },
+      sender: { email: EMAIL_FROM, name: 'AgriDeepAI' },
       to: [{ email }],
       subject: 'AgriDeepAI — Your Verification Code',
       htmlContent: `
@@ -125,7 +86,7 @@ async function sendVerificationEmail(email, code) {
     }),
   });
   if (!response.ok) {
-    let msg = `Brevo API error: ${response.status}`;
+    let msg = `Brevo error: ${response.status}`;
     try {
       const text = await response.text();
       const json = JSON.parse(text);
@@ -137,10 +98,10 @@ async function sendVerificationEmail(email, code) {
 }
 
 // ==========================================================
-// HANDLER
+// Handler
 // ==========================================================
 export default async function handler(req, res) {
-  // Always set JSON content type and CORS
+  // Always JSON
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -153,37 +114,161 @@ export default async function handler(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const path = url.pathname;
 
-  // Only handle the verification endpoint for now
-  if (req.method === 'POST' && path === '/api/send-verification') {
-    try {
-      const { email, code } = req.body;
-      if (!email || !code) {
-        return res.status(400).json({ error: 'Email and code required' });
-      }
-      if (!isValidEmail(email)) {
-        return res.status(400).json({ error: 'Invalid email address' });
-      }
-
-      // Store code in memory or Supabase
-      const expiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-      if (supabaseAvailable) {
-        await supabase
-          .from('verification_codes')
-          .upsert({ email, code, expiry }, { onConflict: 'email' });
-      } else {
-        memoryStore[email] = { code, expiry };
-      }
-
-      // Send email
-      await sendVerificationEmail(email, code);
-
-      return res.status(200).json({ success: true, message: 'Verification code sent' });
-    } catch (error) {
-      console.error('Send verification error:', error.message);
-      return res.status(500).json({ error: error.message || 'Failed to send email' });
+  // ---- ROUTING ----
+  try {
+    if (req.method === 'POST' && path === '/api/send-verification') {
+      return handleSendVerification(req, res);
     }
+    if (req.method === 'POST' && path === '/api/auth/signup') {
+      return handleSignup(req, res);
+    }
+    if (req.method === 'POST' && path === '/api/auth/login') {
+      return handleLogin(req, res);
+    }
+    if (req.method === 'POST' && path === '/api/auth/verify-login') {
+      return handleVerifyLogin(req, res);
+    }
+    if (req.method === 'GET' && path === '/api/conversations') {
+      return handleGetConversations(req, res);
+    }
+    if (req.method === 'POST' && path === '/api/conversations') {
+      return handleSaveConversations(req, res);
+    }
+    // Chat endpoint (placeholder)
+    if (req.method === 'POST' && path === '/api/chat') {
+      return res.status(200).json({ response: 'AI placeholder' });
+    }
+    // 404
+    res.status(404).json({ error: 'Not found' });
+  } catch (error) {
+    console.error('Error:', error.message);
+    res.status(500).json({ error: error.message || 'Internal error' });
+  }
+}
+
+// ==========================================================
+// Handlers
+// ==========================================================
+
+// --- Send verification code (sign-up flow) ---
+async function handleSendVerification(req, res) {
+  const { email, code } = req.body;
+  if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+
+  // Store code in memory
+  codeStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000 };
+
+  // Send email
+  try {
+    await sendVerificationEmail(email, code);
+    return res.status(200).json({ success: true, message: 'Verification code sent' });
+  } catch (err) {
+    console.error('Send email error:', err.message);
+    return res.status(500).json({ error: 'Failed to send email: ' + err.message });
+  }
+}
+
+// --- Sign up ---
+async function handleSignup(req, res) {
+  const { email, password, name, verificationCode } = req.body;
+  if (!email || !password || !name || !verificationCode) {
+    return res.status(400).json({ error: 'All fields required' });
+  }
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+
+  // Verify code
+  const stored = codeStore[email];
+  if (!stored) return res.status(400).json({ error: 'No code found. Please request a new code.' });
+  if (stored.code !== verificationCode) return res.status(400).json({ error: 'Invalid verification code' });
+  if (stored.expiry < Date.now()) return res.status(400).json({ error: 'Verification code expired. Please request a new code.' });
+
+  // Check if user already exists
+  if (userStore[email]) return res.status(400).json({ error: 'Email already registered' });
+
+  // Hash password
+  const { salt, hash } = hashPassword(password);
+  const userId = generateId();
+
+  // Save user
+  userStore[email] = { id: userId, email, name, passwordHash: hash, salt };
+
+  // Delete used code
+  delete codeStore[email];
+
+  // Generate session token
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+
+  return res.status(200).json({
+    user: { id: userId, email, name },
+    sessionToken,
+  });
+}
+
+// --- Login (send code) ---
+async function handleLogin(req, res) {
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+
+  const user = userStore[email];
+  if (!user) return res.status(400).json({ error: 'Invalid email or password' });
+
+  // Verify password
+  if (!verifyPassword(password, user.salt, user.passwordHash)) {
+    return res.status(400).json({ error: 'Invalid email or password' });
   }
 
-  // For other endpoints, return a simple message (so we know it's JSON)
-  res.status(200).json({ message: 'AgriDeepAI API is running' });
+  // Generate and store code
+  const code = generateCode();
+  codeStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000, userId: user.id };
+
+  // Send email
+  try {
+    await sendVerificationEmail(email, code);
+    return res.status(200).json({ message: 'Verification code sent', userId: user.id });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to send email: ' + err.message });
+  }
+}
+
+// --- Verify login (confirm code) ---
+async function handleVerifyLogin(req, res) {
+  const { email, code } = req.body;
+  if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+
+  const stored = codeStore[email];
+  if (!stored) return res.status(400).json({ error: 'No code found. Please request a new code.' });
+  if (stored.code !== code) return res.status(400).json({ error: 'Invalid verification code' });
+  if (stored.expiry < Date.now()) return res.status(400).json({ error: 'Verification code expired. Please request a new code.' });
+
+  const user = userStore[email];
+  if (!user) return res.status(400).json({ error: 'User not found' });
+
+  delete codeStore[email];
+
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+
+  return res.status(200).json({
+    user: { id: user.id, email: user.email, name: user.name },
+    sessionToken,
+  });
+}
+
+// --- Conversations (simple in-memory) ---
+const conversationStore = {};
+
+async function handleGetConversations(req, res) {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId required' });
+  const convs = conversationStore[userId] || [];
+  return res.status(200).json({ conversations: convs });
+}
+
+async function handleSaveConversations(req, res) {
+  const { userId, conversations } = req.body;
+  if (!userId || !conversations) return res.status(400).json({ error: 'userId and conversations required' });
+  conversationStore[userId] = conversations;
+  return res.status(200).json({ success: true });
 }
