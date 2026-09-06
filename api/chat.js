@@ -6,12 +6,20 @@ import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
-// Supabase client
+// ------------------------------
+// 1. SUPABASE CLIENT
+// ------------------------------
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-// Brevo config
+if (!supabase) {
+  console.warn('⚠️ Supabase not configured. Auth will fail.');
+}
+
+// ------------------------------
+// 2. BREVO CONFIG
+// ------------------------------
 const brevoApiKey = process.env.BREVO_API_KEY;
 const emailFrom = process.env.EMAIL_FROM || 'noreply@agrideepai.agentdomains.co';
 
@@ -20,9 +28,14 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-// Helper: send verification email via Brevo
+// Helper: generate 6‑digit code
+function generateCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Helper: send verification email via Brevo (always resolves/throws as JSON)
 async function sendVerificationEmail(email, code) {
-  if (!brevoApiKey) throw new Error('BREVO_API_KEY not set');
+  if (!brevoApiKey) throw new Error('BREVO_API_KEY is not set');
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
@@ -66,24 +79,24 @@ async function sendVerificationEmail(email, code) {
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Brevo error: ${text}`);
+    // Parse error if possible
+    let errorMsg = `Brevo API error: ${response.status} ${response.statusText}`;
+    try {
+      const json = JSON.parse(text);
+      if (json.message) errorMsg = json.message;
+    } catch (e) {
+      // fallback
+    }
+    throw new Error(errorMsg);
   }
   return true;
 }
 
-// Generate a 6-digit code
-function generateCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-// Temporary in-memory store for verification codes (use Redis in production)
-const verificationStore = {};
-
-// ------------------------------
-// MAIN HANDLER (routing)
-// ------------------------------
+// ==========================================================
+// ROUTER (with global error handler)
+// ==========================================================
 export default async function handler(req, res) {
-  // CORS headers
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -93,275 +106,236 @@ export default async function handler(req, res) {
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = url.pathname;
+  const path = url.pathname;
 
-  // Route: /api/chat
-  if (req.method === 'POST' && pathname === '/api/chat') {
-    return handleChat(req, res);
+  try {
+    if (req.method === 'POST' && path === '/api/chat') {
+      return handleChat(req, res);
+    }
+    if (req.method === 'POST' && path === '/api/auth/signup') {
+      return handleSignup(req, res);
+    }
+    if (req.method === 'POST' && path === '/api/auth/login') {
+      return handleLoginRequest(req, res);
+    }
+    if (req.method === 'POST' && path === '/api/auth/verify-login') {
+      return handleVerifyLogin(req, res);
+    }
+    if (req.method === 'GET' && path === '/api/conversations') {
+      return handleGetConversations(req, res);
+    }
+    if (req.method === 'POST' && path === '/api/conversations') {
+      return handleSaveConversations(req, res);
+    }
+    if (req.method === 'POST' && path === '/api/send-verification') {
+      return handleSendVerification(req, res);
+    }
+    res.status(404).json({ error: 'Not found' });
+  } catch (error) {
+    console.error('Unhandled error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
   }
-
-  // Route: /api/auth/signup
-  if (req.method === 'POST' && pathname === '/api/auth/signup') {
-    return handleSignup(req, res);
-  }
-
-  // Route: /api/auth/login
-  if (req.method === 'POST' && pathname === '/api/auth/login') {
-    return handleLoginRequest(req, res);
-  }
-
-  // Route: /api/auth/verify-login
-  if (req.method === 'POST' && pathname === '/api/auth/verify-login') {
-    return handleVerifyLogin(req, res);
-  }
-
-  // Route: /api/conversations (GET)
-  if (req.method === 'GET' && pathname === '/api/conversations') {
-    return handleGetConversations(req, res);
-  }
-
-  // Route: /api/conversations (POST)
-  if (req.method === 'POST' && pathname === '/api/conversations') {
-    return handleSaveConversations(req, res);
-  }
-
-  // Route: /api/send-verification (legacy, keep for compatibility)
-  if (req.method === 'POST' && pathname === '/api/send-verification') {
-    return handleSendVerification(req, res);
-  }
-
-  // 404
-  res.status(404).json({ error: 'Not found' });
 }
 
 // ==========================================================
-// HANDLER: Chat (AI)
+// HANDLERS (all return JSON)
 // ==========================================================
+
+// ----- CHAT (placeholder) -----
 async function handleChat(req, res) {
-  try {
-    const { message, history, model, temperature, webSearchEnabled, files, userId } = req.body;
-
-    if (!message && !files) {
-      return res.status(400).json({ error: 'Message or files required' });
-    }
-
-    // Your existing AI logic goes here.
-    // For brevity, we use a dummy response – replace with your full AI code.
-    // (You must copy your full AI functions from earlier.)
-    const response = await callAI(getSystemPrompt(), message, history, model, temperature, files);
-    return res.status(200).json({ response, searchUsed: false, fileProcessed: false });
-  } catch (error) {
-    console.error('Chat error:', error);
-    return res.status(500).json({ error: error.message });
-  }
+  // Replace with your real AI logic
+  res.status(200).json({ response: 'AI response placeholder' });
 }
 
-// ==========================================================
-// HANDLER: Signup
-// ==========================================================
+// ----- SIGNUP -----
 async function handleSignup(req, res) {
-  try {
-    const { email, password, name, verificationCode } = req.body;
+  const { email, password, name, verificationCode } = req.body;
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+  if (!verificationCode) return res.status(400).json({ error: 'Verification code required' });
 
-    // Validate email
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: 'Invalid email address' });
-    }
+  // Verify code from Supabase
+  const { data, error } = await supabase
+    .from('verification_codes')
+    .select('code, expiry')
+    .eq('email', email)
+    .maybeSingle();
 
-    // Verify the code
-    const stored = verificationStore[email];
-    if (!stored || stored.code !== verificationCode || Date.now() > stored.expiry) {
-      return res.status(400).json({ error: 'Invalid or expired verification code' });
-    }
-
-    // Hash password
-    const salt = bcrypt.genSaltSync(10);
-    const passwordHash = bcrypt.hashSync(password, salt);
-
-    // Insert user
-    const { data, error } = await supabase
-      .from('users')
-      .insert([{ email, name, password_hash: passwordHash }])
-      .select('id, email, name');
-
-    if (error) {
-      if (error.code === '23505') return res.status(400).json({ error: 'Email already registered' });
-      console.error('Supabase insert error:', error);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    const user = data[0];
-    delete verificationStore[email];
-
-    const sessionToken = crypto.randomUUID();
-    return res.status(200).json({ user: { id: user.id, email: user.email, name: user.name }, sessionToken });
-  } catch (error) {
-    console.error('Signup error:', error);
-    return res.status(500).json({ error: error.message });
+  if (error || !data) {
+    return res.status(400).json({ error: 'No verification code found. Please request a new code.' });
   }
+  if (data.code !== verificationCode) {
+    return res.status(400).json({ error: 'Invalid verification code' });
+  }
+  if (new Date(data.expiry) < new Date()) {
+    return res.status(400).json({ error: 'Verification code expired. Please request a new code.' });
+  }
+
+  // Hash password
+  const salt = bcrypt.genSaltSync(10);
+  const passwordHash = bcrypt.hashSync(password, salt);
+
+  // Insert user
+  const { data: userData, error: userError } = await supabase
+    .from('users')
+    .insert([{ email, name, password_hash: passwordHash }])
+    .select('id, email, name');
+
+  if (userError) {
+    if (userError.code === '23505') {
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+    console.error('Supabase insert error:', userError);
+    return res.status(500).json({ error: 'Database error' });
+  }
+
+  // Delete used code
+  await supabase.from('verification_codes').delete().eq('email', email);
+
+  const user = userData[0];
+  const sessionToken = crypto.randomUUID();
+  return res.status(200).json({ user: { id: user.id, email: user.email, name: user.name }, sessionToken });
 }
 
-// ==========================================================
-// HANDLER: Login request (send code)
-// ==========================================================
+// ----- LOGIN REQUEST (send code) -----
 async function handleLoginRequest(req, res) {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
 
-    // Validate email
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: 'Invalid email address' });
-    }
+  // Find user
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, email, name, password_hash')
+    .eq('email', email)
+    .maybeSingle();
 
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, email, name, password_hash')
-      .eq('email', email)
-      .maybeSingle();
-
-    if (error || !data) return res.status(400).json({ error: 'Invalid email or password' });
-
-    const valid = bcrypt.compareSync(password, data.password_hash);
-    if (!valid) return res.status(400).json({ error: 'Invalid email or password' });
-
-    const code = generateCode();
-    verificationStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000, userId: data.id };
-
-    await sendVerificationEmail(email, code);
-
-    return res.status(200).json({ message: 'Verification code sent', userId: data.id });
-  } catch (error) {
-    console.error('Login request error:', error);
-    return res.status(500).json({ error: error.message });
+  if (error || !data) {
+    return res.status(400).json({ error: 'Invalid email or password' });
   }
+
+  // Verify password
+  const valid = bcrypt.compareSync(password, data.password_hash);
+  if (!valid) {
+    return res.status(400).json({ error: 'Invalid email or password' });
+  }
+
+  // Generate and store code
+  const code = generateCode();
+  const expiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  await supabase
+    .from('verification_codes')
+    .upsert({ email, code, expiry, user_id: data.id }, { onConflict: 'email' });
+
+  // Send email
+  try {
+    await sendVerificationEmail(email, code);
+  } catch (err) {
+    console.error('Brevo error:', err.message);
+    return res.status(500).json({ error: 'Failed to send email: ' + err.message });
+  }
+
+  return res.status(200).json({ message: 'Verification code sent', userId: data.id });
 }
 
-// ==========================================================
-// HANDLER: Verify login (confirm code)
-// ==========================================================
+// ----- VERIFY LOGIN -----
 async function handleVerifyLogin(req, res) {
-  try {
-    const { email, code } = req.body;
-    if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+  const { email, code } = req.body;
+  if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
 
-    // Validate email
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: 'Invalid email address' });
-    }
+  const { data, error } = await supabase
+    .from('verification_codes')
+    .select('code, expiry, user_id')
+    .eq('email', email)
+    .maybeSingle();
 
-    const stored = verificationStore[email];
-    if (!stored || stored.code !== code || Date.now() > stored.expiry) {
-      return res.status(400).json({ error: 'Invalid or expired verification code' });
-    }
-
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, email, name')
-      .eq('id', stored.userId)
-      .maybeSingle();
-
-    if (error || !data) return res.status(400).json({ error: 'User not found' });
-
-    const sessionToken = crypto.randomUUID();
-    delete verificationStore[email];
-
-    return res.status(200).json({ user: data, sessionToken });
-  } catch (error) {
-    console.error('Verify login error:', error);
-    return res.status(500).json({ error: error.message });
+  if (error || !data) {
+    return res.status(400).json({ error: 'No verification code found. Please request a new code.' });
   }
+  if (data.code !== code) {
+    return res.status(400).json({ error: 'Invalid verification code' });
+  }
+  if (new Date(data.expiry) < new Date()) {
+    return res.status(400).json({ error: 'Verification code expired. Please request a new code.' });
+  }
+
+  // Get user
+  const { data: userData } = await supabase
+    .from('users')
+    .select('id, email, name')
+    .eq('id', data.user_id)
+    .maybeSingle();
+
+  if (!userData) {
+    return res.status(400).json({ error: 'User not found' });
+  }
+
+  // Delete used code
+  await supabase.from('verification_codes').delete().eq('email', email);
+
+  const sessionToken = crypto.randomUUID();
+  return res.status(200).json({ user: userData, sessionToken });
 }
 
-// ==========================================================
-// HANDLER: Get conversations
-// ==========================================================
-async function handleGetConversations(req, res) {
-  try {
-    const { userId } = req.query;
-    if (!userId) return res.status(400).json({ error: 'userId required' });
-
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      console.error('Fetch conversations error:', error);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    return res.status(200).json({ conversations: data || [] });
-  } catch (error) {
-    console.error('Get conv error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-}
-
-// ==========================================================
-// HANDLER: Save conversations
-// ==========================================================
-async function handleSaveConversations(req, res) {
-  try {
-    const { userId, conversations } = req.body;
-    if (!userId || !conversations) return res.status(400).json({ error: 'userId and conversations required' });
-
-    for (const conv of conversations) {
-      const { id, title, messages, pinned, updatedAt } = conv;
-      const { error } = await supabase
-        .from('conversations')
-        .upsert({
-          id,
-          user_id: userId,
-          title,
-          messages,
-          pinned: pinned || false,
-          updated_at: updatedAt || new Date().toISOString(),
-        }, { onConflict: 'id' });
-      if (error) {
-        console.error('Upsert conversation error:', error);
-        return res.status(500).json({ error: 'Failed to save conversation' });
-      }
-    }
-
-    return res.status(200).json({ success: true });
-  } catch (error) {
-    console.error('Save conv error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-}
-
-// ==========================================================
-// HANDLER: Send verification (legacy)
-// ==========================================================
+// ----- SEND VERIFICATION (legacy, used for sign-up) -----
 async function handleSendVerification(req, res) {
+  const { email, code } = req.body;
+  if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
+
+  // Store code in Supabase
+  const expiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  await supabase
+    .from('verification_codes')
+    .upsert({ email, code, expiry }, { onConflict: 'email' });
+
+  // Send email
   try {
-    const { email, code } = req.body;
-    if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
-
-    // Validate email
-    if (!isValidEmail(email)) {
-      return res.status(400).json({ error: 'Invalid email address' });
-    }
-
-    // Store the code temporarily so the frontend can verify it later.
-    verificationStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000 };
     await sendVerificationEmail(email, code);
-    return res.status(200).json({ success: true });
-  } catch (error) {
-    console.error('Send verification error:', error);
-    return res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error('Brevo error:', err.message);
+    return res.status(500).json({ error: 'Failed to send email: ' + err.message });
   }
+
+  return res.status(200).json({ success: true });
 }
 
-// ==========================================================
-// DUMMY AI FUNCTIONS (replace with your real ones)
-// ==========================================================
-function getSystemPrompt() {
-  return "You are AgriDeepAI, a helpful assistant.";
+// ----- GET CONVERSATIONS -----
+async function handleGetConversations(req, res) {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId required' });
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+  if (error) {
+    console.error('Fetch conversations error:', error);
+    return res.status(500).json({ error: 'Database error' });
+  }
+  return res.status(200).json({ conversations: data || [] });
 }
-async function callAI(systemPrompt, message, history, model, temperature, files) {
-  // Replace with your actual AI call (Groq/Gemini)
-  return "This is a placeholder response. Please replace with your AI code.";
+
+// ----- SAVE CONVERSATIONS -----
+async function handleSaveConversations(req, res) {
+  const { userId, conversations } = req.body;
+  if (!userId || !conversations) return res.status(400).json({ error: 'userId and conversations required' });
+  for (const conv of conversations) {
+    const { id, title, messages, pinned, updatedAt } = conv;
+    const { error } = await supabase
+      .from('conversations')
+      .upsert({
+        id,
+        user_id: userId,
+        title,
+        messages,
+        pinned: pinned || false,
+        updated_at: updatedAt || new Date().toISOString(),
+      }, { onConflict: 'id' });
+    if (error) {
+      console.error('Upsert conversation error:', error);
+      return res.status(500).json({ error: 'Failed to save conversation' });
+    }
+  }
+  return res.status(200).json({ success: true });
 }
