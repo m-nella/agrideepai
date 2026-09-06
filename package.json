@@ -1,14 +1,10 @@
 {
-  "name": "agrideepai-backend",
+  "name": "agrideepai",
   "version": "2.0.0",
-  "description": "AgriDeepAI backend with Supabase",
+  "description": "AgriDeepAI with Supabase Auth",
   "main": "api/chat.js",
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.6",
-    "bcryptjs": "^2.4.3"
-  },
-  "scripts": {
-    "start": "node api/chat.js"
+    "@supabase/supabase-js": "^2.45.6"
   },
   "engines": {
     "node": "20.x"
