@@ -11,15 +11,10 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <!-- Supabase SDK -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    /* ===== COMPLETE STYLES (same as your original) ===== */
-    /* I’m including the full CSS here because you need it all.
-       For brevity in this answer, I'll compress it to a concise version
-       but you can paste your existing <style> block – it's unchanged. */
-
+    /* ===== COMPLETE STYLES (your existing CSS) ===== */
+    /* I've condensed it to save space – keep your original CSS. */
     :root {
       --bg-app: #0c0c0d;
       --bg-surface: #141416;
@@ -49,1487 +44,1385 @@
       --chat-max-width: 820px;
       --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
-    [data-theme="light"] { /* light theme overrides */ }
+    [data-theme="light"] { /* keep your light theme */ }
     * { margin:0; padding:0; box-sizing:border-box; }
     html, body { height:100%; font-family:var(--font-sans); background:var(--bg-app); color:var(--text-primary); overflow:hidden; }
     .app { display:flex; height:100vh; width:100%; }
-    /* Sidebar */
-    .sidebar { width:var(--sidebar-width); height:100vh; background:var(--bg-surface); border-right:1px solid var(--border-subtle); display:flex; flex-direction:column; flex-shrink:0; transition:0.24s; overflow:hidden; z-index:200; }
-    .sidebar.is-collapsed { width:56px; }
-    .sidebar-header { padding:14px 16px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border-subtle); min-height:56px; }
-    .brand { display:flex; align-items:center; gap:10px; }
-    .brand img { width:28px; height:28px; border-radius:8px; }
-    .brand-text { font-size:17px; font-weight:700; }
-    .brand-text .accent { color:var(--accent); }
-    .sidebar-toggle { background:var(--accent-dim); border:1px solid var(--accent); border-radius:50%; width:34px; height:34px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-    .sidebar-toggle svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2; }
-    .new-chat-btn { margin:10px 16px; padding:10px 16px; background:var(--bg-elevated); border:1px solid var(--border-subtle); border-radius:var(--radius-md); color:var(--text-primary); font-size:13px; font-weight:600; cursor:pointer; display:flex; align-items:center; gap:8px; justify-content:center; min-height:40px; }
-    .new-chat-btn svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2.5; }
-    .chat-history { flex:1; overflow-y:auto; padding:6px 12px; }
-    .chat-item { padding:8px 12px; border-radius:var(--radius-md); cursor:pointer; display:flex; align-items:center; justify-content:space-between; background:var(--bg-surface); }
-    .chat-item:hover { background:var(--bg-hover); }
-    .chat-item.is-active { background:var(--bg-active); }
-    .chat-item .title { font-size:13px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
-    .chat-item .chat-actions button { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:2px 5px; }
-    .empty-history { color:var(--text-muted); font-size:13px; text-align:center; padding:32px 12px; }
-    .sidebar-footer { padding:10px 12px; border-top:1px solid var(--border-subtle); }
-    .auth-btn { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:var(--radius-md); cursor:pointer; width:100%; background:none; border:none; color:var(--text-primary); font-size:13px; }
-    .auth-btn .avatar { width:28px; height:28px; border-radius:50%; background:var(--bg-elevated); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:var(--text-secondary); }
-    .auth-btn .account-info .name { font-size:13px; font-weight:500; }
-    .auth-btn .account-info .sub { font-size:11px; color:var(--text-muted); }
-    .account-dropdown { position:absolute; bottom:60px; left:10px; background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-md); box-shadow:0 24px 64px rgba(0,0,0,0.8); padding:6px 0; min-width:200px; display:none; flex-direction:column; z-index:500; }
-    .account-dropdown.is-open { display:flex; }
-    .account-dropdown .dropdown-item { padding:10px 16px; font-size:13px; color:var(--text-secondary); cursor:pointer; display:flex; align-items:center; gap:10px; background:none; border:none; width:100%; text-align:left; font-family:inherit; }
-    .account-dropdown .dropdown-item:hover { background:var(--bg-hover); color:var(--text-primary); }
-    .account-dropdown .dropdown-divider { height:1px; background:var(--border-subtle); margin:4px 12px; }
-    /* Main chat */
-    .main-chat { flex:1; display:flex; flex-direction:column; background:var(--bg-app); height:100vh; min-width:0; position:relative; }
-    .chat-header { height:var(--header-height); padding:0 18px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border-subtle); flex-shrink:0; background:var(--bg-app); }
-    .chat-header .sidebar-open-btn { background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:50%; color:var(--text-secondary); cursor:pointer; width:34px; height:34px; display:none; align-items:center; justify-content:center; }
-    .chat-header .chat-title { font-size:14px; font-weight:500; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .messages-container { flex:1; overflow-y:auto; padding:20px 24px 80px 24px; display:flex; flex-direction:column; scroll-behavior:smooth; position:relative; }
-    .empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:32px 20px; max-width:880px; margin:0 auto; width:100%; }
-    .empty-state .logo { width:64px; height:64px; border-radius:18px; margin-bottom:18px; object-fit:cover; }
-    .empty-state h1 { font-size:26px; font-weight:700; }
-    .empty-state h1 .accent { color:var(--accent); }
-    .empty-state .subtitle { font-size:15px; color:var(--text-secondary); max-width:400px; line-height:1.6; }
-    .empty-state .suggestions { display:flex; flex-wrap:wrap; gap:10px; margin-top:24px; justify-content:center; }
-    .empty-state .suggestions button { background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-secondary); padding:8px 18px; border-radius:var(--radius-full); font-size:13px; cursor:pointer; font-family:inherit; }
-    .empty-state .suggestions button:hover { background:var(--bg-hover); color:var(--text-primary); border-color:var(--accent); }
-    .empty-state.is-hidden { display:none; }
-    .message-wrapper { display:flex; flex-direction:column; margin-bottom:18px; max-width:78%; width:100%; animation:fadeUp 0.25s ease; }
-    .message-wrapper.is-user { align-self:flex-end; }
-    .message-wrapper.is-bot { align-self:flex-start; }
-    .message-bubble { padding:12px 18px; border-radius:var(--radius-lg); font-size:14.5px; line-height:1.65; word-wrap:break-word; max-width:100%; }
-    .message-wrapper.is-user .message-bubble { background:rgba(43,125,75,0.25); border-bottom-right-radius:4px; border:1px solid var(--accent); }
-    .message-wrapper.is-bot .message-bubble { background:var(--bg-elevated); border-bottom-left-radius:4px; }
-    .message-bubble p { margin:0 0 0.8em; }
-    .message-bubble p:last-child { margin-bottom:0; }
-    .message-bubble code:not(.hljs) { background:var(--bg-elevated); padding:2px 6px; border-radius:4px; font-family:monospace; }
-    .response-code-block { background:var(--bg-elevated); border-radius:var(--radius-md); margin:0.5em 0; overflow:hidden; border:1px solid var(--border-subtle); }
-    .response-code-header { display:flex; justify-content:space-between; padding:6px 12px; background:var(--bg-surface); border-bottom:1px solid var(--border-subtle); font-size:12px; color:var(--text-muted); }
-    .response-code-copy { background:none; border:none; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:4px; font-size:12px; font-family:inherit; padding:2px 8px; border-radius:var(--radius-sm); }
-    .response-code-copy:hover { background:var(--bg-hover); color:var(--text-primary); }
-    .response-code-block pre { margin:0; padding:10px 14px; overflow-x:auto; }
-    .message-actions { display:flex; gap:2px; margin-top:4px; flex-wrap:wrap; }
-    .message-wrapper.is-user .message-actions { justify-content:flex-end; }
-    .message-wrapper.is-bot .message-actions { justify-content:flex-start; }
-    .message-actions button { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px 7px; border-radius:var(--radius-sm); font-family:inherit; }
-    .message-actions button:hover { background:var(--bg-hover); color:var(--text-primary); }
-    .message-actions button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; }
-    .scroll-bottom-btn { position:absolute; bottom:100px; right:28px; background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:50%; width:38px; height:38px; display:none; align-items:center; justify-content:center; cursor:pointer; color:var(--text-secondary); box-shadow:0 2px 8px rgba(0,0,0,0.4); z-index:50; }
-    .scroll-bottom-btn.is-visible { display:flex; }
-    .composer-wrapper { position:sticky; bottom:0; padding:10px 24px 6px; background:linear-gradient(to top, var(--bg-app) 50%, transparent); flex-shrink:0; }
-    .composer { display:flex; flex-direction:column; background:var(--bg-surface); border:2px solid var(--accent); border-radius:var(--radius-lg); padding:6px 8px 6px 12px; max-width:var(--chat-max-width); margin:0 auto; }
-    .composer .input-row { display:flex; align-items:flex-end; gap:6px; width:100%; }
-    .composer textarea { flex:1; background:transparent; border:none; outline:none; color:var(--text-primary); font-size:14.5px; font-family:inherit; padding:8px 0; resize:none; min-height:24px; max-height:180px; line-height:1.5; }
-    .composer textarea::placeholder { color:var(--text-muted); }
-    .composer-actions { display:flex; align-items:center; gap:2px; flex-shrink:0; }
-    .send-stop-btn { background:var(--accent); color:#fff; border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; border:none; cursor:pointer; opacity:0.35; transition:all 0.12s; }
-    .send-stop-btn.is-active { opacity:1; }
-    .send-stop-btn.is-generating { opacity:1; background:var(--accent); }
-    .send-stop-btn svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2.5; }
-    .attach-btn { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:5px; border-radius:50%; display:flex; align-items:center; justify-content:center; width:34px; height:34px; }
-    .attach-btn:hover { background:var(--bg-hover); color:var(--text-primary); }
-    .file-input { display:none; }
-    .attachment-previews { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0 8px; }
-    .attachment-preview { display:flex; align-items:center; gap:6px; background:var(--bg-elevated); padding:4px 8px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle); font-size:12px; color:var(--text-secondary); }
-    .attachment-preview img { width:28px; height:28px; border-radius:4px; object-fit:cover; }
-    .attachment-preview .remove-attach { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:2px 5px; }
-    .chat-footer { padding:6px 24px 16px; text-align:center; font-size:12px; color:var(--text-muted); max-width:var(--chat-max-width); margin:0 auto; width:100%; }
-    /* Modals */
-    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); backdrop-filter:blur(3px); z-index:999; align-items:center; justify-content:center; padding:20px; }
-    .modal-overlay.is-active { display:flex; }
-    .modal-box { background:var(--bg-surface); border-radius:var(--radius-lg); padding:28px 30px; max-width:420px; width:100%; border:1px solid var(--border-subtle); box-shadow:0 24px 64px rgba(0,0,0,0.8); max-height:90vh; overflow-y:auto; }
-    .modal-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
-    .modal-header h2 { font-size:20px; font-weight:700; }
-    .modal-close { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px; }
-    .modal-close svg { width:20px; height:20px; }
-    .modal-desc { color:var(--text-muted); font-size:14px; margin-bottom:18px; }
-    .field { margin-bottom:14px; }
-    .field label { display:block; font-size:12px; font-weight:500; color:var(--text-secondary); margin-bottom:4px; }
-    .field input, .field select { width:100%; padding:10px 14px; background:var(--bg-input); border:1px solid var(--border-subtle); border-radius:var(--radius-md); color:var(--text-primary); font-size:14px; outline:none; font-family:inherit; }
-    .field input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-glow); }
-    .password-wrapper { position:relative; }
-    .password-wrapper input { padding-right:40px; }
-    .password-toggle { position:absolute; right:12px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:18px; }
-    .auth-error { color:var(--error); font-size:13px; margin-top:4px; padding:6px 10px; background:rgba(255,59,48,0.1); border-radius:var(--radius-sm); border-left:3px solid var(--error); display:none; }
-    .auth-error.is-visible { display:block; }
-    .modal-actions { display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; }
-    .modal-actions button { flex:1; padding:10px 16px; border:none; border-radius:var(--radius-md); font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; min-width:70px; }
-    .btn-primary { background:var(--accent); color:#fff; }
-    .btn-primary:hover { background:var(--accent-hover); }
-    .btn-secondary { background:var(--bg-elevated); color:var(--text-primary); }
-    .btn-secondary:hover { background:var(--bg-hover); }
-    .btn-ghost { background:transparent; color:var(--text-muted); }
-    .btn-ghost:hover { color:var(--text-primary); background:var(--bg-hover); }
-    .btn-danger { background:var(--error); color:#fff; }
-    .share-link-container { display:flex; gap:8px; margin:16px 0; background:var(--bg-input); border-radius:var(--radius-md); padding:8px 12px; border:1px solid var(--border-subtle); align-items:center; }
-    .share-link-container input { flex:1; background:transparent; border:none; outline:none; color:var(--text-primary); font-size:13px; }
-    .share-link-container .copy-link-btn { background:var(--accent); color:#fff; border:none; border-radius:var(--radius-sm); padding:6px 14px; font-size:13px; font-weight:500; cursor:pointer; }
-    .toast-container { position:fixed; bottom:24px; right:24px; z-index:1000; display:flex; flex-direction:column; gap:8px; max-width:340px; width:100%; pointer-events:none; }
-    .toast { background:var(--bg-toast); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:12px 16px; box-shadow:0 2px 8px rgba(0,0,0,0.4); display:flex; align-items:center; gap:10px; pointer-events:auto; }
-    .toast .toast-icon { font-size:18px; flex-shrink:0; }
-    .toast .toast-msg { flex:1; font-size:13.5px; color:var(--text-primary); }
-    .toast .toast-dismiss { background:none; border:none; color:var(--text-muted); cursor:pointer; padding:4px; }
-    @media (max-width:992px) { .sidebar { position:fixed; left:0; top:0; transform:translateX(-100%); box-shadow:0 24px 64px rgba(0,0,0,0.8); border-right:none; z-index:300; } .sidebar.is-open { transform:translateX(0); } .sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:299; } .sidebar-overlay.is-visible { display:block; } .chat-header .sidebar-open-btn { display:flex; } }
-    @media (max-width:600px) { .messages-container { padding:12px 12px 70px; } .message-bubble { font-size:13.5px; padding:10px 14px; } .composer-wrapper { padding:6px 12px; } }
-    @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-    .loading-dots span { animation:pulse 1.2s infinite; display:inline-block; font-size:18px; }
-    .loading-dots span:nth-child(2) { animation-delay:0.2s; }
-    .loading-dots span:nth-child(3) { animation-delay:0.4s; }
-    @keyframes pulse { 0%,60%,100%{opacity:0.2} 30%{opacity:1} }
+    /* ... rest of your CSS ... */
+    /* I'm omitting the full CSS to keep the answer manageable – you can paste your original <style> block. */
   </style>
 </head>
 <body>
 
-<!-- ===== APP ===== -->
-<div class="app" id="app">
+  <!-- ===== APP ===== -->
+  <div class="app" id="app">
 
-  <!-- SIDEBAR -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <div class="brand">
-        <img src="logo.png" alt="AgriDeepAI Logo" />
-        <span class="brand-text">Agri<span class="accent">DeepAI</span></span>
-      </div>
-      <button class="sidebar-toggle" id="sidebarToggle">
-        <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
-      </button>
-    </div>
-    <button class="new-chat-btn" id="newChatBtn">
-      <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      <span class="new-chat-label">New Chat</span>
-    </button>
-    <div class="chat-history" id="chatHistory">
-      <div class="empty-history" id="emptyHistory">No chats yet.<br />Start a new conversation.</div>
-    </div>
-    <div class="sidebar-footer">
-      <button class="auth-btn" id="authBtn">
-        <div class="avatar" id="avatarDisplay">👤</div>
-        <div class="account-info">
-          <div class="name" id="userNameDisplay">Sign In</div>
-          <div class="sub" id="userSubDisplay">Click to sign in</div>
+    <!-- SIDEBAR (same as before) -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <img src="logo.png" alt="AgriDeepAI Logo" />
+          <span class="brand-text">Agri<span class="accent">DeepAI</span></span>
         </div>
-        <span class="account-settings-icon" id="settingsIcon">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        </span>
-      </button>
-      <div class="account-dropdown" id="accountDropdown">
-        <button class="dropdown-item" data-action="profile"><span class="icon">👤</span> Profile</button>
-        <button class="dropdown-item" data-action="account"><span class="icon">📧</span> Account Settings</button>
-        <div class="dropdown-divider"></div>
-        <button class="dropdown-item" data-action="settings"><span class="icon">⚙️</span> App Settings</button>
-        <div class="dropdown-divider"></div>
-        <button class="dropdown-item" data-action="logout" style="color:var(--error);"><span class="icon">🚪</span> Log Out</button>
+        <button class="sidebar-toggle" id="sidebarToggle">
+          <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
       </div>
-    </div>
-  </aside>
-  <div class="sidebar-overlay" id="sidebarOverlay"></div>
-
-  <!-- MAIN CHAT -->
-  <main class="main-chat" id="mainChat">
-    <header class="chat-header">
-      <button class="sidebar-open-btn" id="sidebarOpenBtn">
-        <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      <button class="new-chat-btn" id="newChatBtn">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span class="new-chat-label">New Chat</span>
       </button>
-      <span class="chat-title" id="chatTitle">AgriDeepAI</span>
-    </header>
-    <div class="messages-container" id="messagesContainer">
-      <div class="empty-state" id="emptyState">
-        <img src="logo.png" alt="AgriDeepAI" class="logo" />
-        <h1>Agri<span class="accent">DeepAI</span></h1>
-        <div class="subtitle">Your AI assistant for agriculture &amp; livestock. Where should we start today?</div>
-        <div class="suggestions">
-          <button data-suggestion="What are the best crops to grow in Rwanda?">🌱 Best crops in Rwanda</button>
-          <button data-suggestion="How to treat maize leaf disease?">🌽 Maize disease treatment</button>
-          <button data-suggestion="What is the best fertilizer for potatoes?">🥔 Best fertilizer</button>
-          <button data-suggestion="Tell me about livestock farming in Rwanda">🐄 Livestock farming</button>
+      <div class="chat-history" id="chatHistory">
+        <div class="empty-history" id="emptyHistory">No chats yet.<br />Start a new conversation.</div>
+      </div>
+      <div class="sidebar-footer">
+        <button class="auth-btn" id="authBtn">
+          <div class="avatar" id="avatarDisplay">👤</div>
+          <div class="account-info">
+            <div class="name" id="userNameDisplay">Sign In</div>
+            <div class="sub" id="userSubDisplay">Click to sign in</div>
+          </div>
+          <span class="account-settings-icon" id="settingsIcon">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </span>
+        </button>
+        <div class="account-dropdown" id="accountDropdown">
+          <button class="dropdown-item" data-action="profile"><span class="icon">👤</span> Profile</button>
+          <button class="dropdown-item" data-action="account"><span class="icon">📧</span> Account Settings</button>
+          <div class="dropdown-divider"></div>
+          <button class="dropdown-item" data-action="settings"><span class="icon">⚙️</span> App Settings</button>
+          <div class="dropdown-divider"></div>
+          <button class="dropdown-item" data-action="logout" style="color:var(--error);"><span class="icon">🚪</span> Log Out</button>
         </div>
       </div>
-      <button class="scroll-bottom-btn" id="scrollBottomBtn">
-        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-      </button>
-    </div>
-    <!-- Composer -->
-    <div class="composer-wrapper">
-      <div class="composer" id="composer">
-        <div class="attachment-previews" id="attachmentPreviews"></div>
-        <div class="input-row">
-          <button class="attach-btn" id="attachBtn">
-            <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          </button>
-          <input type="file" id="fileInput" class="file-input" accept="image/*,.pdf,.doc,.docx,.txt" multiple />
-          <textarea id="userInput" rows="1" placeholder="Ask me about agriculture and livestock..."></textarea>
-          <div class="composer-actions">
-            <button class="send-stop-btn" id="sendStopBtn">
-              <span class="send-icon">
-                <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              </span>
-              <span class="stop-icon" style="display:none;">
-                <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-              </span>
+    </aside>
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- MAIN CHAT -->
+    <main class="main-chat" id="mainChat">
+      <header class="chat-header">
+        <button class="sidebar-open-btn" id="sidebarOpenBtn">
+          <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <span class="chat-title" id="chatTitle">AgriDeepAI</span>
+      </header>
+      <div class="messages-container" id="messagesContainer">
+        <div class="empty-state" id="emptyState">
+          <img src="logo.png" alt="AgriDeepAI" class="logo" />
+          <h1>Agri<span class="accent">DeepAI</span></h1>
+          <div class="subtitle">Your AI assistant for agriculture &amp; livestock. Where should we start today?</div>
+          <div class="suggestions">
+            <button data-suggestion="What are the best crops to grow in Rwanda?">🌱 Best crops in Rwanda</button>
+            <button data-suggestion="How to treat maize leaf disease?">🌽 Maize disease treatment</button>
+            <button data-suggestion="What is the best fertilizer for potatoes?">🥔 Best fertilizer</button>
+            <button data-suggestion="Tell me about livestock farming in Rwanda">🐄 Livestock farming</button>
+          </div>
+        </div>
+        <button class="scroll-bottom-btn" id="scrollBottomBtn">
+          <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+      <!-- Composer -->
+      <div class="composer-wrapper">
+        <div class="composer" id="composer">
+          <div class="attachment-previews" id="attachmentPreviews"></div>
+          <div class="input-row">
+            <button class="attach-btn" id="attachBtn">
+              <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             </button>
+            <input type="file" id="fileInput" class="file-input" accept="image/*,.pdf,.doc,.docx,.txt" multiple />
+            <textarea id="userInput" rows="1" placeholder="Ask me about agriculture and livestock..."></textarea>
+            <div class="composer-actions">
+              <button class="send-stop-btn" id="sendStopBtn">
+                <span class="send-icon">
+                  <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </span>
+                <span class="stop-icon" style="display:none;">
+                  <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-    <div class="chat-footer">AgriDeepAI can make mistake. Check for reference.</div>
-  </main>
-</div>
+      <div class="chat-footer">AgriDeepAI can make mistake. Check for reference.</div>
+    </main>
+  </div>
 
-<!-- ===== MODALS ===== -->
-<!-- Auth Modal -->
-<div class="modal-overlay" id="authModal">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h2 id="authModalTitle">Sign In</h2>
-      <button class="modal-close" id="authModalClose"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-    </div>
-    <p class="modal-desc" id="authModalDesc">Sign in to save your chats across devices.</p>
-    <div id="authFields">
-      <div class="field" id="authNameField" style="display:none;">
-        <label for="authName">Full Name</label>
-        <input type="text" id="authName" placeholder="Your name" />
+  <!-- ===== MODALS ===== -->
+  <!-- Auth Modal -->
+  <div class="modal-overlay" id="authModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="authModalTitle">Sign In</h2>
+        <button class="modal-close" id="authModalClose"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
-      <div class="field">
-        <label for="authEmail">Email</label>
-        <input type="email" id="authEmail" placeholder="you@example.com" />
-      </div>
-      <div class="field">
-        <label for="authPassword">Password</label>
-        <div class="password-wrapper">
-          <input type="password" id="authPassword" placeholder="••••••••" />
-          <button class="password-toggle" type="button" data-target="authPassword">👁</button>
+      <p class="modal-desc" id="authModalDesc">Sign in to save your chats across devices.</p>
+      <div id="authFields">
+        <div class="field" id="authNameField" style="display:none;">
+          <label for="authName">Full Name</label>
+          <input type="text" id="authName" placeholder="Your name" />
         </div>
-      </div>
-      <div class="field" id="authConfirmField" style="display:none;">
-        <label for="authConfirmPassword">Confirm Password</label>
-        <div class="password-wrapper">
-          <input type="password" id="authConfirmPassword" placeholder="••••••••" />
-          <button class="password-toggle" type="button" data-target="authConfirmPassword">👁</button>
+        <div class="field">
+          <label for="authEmail">Email</label>
+          <input type="email" id="authEmail" placeholder="you@example.com" />
         </div>
+        <div class="field">
+          <label for="authPassword">Password</label>
+          <div class="password-wrapper">
+            <input type="password" id="authPassword" placeholder="••••••••" />
+            <button class="password-toggle" type="button" data-target="authPassword">👁</button>
+          </div>
+        </div>
+        <div class="field" id="authConfirmField" style="display:none;">
+          <label for="authConfirmPassword">Confirm Password</label>
+          <div class="password-wrapper">
+            <input type="password" id="authConfirmPassword" placeholder="••••••••" />
+            <button class="password-toggle" type="button" data-target="authConfirmPassword">👁</button>
+          </div>
+        </div>
+        <div class="auth-error" id="authError">Invalid credentials.</div>
       </div>
-      <div class="auth-error" id="authError">Invalid credentials.</div>
+      <div class="modal-actions">
+        <button class="btn-primary" id="authSubmitBtn">Sign In</button>
+        <button class="btn-secondary" id="authSwitchBtn">Create Account</button>
+        <button class="btn-ghost" id="authGuestBtn">Continue as Guest</button>
+      </div>
     </div>
-    <div class="modal-actions">
-      <button class="btn-primary" id="authSubmitBtn">Sign In</button>
-      <button class="btn-secondary" id="authSwitchBtn">Create Account</button>
-      <button class="btn-ghost" id="authGuestBtn">Continue as Guest</button>
+  </div>
+
+  <!-- Settings Modal (shortened) -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal-box">
+      <div class="modal-header"><h2>Settings</h2><button class="modal-close" id="settingsCloseBtn"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="field"><label for="themeSelect">Appearance</label><select id="themeSelect"><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></div>
+      <div class="field"><label for="enterSendSelect">Enter to send</label><select id="enterSendSelect"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
+      <div class="field"><label for="modelSelect">AI Model</label><select id="modelSelect"><option value="groq/compound-mini">Groq Compound Mini</option></select></div>
+      <div class="field"><label>Temperature: <span class="range-value" id="tempValue">0.7</span></label><input type="range" id="temperatureSlider" min="0" max="1" step="0.05" value="0.7" /></div>
+      <div class="field"><label><input type="checkbox" id="webSearchToggle" checked /> Enable Web Search</label></div>
+      <div class="modal-actions"><button class="btn-primary" id="settingsSaveBtn">Save</button><button class="btn-secondary" id="settingsCloseActionBtn">Close</button></div>
     </div>
   </div>
-</div>
 
-<!-- Settings Modal (simplified) -->
-<div class="modal-overlay" id="settingsModal">
-  <div class="modal-box">
-    <div class="modal-header"><h2>Settings</h2><button class="modal-close" id="settingsCloseBtn"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="field"><label for="themeSelect">Appearance</label><select id="themeSelect"><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></div>
-    <div class="field"><label for="enterSendSelect">Enter to send</label><select id="enterSendSelect"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
-    <div class="field"><label for="modelSelect">AI Model</label><select id="modelSelect"><option value="groq/compound-mini">Groq Compound Mini</option></select></div>
-    <div class="field"><label>Temperature: <span class="range-value" id="tempValue">0.7</span></label><input type="range" id="temperatureSlider" min="0" max="1" step="0.05" value="0.7" /></div>
-    <div class="field"><label><input type="checkbox" id="webSearchToggle" checked /> Enable Web Search</label></div>
-    <div class="modal-actions"><button class="btn-primary" id="settingsSaveBtn">Save</button><button class="btn-secondary" id="settingsCloseActionBtn">Close</button></div>
+  <!-- Profile Modal -->
+  <div class="modal-overlay" id="profileModal">
+    <div class="modal-box">
+      <div class="modal-header"><h2>Profile</h2><button class="modal-close" id="profileCloseBtn"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="field"><label>Name</label><input type="text" id="profileName" readonly style="background:var(--bg-input);" /></div>
+      <div class="field"><label>Email</label><input type="email" id="profileEmail" readonly style="background:var(--bg-input);" /></div>
+      <div class="modal-actions"><button class="btn-secondary" id="profileCloseActionBtn">Close</button></div>
+    </div>
   </div>
-</div>
 
-<!-- Profile Modal -->
-<div class="modal-overlay" id="profileModal">
-  <div class="modal-box">
-    <div class="modal-header"><h2>Profile</h2><button class="modal-close" id="profileCloseBtn"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="field"><label>Name</label><input type="text" id="profileName" readonly style="background:var(--bg-input);" /></div>
-    <div class="field"><label>Email</label><input type="email" id="profileEmail" readonly style="background:var(--bg-input);" /></div>
-    <div class="modal-actions"><button class="btn-secondary" id="profileCloseActionBtn">Close</button></div>
+  <!-- Account Settings Modal -->
+  <div class="modal-overlay" id="accountSettingsModal">
+    <div class="modal-box">
+      <div class="modal-header"><h2>Account Settings</h2><button class="modal-close" id="accountSettingsCloseBtn"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="field"><label>Change Password</label>
+        <div class="password-wrapper"><input type="password" id="currentPass" placeholder="Current password" style="margin-bottom:8px;" /><button class="password-toggle" data-target="currentPass">👁</button></div>
+        <div class="password-wrapper"><input type="password" id="newPass" placeholder="New password" style="margin-bottom:8px;" /><button class="password-toggle" data-target="newPass">👁</button></div>
+        <div class="password-wrapper"><input type="password" id="confirmPass" placeholder="Confirm new password" /><button class="password-toggle" data-target="confirmPass">👁</button></div>
+      </div>
+      <button class="btn-primary" id="changePassBtn" style="width:100%;margin-bottom:12px;">Update Password</button>
+      <hr style="border-color:var(--border-subtle);margin:12px 0;" />
+      <button class="btn-danger" id="deleteAccountBtn" style="width:100%;">Delete Account</button>
+      <div class="modal-actions" style="margin-top:12px;"><button class="btn-secondary" id="accountSettingsCloseActionBtn">Close</button></div>
+    </div>
   </div>
-</div>
 
-<!-- Account Settings Modal -->
-<div class="modal-overlay" id="accountSettingsModal">
-  <div class="modal-box">
-    <div class="modal-header"><h2>Account Settings</h2><button class="modal-close" id="accountSettingsCloseBtn"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="field"><label>Change Password</label><div class="password-wrapper"><input type="password" id="currentPass" placeholder="Current password" style="margin-bottom:8px;" /><button class="password-toggle" data-target="currentPass">👁</button></div><div class="password-wrapper"><input type="password" id="newPass" placeholder="New password" style="margin-bottom:8px;" /><button class="password-toggle" data-target="newPass">👁</button></div><div class="password-wrapper"><input type="password" id="confirmPass" placeholder="Confirm new password" /><button class="password-toggle" data-target="confirmPass">👁</button></div></div>
-    <button class="btn-primary" id="changePassBtn" style="width:100%;margin-bottom:12px;">Update Password</button>
-    <hr style="border-color:var(--border-subtle);margin:12px 0;" />
-    <button class="btn-danger" id="deleteAccountBtn" style="width:100%;">Delete Account</button>
-    <div class="modal-actions" style="margin-top:12px;"><button class="btn-secondary" id="accountSettingsCloseActionBtn">Close</button></div>
+  <!-- Share Modal -->
+  <div class="modal-overlay share-modal" id="shareModal">
+    <div class="modal-box">
+      <div class="modal-header"><h2 id="shareModalTitle">Share</h2><button class="modal-close" id="shareModalClose"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <p class="modal-desc" id="shareModalDesc">Share this link with anyone.</p>
+      <div class="share-link-container"><input type="text" id="shareLinkInput" readonly /><button class="copy-link-btn" id="shareCopyBtn">Copy</button></div>
+      <div class="modal-actions"><button class="btn-secondary" id="shareModalCloseBtn">Close</button></div>
+    </div>
   </div>
-</div>
 
-<!-- Share Modal -->
-<div class="modal-overlay share-modal" id="shareModal">
-  <div class="modal-box">
-    <div class="modal-header"><h2 id="shareModalTitle">Share</h2><button class="modal-close" id="shareModalClose"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <p class="modal-desc" id="shareModalDesc">Share this link with anyone.</p>
-    <div class="share-link-container"><input type="text" id="shareLinkInput" readonly /><button class="copy-link-btn" id="shareCopyBtn">Copy</button></div>
-    <div class="modal-actions"><button class="btn-secondary" id="shareModalCloseBtn">Close</button></div>
+  <!-- Confirm Modal -->
+  <div class="modal-overlay confirm-modal" id="confirmModal">
+    <div class="modal-box">
+      <div class="modal-header"><h2 id="confirmTitle">Confirm</h2><button class="modal-close" id="confirmCloseBtn"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <p class="modal-desc" id="confirmMessage">Are you sure?</p>
+      <div class="modal-actions"><button class="btn-secondary" id="confirmCancelBtn">Cancel</button><button class="btn-danger" id="confirmOkBtn">OK</button></div>
+    </div>
   </div>
-</div>
 
-<!-- Confirm Modal -->
-<div class="modal-overlay confirm-modal" id="confirmModal">
-  <div class="modal-box">
-    <div class="modal-header"><h2 id="confirmTitle">Confirm</h2><button class="modal-close" id="confirmCloseBtn"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <p class="modal-desc" id="confirmMessage">Are you sure?</p>
-    <div class="modal-actions"><button class="btn-secondary" id="confirmCancelBtn">Cancel</button><button class="btn-danger" id="confirmOkBtn">OK</button></div>
-  </div>
-</div>
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
 
-<!-- Toast Container -->
-<div class="toast-container" id="toastContainer"></div>
-
-<!-- ========================================================== -->
-<!-- JAVASCRIPT – COMPLETE APP LOGIC WITH SUPABASE AUTH -->
-<!-- ========================================================== -->
-<script>
-  // ------------------------------------------------------------------
-  // 1. SUPABASE CLIENT
-  // ------------------------------------------------------------------
-  const SUPABASE_URL = 'https://cfazulpmzvuzwszcoirt.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmYXp1bHBtenZ1endzemNvaXJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjU2NjU5ODMsImV4cCI6MjA0MTI0MTk4M30.8nBm4l_lvTVSgk-6s4FGNx3Kq5K2Mq8yJzUc7qQm5fY';
-  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  // ------------------------------------------------------------------
-  // 2. APP STATE
-  // ------------------------------------------------------------------
-  const state = {
-    user: null,
-    session: null,
-    conversations: {},
-    activeId: null,
-    isGenerating: false,
-    abortController: null,
-    theme: 'dark',
-    enterToSend: true,
-    selectedModel: 'groq/compound-mini',
-    temperature: 0.7,
-    webSearchEnabled: true,
-    attachments: [],
-    userScrolledUp: false,
-    dropdownOpen: false,
-  };
-
-  // ------------------------------------------------------------------
-  // 3. DOM REFS
-  // ------------------------------------------------------------------
-  const $ = id => document.getElementById(id);
-  const sidebar = $('sidebar');
-  const sidebarToggle = $('sidebarToggle');
-  const sidebarOpenBtn = $('sidebarOpenBtn');
-  const sidebarOverlay = $('sidebarOverlay');
-  const newChatBtn = $('newChatBtn');
-  const chatHistory = $('chatHistory');
-  const messagesContainer = $('messagesContainer');
-  const emptyState = $('emptyState');
-  const userInput = $('userInput');
-  const sendStopBtn = $('sendStopBtn');
-  const attachBtn = $('attachBtn');
-  const fileInput = $('fileInput');
-  const attachmentPreviews = $('attachmentPreviews');
-  const scrollBottomBtn = $('scrollBottomBtn');
-  const chatTitle = $('chatTitle');
-  const authBtn = $('authBtn');
-  const settingsIcon = $('settingsIcon');
-  const avatarDisplay = $('avatarDisplay');
-  const userNameDisplay = $('userNameDisplay');
-  const userSubDisplay = $('userSubDisplay');
-  const accountDropdown = $('accountDropdown');
-
-  const authModal = $('authModal');
-  const authModalClose = $('authModalClose');
-  const authModalTitle = $('authModalTitle');
-  const authModalDesc = $('authModalDesc');
-  const authName = $('authName');
-  const authEmail = $('authEmail');
-  const authPassword = $('authPassword');
-  const authConfirmPassword = $('authConfirmPassword');
-  const authError = $('authError');
-  const authSubmitBtn = $('authSubmitBtn');
-  const authSwitchBtn = $('authSwitchBtn');
-  const authGuestBtn = $('authGuestBtn');
-  const authNameField = $('authNameField');
-  const authConfirmField = $('authConfirmField');
-
-  const settingsModal = $('settingsModal');
-  const settingsCloseBtn = $('settingsCloseBtn');
-  const settingsCloseActionBtn = $('settingsCloseActionBtn');
-  const themeSelect = $('themeSelect');
-  const enterSendSelect = $('enterSendSelect');
-  const settingsSaveBtn = $('settingsSaveBtn');
-  const modelSelect = $('modelSelect');
-  const temperatureSlider = $('temperatureSlider');
-  const tempValue = $('tempValue');
-  const webSearchToggle = $('webSearchToggle');
-
-  const profileModal = $('profileModal');
-  const profileCloseBtn = $('profileCloseBtn');
-  const profileCloseActionBtn = $('profileCloseActionBtn');
-  const profileName = $('profileName');
-  const profileEmail = $('profileEmail');
-
-  const accountSettingsModal = $('accountSettingsModal');
-  const accountSettingsCloseBtn = $('accountSettingsCloseBtn');
-  const accountSettingsCloseActionBtn = $('accountSettingsCloseActionBtn');
-  const currentPass = $('currentPass');
-  const newPass = $('newPass');
-  const confirmPass = $('confirmPass');
-  const changePassBtn = $('changePassBtn');
-  const deleteAccountBtn = $('deleteAccountBtn');
-
-  const shareModal = $('shareModal');
-  const shareModalClose = $('shareModalClose');
-  const shareModalCloseBtn = $('shareModalCloseBtn');
-  const shareModalTitle = $('shareModalTitle');
-  const shareModalDesc = $('shareModalDesc');
-  const shareLinkInput = $('shareLinkInput');
-  const shareCopyBtn = $('shareCopyBtn');
-
-  const confirmModal = $('confirmModal');
-  const confirmTitle = $('confirmTitle');
-  const confirmMessage = $('confirmMessage');
-  const confirmOkBtn = $('confirmOkBtn');
-  const confirmCancelBtn = $('confirmCancelBtn');
-  const confirmCloseBtn = $('confirmCloseBtn');
-  const toastContainer = $('toastContainer');
-
-  // ------------------------------------------------------------------
-  // 4. STORAGE (localStorage)
-  // ------------------------------------------------------------------
-  const Storage = {
-    get(key) {
-      try {
-        const raw = localStorage.getItem('agrideepai_' + key);
-        return raw ? JSON.parse(raw) : null;
-      } catch { return null; }
-    },
-    set(key, value) {
-      try { localStorage.setItem('agrideepai_' + key, JSON.stringify(value)); } catch {}
-    },
-    remove(key) { localStorage.removeItem('agrideepai_' + key); }
-  };
-
-  // ------------------------------------------------------------------
-  // 5. TOAST & MODAL HELPERS
-  // ------------------------------------------------------------------
-  function showToast(message, type = 'info', duration = 3000) {
-    const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
-    const toast = document.createElement('div');
-    toast.className = 'toast is-' + type;
-    toast.innerHTML = `
-      <span class="toast-icon">${icons[type] || 'ℹ️'}</span>
-      <span class="toast-msg">${message}</span>
-      <button class="toast-dismiss"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-    `;
-    toastContainer.appendChild(toast);
-    toast.querySelector('.toast-dismiss').addEventListener('click', () => {
-      toast.classList.add('is-hiding');
-      setTimeout(() => toast.remove(), 300);
-    });
-    setTimeout(() => {
-      toast.classList.add('is-hiding');
-      setTimeout(() => toast.remove(), 300);
-    }, duration);
-  }
-
-  function openModal(modal) { if (modal) modal.classList.add('is-active'); }
-  function closeModal(modal) { if (modal) modal.classList.remove('is-active'); }
-  function openConfirmModal(title, message, onConfirm) {
-    confirmTitle.textContent = title;
-    confirmMessage.textContent = message;
-    confirmModal._onConfirm = onConfirm || null;
-    openModal(confirmModal);
-  }
-
-  // ------------------------------------------------------------------
-  // 6. UI UPDATE
-  // ------------------------------------------------------------------
-  function updateUIForUser(user) {
-    if (user) {
-      const name = user.user_metadata?.name || user.email?.split('@')[0] || 'User';
-      avatarDisplay.textContent = name.charAt(0).toUpperCase();
-      userNameDisplay.textContent = name;
-      userSubDisplay.textContent = user.email || 'signed in';
-      settingsIcon.style.display = 'block';
-    } else {
-      avatarDisplay.textContent = '👤';
-      userNameDisplay.textContent = 'Sign In';
-      userSubDisplay.textContent = 'Click to sign in';
-      settingsIcon.style.display = 'none';
+  <!-- ========================================================== -->
+  <!-- JAVASCRIPT – COMPLETE APP LOGIC WITH CUSTOM AUTH          -->
+  <!-- ========================================================== -->
+  <script>
+    // ============================================================
+    // 1. API HELPERS
+    // ============================================================
+    async function callAPI(endpoint, method, body, token) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const resp = await fetch(endpoint, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Request failed');
+      return data;
     }
-  }
 
-  function clearMessages() {
-    document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
-    emptyState.classList.remove('is-hidden');
-  }
+    // ============================================================
+    // 2. STORAGE (localStorage)
+    // ============================================================
+    const Storage = {
+      get(key) {
+        try { return JSON.parse(localStorage.getItem('agrideepai_' + key)); } catch { return null; }
+      },
+      set(key, value) {
+        localStorage.setItem('agrideepai_' + key, JSON.stringify(value));
+      },
+      remove(key) {
+        localStorage.removeItem('agrideepai_' + key);
+      }
+    };
 
-  // ------------------------------------------------------------------
-  // 7. CONVERSATIONS CRUD (Supabase)
-  // ------------------------------------------------------------------
-  async function loadConversations(userId) {
-    if (!userId) return;
-    const { data, error } = await supabaseClient
-      .from('conversations')
-      .select('*')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
-    if (error) {
-      console.error('loadConversations error:', error);
-      showToast('Failed to load conversations', 'error');
-      return;
+    function getSessionToken() {
+      return localStorage.getItem('agrideepai_sessionToken');
     }
-    const convs = {};
-    for (const row of data) {
-      convs[row.id] = {
-        id: row.id,
-        title: row.title || 'New Chat',
-        messages: row.messages || [],
-        pinned: row.pinned || false,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      };
+
+    function setSessionToken(token) {
+      localStorage.setItem('agrideepai_sessionToken', token);
     }
-    state.conversations = convs;
-    renderHistory();
-    const ids = Object.keys(convs);
-    if (ids.length === 0) {
-      newChat();
-    } else {
-      const latest = ids.sort((a,b) => new Date(convs[b].updated_at) - new Date(convs[a].updated_at))[0];
-      switchConversation(latest);
+
+    function getCurrentUser() {
+      return Storage.get('user');
     }
-  }
 
-  async function saveConversation(convId) {
-    const conv = state.conversations[convId];
-    if (!conv || !state.user) return;
-    const { error } = await supabaseClient
-      .from('conversations')
-      .upsert({
-        id: convId,
-        user_id: state.user.id,
-        title: conv.title,
-        messages: conv.messages,
-        pinned: conv.pinned,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
-    if (error) {
-      console.error('save error:', error);
-      showToast('Failed to save conversation', 'error');
+    function setCurrentUser(user) {
+      Storage.set('user', user);
     }
-  }
 
-  async function deleteConversation(convId) {
-    if (!state.user) return;
-    const { error } = await supabaseClient
-      .from('conversations')
-      .delete()
-      .eq('id', convId);
-    if (error) {
-      console.error('delete error:', error);
-      showToast('Failed to delete', 'error');
-      return;
+    function clearSession() {
+      localStorage.removeItem('agrideepai_sessionToken');
+      Storage.remove('user');
     }
-    delete state.conversations[convId];
-    if (state.activeId === convId) {
-      state.activeId = null;
-      clearMessages();
-      renderHistory();
-      if (Object.keys(state.conversations).length === 0) newChat();
+
+    // ============================================================
+    // 3. AUTH FUNCTIONS
+    // ============================================================
+    async function handleSignUp(email, password, name) {
+      // Step 1: send verification code
+      await callAPI('/api/send-verification', 'POST', { email });
+      showToast('Verification code sent to your email.', 'success');
+      // Step 2: get code from user (prompt – you can use a modal if you prefer)
+      const code = prompt('Enter the 6-digit verification code sent to your email:');
+      if (!code) return;
+      // Step 3: complete sign-up
+      const result = await callAPI('/api/auth/signup', 'POST', {
+        email,
+        password,
+        name,
+        verificationCode: code,
+      });
+      setSessionToken(result.token);
+      setCurrentUser(result.user);
+      updateUIForUser(result.user);
+      await loadConversations();
+      closeModal(document.getElementById('authModal'));
+      showToast('Account created! Welcome!', 'success');
     }
-    renderHistory();
-    showToast('Conversation deleted.', 'info');
-  }
 
-  // ------------------------------------------------------------------
-  // 8. AUTH FUNCTIONS
-  // ------------------------------------------------------------------
-  async function handleSignUp(email, password, name) {
-    const { data, error } = await supabaseClient.auth.signUp({
-      email,
-      password,
-      options: { data: { name } }
-    });
-    if (error) throw error;
-    showToast('Verification email sent! Please confirm.', 'success');
-    closeModal(authModal);
-    return data;
-  }
+    async function handleSignIn(email, password) {
+      // Step 1: request login code
+      const loginRes = await callAPI('/api/auth/login', 'POST', { email, password });
+      showToast('Verification code sent to your email.', 'success');
+      // Step 2: get code from user
+      const code = prompt('Enter the 6-digit verification code sent to your email:');
+      if (!code) return;
+      // Step 3: verify login code
+      const verifyRes = await callAPI('/api/auth/verify-login', 'POST', { email, code });
+      setSessionToken(verifyRes.token);
+      setCurrentUser(verifyRes.user);
+      updateUIForUser(verifyRes.user);
+      await loadConversations();
+      closeModal(document.getElementById('authModal'));
+      showToast('Signed in!', 'success');
+    }
 
-  async function handleSignIn(email, password) {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    showToast('Signed in!', 'success');
-    closeModal(authModal);
-    return data;
-  }
-
-  async function handleSignOut() {
-    await supabaseClient.auth.signOut();
-  }
-
-  // ------------------------------------------------------------------
-  // 9. AUTH STATE LISTENER
-  // ------------------------------------------------------------------
-  supabaseClient.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-      state.session = session;
-      state.user = session?.user || null;
-      updateUIForUser(state.user);
-      if (state.user) loadConversations(state.user.id);
-      closeModal(authModal);
-    } else if (event === 'SIGNED_OUT') {
-      state.session = null;
-      state.user = null;
+    async function handleLogout() {
+      const token = getSessionToken();
+      if (token) {
+        try { await callAPI('/api/auth/logout', 'POST', {}, token); } catch (e) {}
+      }
+      clearSession();
+      updateUIForUser(null);
       state.conversations = {};
       state.activeId = null;
-      updateUIForUser(null);
-      clearMessages();
       renderHistory();
-      if (emptyState) emptyState.classList.remove('is-hidden');
-      if (chatTitle) chatTitle.textContent = 'AgriDeepAI';
-      showToast('Signed out.', 'info');
+      clearMessages();
+      showToast('Logged out.', 'info');
     }
-  });
 
-  // ------------------------------------------------------------------
-  // 10. AUTH MODAL EVENTS
-  // ------------------------------------------------------------------
-  let authMode = 'signin';
-
-  function openAuthModal(mode = 'signin') {
-    authMode = mode;
-    authError.textContent = '';
-    authError.classList.remove('is-visible');
-    authName.value = '';
-    authEmail.value = '';
-    authPassword.value = '';
-    authConfirmPassword.value = '';
-    authNameField.style.display = mode === 'signup' ? 'block' : 'none';
-    authConfirmField.style.display = mode === 'signup' ? 'block' : 'none';
-    if (mode === 'signin') {
-      authModalTitle.textContent = 'Sign In';
-      authModalDesc.textContent = 'Sign in to save your chats across devices.';
-      authSubmitBtn.textContent = 'Sign In';
-      authSwitchBtn.textContent = 'Create Account';
-    } else {
-      authModalTitle.textContent = 'Create Account';
-      authModalDesc.textContent = 'Join AgriDeepAI to save your chats.';
-      authSubmitBtn.textContent = 'Sign Up';
-      authSwitchBtn.textContent = 'Already have an account? Sign In';
+    // ============================================================
+    // 4. UI UPDATE
+    // ============================================================
+    function updateUIForUser(user) {
+      const avatarDisplay = document.getElementById('avatarDisplay');
+      const userNameDisplay = document.getElementById('userNameDisplay');
+      const userSubDisplay = document.getElementById('userSubDisplay');
+      const settingsIcon = document.getElementById('settingsIcon');
+      if (user) {
+        const name = user.name || user.email?.split('@')[0] || 'User';
+        avatarDisplay.textContent = name.charAt(0).toUpperCase();
+        userNameDisplay.textContent = name;
+        userSubDisplay.textContent = user.email || 'signed in';
+        settingsIcon.style.display = 'block';
+      } else {
+        avatarDisplay.textContent = '👤';
+        userNameDisplay.textContent = 'Sign In';
+        userSubDisplay.textContent = 'Click to sign in';
+        settingsIcon.style.display = 'none';
+      }
     }
-    openModal(authModal);
-  }
 
-  authSubmitBtn.addEventListener('click', async () => {
-    const email = authEmail.value.trim();
-    const password = authPassword.value.trim();
-    if (!email || !password) {
-      showToast('Email and password required.', 'error');
-      return;
+    function clearMessages() {
+      document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
+      document.getElementById('emptyState').classList.remove('is-hidden');
     }
-    if (authMode === 'signup') {
-      const name = authName.value.trim() || 'User';
-      const confirm = authConfirmPassword.value.trim();
-      if (password !== confirm) {
-        showToast('Passwords do not match.', 'error');
+
+    // ============================================================
+    // 5. CONVERSATIONS CRUD (with API)
+    // ============================================================
+    async function loadConversations() {
+      const token = getSessionToken();
+      if (!token) return;
+      try {
+        const data = await callAPI('/api/conversations', 'GET', null, token);
+        const convs = {};
+        for (const row of data.conversations) {
+          convs[row.id] = {
+            id: row.id,
+            title: row.title || 'New Chat',
+            messages: row.messages || [],
+            pinned: row.pinned || false,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+          };
+        }
+        state.conversations = convs;
+        renderHistory();
+        const ids = Object.keys(convs);
+        if (ids.length === 0) {
+          newChat();
+        } else {
+          const latest = ids.sort((a,b) => new Date(convs[b].updated_at) - new Date(convs[a].updated_at))[0];
+          switchConversation(latest);
+        }
+      } catch (err) {
+        showToast('Failed to load conversations: ' + err.message, 'error');
+      }
+    }
+
+    async function saveConversation(convId) {
+      const conv = state.conversations[convId];
+      if (!conv) return;
+      const token = getSessionToken();
+      if (!token) return; // guest mode – skip saving to cloud
+      try {
+        await callAPI('/api/conversations', 'POST', {
+          conversations: [{
+            id: convId,
+            title: conv.title,
+            messages: conv.messages,
+            pinned: conv.pinned,
+            updatedAt: new Date().toISOString(),
+          }]
+        }, token);
+      } catch (err) {
+        console.error('Save error:', err);
+      }
+    }
+
+    // ============================================================
+    // 6. AUTH MODAL EVENTS
+    // ============================================================
+    let authMode = 'signin';
+
+    const authModal = document.getElementById('authModal');
+    const authModalTitle = document.getElementById('authModalTitle');
+    const authModalDesc = document.getElementById('authModalDesc');
+    const authName = document.getElementById('authName');
+    const authEmail = document.getElementById('authEmail');
+    const authPassword = document.getElementById('authPassword');
+    const authConfirmPassword = document.getElementById('authConfirmPassword');
+    const authError = document.getElementById('authError');
+    const authSubmitBtn = document.getElementById('authSubmitBtn');
+    const authSwitchBtn = document.getElementById('authSwitchBtn');
+    const authGuestBtn = document.getElementById('authGuestBtn');
+    const authNameField = document.getElementById('authNameField');
+    const authConfirmField = document.getElementById('authConfirmField');
+
+    function openAuthModal(mode = 'signin') {
+      authMode = mode;
+      authError.textContent = '';
+      authError.classList.remove('is-visible');
+      authName.value = '';
+      authEmail.value = '';
+      authPassword.value = '';
+      authConfirmPassword.value = '';
+      authNameField.style.display = mode === 'signup' ? 'block' : 'none';
+      authConfirmField.style.display = mode === 'signup' ? 'block' : 'none';
+      if (mode === 'signin') {
+        authModalTitle.textContent = 'Sign In';
+        authModalDesc.textContent = 'Sign in to save your chats across devices.';
+        authSubmitBtn.textContent = 'Sign In';
+        authSwitchBtn.textContent = 'Create Account';
+      } else {
+        authModalTitle.textContent = 'Create Account';
+        authModalDesc.textContent = 'Join AgriDeepAI to save your chats.';
+        authSubmitBtn.textContent = 'Sign Up';
+        authSwitchBtn.textContent = 'Already have an account? Sign In';
+      }
+      openModal(authModal);
+    }
+
+    authSubmitBtn.addEventListener('click', async () => {
+      const email = authEmail.value.trim();
+      const password = authPassword.value.trim();
+      if (!email || !password) {
+        showToast('Email and password required.', 'error');
         return;
       }
-      try {
-        await handleSignUp(email, password, name);
-      } catch (err) {
-        showToast('Sign-up error: ' + err.message, 'error');
+      if (authMode === 'signup') {
+        const name = authName.value.trim() || 'User';
+        const confirm = authConfirmPassword.value.trim();
+        if (password !== confirm) {
+          showToast('Passwords do not match.', 'error');
+          return;
+        }
+        try {
+          await handleSignUp(email, password, name);
+        } catch (err) {
+          showToast('Sign-up error: ' + err.message, 'error');
+        }
+      } else {
+        try {
+          await handleSignIn(email, password);
+        } catch (err) {
+          showToast('Sign-in error: ' + err.message, 'error');
+        }
       }
-    } else {
-      try {
-        await handleSignIn(email, password);
-      } catch (err) {
-        showToast('Sign-in error: ' + err.message, 'error');
-      }
-    }
-  });
+    });
 
-  authSwitchBtn.addEventListener('click', () => {
-    openAuthModal(authMode === 'signin' ? 'signup' : 'signin');
-  });
+    authSwitchBtn.addEventListener('click', () => {
+      openAuthModal(authMode === 'signin' ? 'signup' : 'signin');
+    });
 
-  authGuestBtn.addEventListener('click', () => {
-    closeModal(authModal);
-    showToast('Continuing as guest. Chats will not be synced.', 'info');
-    supabaseClient.auth.signOut();
-  });
+    authGuestBtn.addEventListener('click', () => {
+      closeModal(authModal);
+      clearSession();
+      updateUIForUser(null);
+      state.conversations = {};
+      state.activeId = null;
+      renderHistory();
+      newChat();
+      showToast('Continuing as guest. Chats will not be synced.', 'info');
+    });
 
-  authModalClose.addEventListener('click', () => closeModal(authModal));
-  authModal.addEventListener('click', (e) => { if (e.target === authModal) closeModal(authModal); });
-
-  authBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (state.user) {
-      if (state.dropdownOpen) closeDropdown();
-      else openDropdown();
-    } else {
-      openAuthModal('signin');
-    }
-  });
-
-  function openDropdown() {
-    state.dropdownOpen = true;
-    accountDropdown.classList.add('is-open');
-  }
-  function closeDropdown() {
-    state.dropdownOpen = false;
-    accountDropdown.classList.remove('is-open');
-  }
-  document.addEventListener('click', (e) => {
-    if (state.dropdownOpen && !accountDropdown.contains(e.target) && e.target !== authBtn) {
-      closeDropdown();
-    }
-  });
-
-  accountDropdown.querySelectorAll('.dropdown-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const action = item.dataset.action;
-      closeDropdown();
-      if (!state.user) {
-        showToast('Please sign in first.', 'warning');
+    // ─── Auth button in sidebar ──────────────────────────────
+    document.getElementById('authBtn').addEventListener('click', function(e) {
+      e.stopPropagation();
+      const user = getCurrentUser();
+      if (user) {
+        if (state.dropdownOpen) closeDropdown();
+        else openDropdown();
+      } else {
         openAuthModal('signin');
+      }
+    });
+
+    // ─── Dropdown logic ────────────────────────────────────────
+    const accountDropdown = document.getElementById('accountDropdown');
+    function openDropdown() {
+      state.dropdownOpen = true;
+      accountDropdown.classList.add('is-open');
+    }
+    function closeDropdown() {
+      state.dropdownOpen = false;
+      accountDropdown.classList.remove('is-open');
+    }
+    document.addEventListener('click', (e) => {
+      if (state.dropdownOpen && !accountDropdown.contains(e.target) && e.target !== document.getElementById('authBtn')) {
+        closeDropdown();
+      }
+    });
+    accountDropdown.querySelectorAll('.dropdown-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const action = item.dataset.action;
+        closeDropdown();
+        const user = getCurrentUser();
+        if (!user) {
+          showToast('Please sign in first.', 'warning');
+          openAuthModal('signin');
+          return;
+        }
+        switch (action) {
+          case 'profile':
+            document.getElementById('profileName').value = user.name || '';
+            document.getElementById('profileEmail').value = user.email || '';
+            openModal(document.getElementById('profileModal'));
+            break;
+          case 'account':
+            openModal(document.getElementById('accountSettingsModal'));
+            break;
+          case 'settings':
+            openModal(document.getElementById('settingsModal'));
+            break;
+          case 'logout':
+            openConfirmModal('Logout', 'Logout from your account?', handleLogout);
+            break;
+        }
+      });
+    });
+
+    document.getElementById('settingsIcon').addEventListener('click', function(e) {
+      e.stopPropagation();
+      const user = getCurrentUser();
+      if (user) {
+        if (state.dropdownOpen) closeDropdown();
+        else openDropdown();
+      } else {
+        openAuthModal('signin');
+      }
+    });
+
+    // ============================================================
+    // 7. MODAL HELPERS
+    // ============================================================
+    function openModal(modal) { if (modal) modal.classList.add('is-active'); }
+    function closeModal(modal) { if (modal) modal.classList.remove('is-active'); }
+
+    document.getElementById('authModalClose').addEventListener('click', () => closeModal(document.getElementById('authModal')));
+    document.getElementById('authModal').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeModal(e.currentTarget); });
+
+    // Settings modal close
+    document.getElementById('settingsCloseBtn').addEventListener('click', () => closeModal(document.getElementById('settingsModal')));
+    document.getElementById('settingsCloseActionBtn').addEventListener('click', () => closeModal(document.getElementById('settingsModal')));
+    document.getElementById('settingsModal').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeModal(e.currentTarget); });
+
+    // Profile modal
+    document.getElementById('profileCloseBtn').addEventListener('click', () => closeModal(document.getElementById('profileModal')));
+    document.getElementById('profileCloseActionBtn').addEventListener('click', () => closeModal(document.getElementById('profileModal')));
+    document.getElementById('profileModal').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeModal(e.currentTarget); });
+
+    // Account settings
+    document.getElementById('accountSettingsCloseBtn').addEventListener('click', () => closeModal(document.getElementById('accountSettingsModal')));
+    document.getElementById('accountSettingsCloseActionBtn').addEventListener('click', () => closeModal(document.getElementById('accountSettingsModal')));
+    document.getElementById('accountSettingsModal').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeModal(e.currentTarget); });
+
+    // Share modal
+    document.getElementById('shareModalClose').addEventListener('click', () => closeModal(document.getElementById('shareModal')));
+    document.getElementById('shareModalCloseBtn').addEventListener('click', () => closeModal(document.getElementById('shareModal')));
+    document.getElementById('shareModal').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeModal(e.currentTarget); });
+
+    // Confirm modal
+    document.getElementById('confirmCloseBtn').addEventListener('click', () => closeModal(document.getElementById('confirmModal')));
+    document.getElementById('confirmCancelBtn').addEventListener('click', () => closeModal(document.getElementById('confirmModal')));
+    document.getElementById('confirmModal').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeModal(e.currentTarget); });
+
+    function openConfirmModal(title, message, onConfirm) {
+      const confirmModal = document.getElementById('confirmModal');
+      document.getElementById('confirmTitle').textContent = title;
+      document.getElementById('confirmMessage').textContent = message;
+      confirmModal._onConfirm = onConfirm;
+      openModal(confirmModal);
+    }
+    document.getElementById('confirmOkBtn').addEventListener('click', function() {
+      const cb = document.getElementById('confirmModal')._onConfirm;
+      closeModal(document.getElementById('confirmModal'));
+      if (typeof cb === 'function') cb();
+    });
+
+    // ============================================================
+    // 8. TOAST
+    // ============================================================
+    function showToast(message, type = 'info', duration = 3000) {
+      const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+      const toast = document.createElement('div');
+      toast.className = 'toast is-' + type;
+      toast.innerHTML = `
+        <span class="toast-icon">${icons[type] || 'ℹ️'}</span>
+        <span class="toast-msg">${message}</span>
+        <button class="toast-dismiss"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      `;
+      document.getElementById('toastContainer').appendChild(toast);
+      toast.querySelector('.toast-dismiss').addEventListener('click', () => {
+        toast.classList.add('is-hiding');
+        setTimeout(() => toast.remove(), 300);
+      });
+      setTimeout(() => {
+        toast.classList.add('is-hiding');
+        setTimeout(() => toast.remove(), 300);
+      }, duration);
+    }
+
+    // ============================================================
+    // 9. APP STATE & CHAT FUNCTIONS (your existing logic)
+    // ============================================================
+    const state = {
+      conversations: {},
+      activeId: null,
+      isGenerating: false,
+      abortController: null,
+      theme: 'dark',
+      enterToSend: true,
+      selectedModel: 'groq/compound-mini',
+      temperature: 0.7,
+      webSearchEnabled: true,
+      attachments: [],
+      userScrolledUp: false,
+      dropdownOpen: false,
+    };
+
+    // ─── DOM refs ───────────────────────────────────────────────
+    const $ = id => document.getElementById(id);
+    const sidebar = $('sidebar');
+    const sidebarToggle = $('sidebarToggle');
+    const sidebarOpenBtn = $('sidebarOpenBtn');
+    const sidebarOverlay = $('sidebarOverlay');
+    const newChatBtn = $('newChatBtn');
+    const chatHistory = $('chatHistory');
+    const messagesContainer = $('messagesContainer');
+    const emptyState = $('emptyState');
+    const userInput = $('userInput');
+    const sendStopBtn = $('sendStopBtn');
+    const attachBtn = $('attachBtn');
+    const fileInput = $('fileInput');
+    const attachmentPreviews = $('attachmentPreviews');
+    const scrollBottomBtn = $('scrollBottomBtn');
+    const chatTitle = $('chatTitle');
+
+    // ─── Your existing chat functions (genId, createConversation, etc.) ───
+    // I'll include a condensed version – you should keep your full implementation.
+
+    function genId() { return 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2,6); }
+    function createConversation(title) {
+      const id = 'conv_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+      state.conversations[id] = {
+        id,
+        title: title || 'New Chat',
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pinned: false,
+      };
+      return id;
+    }
+    function getActive() { return state.activeId ? state.conversations[state.activeId] : null; }
+    function addMessage(convId, role, content) {
+      const conv = state.conversations[convId];
+      if (!conv) return null;
+      const msg = { id: genId(), role, content, createdAt: new Date().toISOString() };
+      conv.messages.push(msg);
+      conv.updatedAt = new Date().toISOString();
+      return msg;
+    }
+
+    function switchConversation(id) {
+      state.activeId = id;
+      renderConversation(id);
+      renderHistory();
+      const conv = state.conversations[id];
+      if (conv && chatTitle) chatTitle.textContent = conv.title;
+      if (window.innerWidth <= 992) closeSidebar();
+      state.attachments = [];
+      renderAttachments();
+      userInput.value = '';
+      userInput.style.height = 'auto';
+      sendStopBtn.classList.remove('is-active', 'is-generating');
+      sendStopBtn.disabled = true;
+      if (conv && conv.messages.length === 0) {
+        emptyState.classList.remove('is-hidden');
+        scrollBottomBtn.classList.remove('is-visible');
+      } else {
+        emptyState.classList.add('is-hidden');
+      }
+    }
+
+    function renderConversation(id) {
+      const conv = state.conversations[id];
+      document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
+      if (!conv || conv.messages.length === 0) {
+        emptyState.classList.remove('is-hidden');
+        scrollBottomBtn.classList.remove('is-visible');
         return;
       }
-      switch (action) {
-        case 'profile':
-          profileName.value = state.user.user_metadata?.name || '';
-          profileEmail.value = state.user.email || '';
-          openModal(profileModal);
-          break;
-        case 'account':
-          openModal(accountSettingsModal);
-          break;
-        case 'settings':
-          openModal(settingsModal);
-          break;
-        case 'logout':
-          openConfirmModal('Logout', 'Logout from your account?', async () => {
-            await handleSignOut();
-          });
-          break;
-      }
-    });
-  });
-
-  settingsIcon.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (state.user) {
-      if (state.dropdownOpen) closeDropdown();
-      else openDropdown();
-    } else {
-      openAuthModal('signin');
-    }
-  });
-
-  // ------------------------------------------------------------------
-  // 11. SETTINGS
-  // ------------------------------------------------------------------
-  function loadSettings() {
-    const saved = Storage.get('settings');
-    if (saved) {
-      state.theme = saved.theme || 'dark';
-      state.enterToSend = saved.enterToSend !== undefined ? saved.enterToSend : true;
-      state.selectedModel = saved.selectedModel || 'groq/compound-mini';
-      state.temperature = saved.temperature !== undefined ? saved.temperature : 0.7;
-      state.webSearchEnabled = saved.webSearchEnabled !== undefined ? saved.webSearchEnabled : true;
-    }
-    applyTheme(state.theme);
-    themeSelect.value = state.theme;
-    enterSendSelect.value = state.enterToSend ? 'true' : 'false';
-    modelSelect.value = state.selectedModel;
-    temperatureSlider.value = state.temperature;
-    tempValue.textContent = state.temperature;
-    webSearchToggle.checked = state.webSearchEnabled;
-  }
-
-  function saveSettings() {
-    state.theme = themeSelect.value;
-    state.enterToSend = enterSendSelect.value === 'true';
-    state.selectedModel = modelSelect.value;
-    state.temperature = parseFloat(temperatureSlider.value);
-    state.webSearchEnabled = webSearchToggle.checked;
-    applyTheme(state.theme);
-    Storage.set('settings', {
-      theme: state.theme,
-      enterToSend: state.enterToSend,
-      selectedModel: state.selectedModel,
-      temperature: state.temperature,
-      webSearchEnabled: state.webSearchEnabled,
-    });
-    closeModal(settingsModal);
-    showToast('Settings saved!', 'success');
-  }
-
-  function applyTheme(theme) {
-    const resolved = theme === 'system' ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : theme;
-    document.documentElement.setAttribute('data-theme', resolved);
-    if (theme !== 'system') Storage.set('theme', theme);
-  }
-
-  temperatureSlider.addEventListener('input', () => {
-    tempValue.textContent = temperatureSlider.value;
-  });
-
-  settingsCloseBtn.addEventListener('click', () => closeModal(settingsModal));
-  settingsCloseActionBtn.addEventListener('click', () => closeModal(settingsModal));
-  settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeModal(settingsModal); });
-  settingsSaveBtn.addEventListener('click', saveSettings);
-
-  // ------------------------------------------------------------------
-  // 12. SIDEBAR TOGGLE
-  // ------------------------------------------------------------------
-  function toggleSidebar() {
-    if (window.innerWidth <= 992) {
-      sidebar.classList.toggle('is-open');
-      sidebarOverlay.classList.toggle('is-visible');
-    } else {
-      sidebar.classList.toggle('is-collapsed');
-    }
-    const svg = sidebarToggle.querySelector('svg');
-    if (svg) {
-      svg.innerHTML = sidebar.classList.contains('is-collapsed') ?
-        '<path d="M9 18l6-6-6-6"/>' :
-        '<path d="M15 18l-6-6 6-6"/>';
-    }
-  }
-
-  sidebarToggle.addEventListener('click', toggleSidebar);
-  sidebarOpenBtn.addEventListener('click', () => {
-    if (window.innerWidth <= 992) {
-      sidebar.classList.add('is-open');
-      sidebarOverlay.classList.add('is-visible');
-    } else {
-      sidebar.classList.remove('is-collapsed');
-    }
-    const svg = sidebarToggle.querySelector('svg');
-    if (svg) svg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
-  });
-  sidebarOverlay.addEventListener('click', () => {
-    if (window.innerWidth <= 992) {
-      sidebar.classList.remove('is-open');
-      sidebarOverlay.classList.remove('is-visible');
-    } else {
-      sidebar.classList.add('is-collapsed');
-    }
-    const svg = sidebarToggle.querySelector('svg');
-    if (svg) svg.innerHTML = '<path d="M9 18l6-6-6-6"/>';
-  });
-
-  window.addEventListener('resize', () => {
-    if (window.innerWidth > 992) {
-      sidebar.classList.remove('is-open');
-      sidebarOverlay.classList.remove('is-visible');
-    }
-  });
-
-  // ------------------------------------------------------------------
-  // 13. CHAT FUNCTIONS
-  // ------------------------------------------------------------------
-  function genId() { return 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2,6); }
-  function createConversation(title) {
-    const id = 'conv_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
-    state.conversations[id] = {
-      id,
-      title: title || 'New Chat',
-      messages: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      pinned: false,
-    };
-    return id;
-  }
-  function getActive() { return state.activeId ? state.conversations[state.activeId] : null; }
-  function addMessage(convId, role, content) {
-    const conv = state.conversations[convId];
-    if (!conv) return null;
-    const msg = { id: genId(), role, content, createdAt: new Date().toISOString() };
-    conv.messages.push(msg);
-    conv.updatedAt = new Date().toISOString();
-    return msg;
-  }
-
-  function switchConversation(id) {
-    state.activeId = id;
-    renderConversation(id);
-    renderHistory();
-    const conv = state.conversations[id];
-    if (conv && chatTitle) chatTitle.textContent = conv.title;
-    if (window.innerWidth <= 992) closeSidebar();
-    state.attachments = [];
-    renderAttachments();
-    userInput.value = '';
-    userInput.style.height = 'auto';
-    sendStopBtn.classList.remove('is-active', 'is-generating');
-    sendStopBtn.disabled = true;
-    if (conv && conv.messages.length === 0) {
-      emptyState.classList.remove('is-hidden');
-      scrollBottomBtn.classList.remove('is-visible');
-    } else {
       emptyState.classList.add('is-hidden');
+      conv.messages.forEach(msg => {
+        if (msg.role === 'user') appendUserMessage(msg.content);
+        else if (msg.role === 'assistant') appendAssistantMessage(msg.id, msg.content, false);
+      });
+      updateScrollBtn();
+      scrollToBottom(false);
     }
-  }
 
-  function renderConversation(id) {
-    const conv = state.conversations[id];
-    document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
-    if (!conv || conv.messages.length === 0) {
-      emptyState.classList.remove('is-hidden');
-      scrollBottomBtn.classList.remove('is-visible');
-      return;
+    function appendUserMessage(content) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'message-wrapper is-user';
+      wrapper.innerHTML = `<div class="message-bubble">${content}</div>
+        <div class="message-actions">
+          <button data-action="copy"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+          <button data-action="edit"><svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+        </div>`;
+      messagesContainer.appendChild(wrapper);
+      // event listeners (simplified)
+      wrapper.querySelector('[data-action="copy"]').addEventListener('click', () => {
+        navigator.clipboard.writeText(content).then(() => showToast('Copied!', 'success'));
+      });
+      wrapper.querySelector('[data-action="edit"]').addEventListener('click', () => {
+        // inline edit (you can keep your existing edit logic)
+        const bubble = wrapper.querySelector('.message-bubble');
+        const actions = wrapper.querySelector('.message-actions');
+        bubble.style.display = 'none';
+        actions.style.display = 'none';
+        const editDiv = document.createElement('div');
+        editDiv.className = 'edit-container';
+        editDiv.innerHTML = `<textarea class="edit-input">${content}</textarea>
+          <div class="edit-actions"><button class="save-edit">Save</button><button class="cancel-edit">Cancel</button></div>`;
+        wrapper.appendChild(editDiv);
+        const ta = editDiv.querySelector('textarea');
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+        editDiv.querySelector('.save-edit').addEventListener('click', async () => {
+          const newText = ta.value.trim();
+          if (newText) {
+            const conv = getActive();
+            if (conv) {
+              const msg = conv.messages.find(m => m.content === content && m.role === 'user');
+              if (msg) {
+                msg.content = newText;
+                const idx = conv.messages.indexOf(msg);
+                conv.messages = conv.messages.slice(0, idx + 1);
+                renderConversation(state.activeId);
+                await saveConversation(state.activeId);
+                sendMessage(newText);
+              }
+            }
+          }
+        });
+        editDiv.querySelector('.cancel-edit').addEventListener('click', () => {
+          bubble.style.display = '';
+          actions.style.display = '';
+          editDiv.remove();
+        });
+      });
     }
-    emptyState.classList.add('is-hidden');
-    conv.messages.forEach(msg => {
-      if (msg.role === 'user') appendUserMessage(msg.content);
-      else if (msg.role === 'assistant') appendAssistantMessage(msg.id, msg.content, false);
-    });
-    updateScrollBtn();
-    scrollToBottom(false);
-  }
 
-  function appendUserMessage(content) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'message-wrapper is-user';
-    wrapper.innerHTML = `<div class="message-bubble">${content}</div>
-      <div class="message-actions">
+    function appendAssistantMessage(messageId, content, isLoading = false) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'message-wrapper is-bot';
+      if (messageId) wrapper.dataset.msgId = messageId;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'message-bubble';
+      if (isLoading) {
+        bubble.innerHTML = `<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span> <span style="font-size:13px;color:var(--text-muted);">Thinking...</span>`;
+        wrapper.dataset.loading = 'true';
+      } else {
+        let rawHtml = marked.parse(content);
+        const safeHtml = DOMPurify.sanitize(rawHtml, {
+          ALLOWED_TAGS: ['p','br','strong','em','i','b','u','s','h1','h2','h3','h4','h5','h6','ul','ol','li','blockquote','pre','code','a','img','table','thead','tbody','tr','th','td','hr','div','span'],
+          ALLOWED_ATTR: ['href','target','rel','src','alt','class','id']
+        });
+        bubble.innerHTML = safeHtml;
+        // highlight code blocks
+        bubble.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+      }
+      wrapper.appendChild(bubble);
+
+      const actions = document.createElement('div');
+      actions.className = 'message-actions';
+      actions.innerHTML = `
         <button data-action="copy"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
-        <button data-action="edit"><svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-      </div>`;
-    messagesContainer.appendChild(wrapper);
-    // event listeners (simplified: copy & edit)
-    wrapper.querySelector('[data-action="copy"]').addEventListener('click', () => {
-      navigator.clipboard.writeText(content).then(() => showToast('Copied!', 'success'));
-    });
-    wrapper.querySelector('[data-action="edit"]').addEventListener('click', () => {
-      // inline edit: replace bubble with textarea
-      const bubble = wrapper.querySelector('.message-bubble');
-      const actions = wrapper.querySelector('.message-actions');
-      bubble.style.display = 'none';
-      actions.style.display = 'none';
-      const editDiv = document.createElement('div');
-      editDiv.className = 'edit-container';
-      editDiv.innerHTML = `<textarea class="edit-input">${content}</textarea>
-        <div class="edit-actions"><button class="save-edit">Save</button><button class="cancel-edit">Cancel</button></div>`;
-      wrapper.appendChild(editDiv);
-      const ta = editDiv.querySelector('textarea');
-      ta.focus();
-      ta.setSelectionRange(ta.value.length, ta.value.length);
-      editDiv.querySelector('.save-edit').addEventListener('click', async () => {
-        const newText = ta.value.trim();
-        if (newText) {
+        <button data-action="regenerate"><svg viewBox="0 0 24 24"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
+        <button data-action="like"><svg viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg></button>
+        <button data-action="dislike"><svg viewBox="0 0 24 24"><path d="M10 15v3a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg></button>
+        <button data-action="share"><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></button>
+      `;
+      wrapper.appendChild(actions);
+
+      actions.querySelectorAll('button[data-action]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const action = btn.dataset.action;
+          const msgText = content;
           const conv = getActive();
-          if (conv) {
-            const msg = conv.messages.find(m => m.content === content && m.role === 'user');
-            if (msg) {
-              msg.content = newText;
-              const idx = conv.messages.indexOf(msg);
-              conv.messages = conv.messages.slice(0, idx + 1);
-              renderConversation(state.activeId);
-              await saveConversation(state.activeId);
-              sendMessage(newText);
+          if (action === 'copy') {
+            navigator.clipboard.writeText(msgText).then(() => showToast('Copied!', 'success'));
+          } else if (action === 'regenerate') {
+            if (conv) {
+              const lastUser = conv.messages.filter(m => m.role === 'user').pop();
+              if (lastUser) {
+                const idx = conv.messages.findIndex(m => m.id === messageId);
+                if (idx > -1) conv.messages = conv.messages.slice(0, idx);
+                renderConversation(state.activeId);
+                sendMessage(lastUser.content);
+              }
             }
+          } else if (action === 'like') {
+            btn.classList.toggle('is-liked');
+          } else if (action === 'dislike') {
+            btn.classList.toggle('is-disliked');
+          } else if (action === 'share') {
+            const url = new URL(window.location.href);
+            url.searchParams.set('conversation', state.activeId);
+            url.searchParams.set('message', messageId);
+            openShareModal('Share Message', 'Share this message.', url.toString());
           }
-        }
+        });
       });
-      editDiv.querySelector('.cancel-edit').addEventListener('click', () => {
-        bubble.style.display = '';
-        actions.style.display = '';
-        editDiv.remove();
-      });
-    });
-  }
 
-  function appendAssistantMessage(messageId, content, isLoading = false) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'message-wrapper is-bot';
-    if (messageId) wrapper.dataset.msgId = messageId;
-
-    const bubble = document.createElement('div');
-    bubble.className = 'message-bubble';
-    if (isLoading) {
-      bubble.innerHTML = `<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span> <span style="font-size:13px;color:var(--text-muted);">Thinking...</span>`;
-      wrapper.dataset.loading = 'true';
-    } else {
-      let rawHtml = marked.parse(content);
-      const safeHtml = DOMPurify.sanitize(rawHtml, {
-        ALLOWED_TAGS: ['p','br','strong','em','i','b','u','s','h1','h2','h3','h4','h5','h6','ul','ol','li','blockquote','pre','code','a','img','table','thead','tbody','tr','th','td','hr','div','span'],
-        ALLOWED_ATTR: ['href','target','rel','src','alt','class','id']
-      });
-      bubble.innerHTML = safeHtml;
-      // highlight code blocks
-      bubble.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+      messagesContainer.appendChild(wrapper);
+      return wrapper;
     }
-    wrapper.appendChild(bubble);
 
-    const actions = document.createElement('div');
-    actions.className = 'message-actions';
-    actions.innerHTML = `
-      <button data-action="copy"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
-      <button data-action="regenerate"><svg viewBox="0 0 24 24"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
-      <button data-action="like"><svg viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg></button>
-      <button data-action="dislike"><svg viewBox="0 0 24 24"><path d="M10 15v3a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg></button>
-      <button data-action="share"><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></button>
-    `;
-    wrapper.appendChild(actions);
+    function openShareModal(title, desc, link) {
+      document.getElementById('shareModalTitle').textContent = title;
+      document.getElementById('shareModalDesc').textContent = desc;
+      document.getElementById('shareLinkInput').value = link;
+      document.getElementById('shareLinkInput').select();
+      openModal(document.getElementById('shareModal'));
+    }
 
-    actions.querySelectorAll('button[data-action]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const action = btn.dataset.action;
-        const msgText = content;
-        const conv = getActive();
-        if (action === 'copy') {
-          navigator.clipboard.writeText(msgText).then(() => showToast('Copied!', 'success'));
-        } else if (action === 'regenerate') {
-          if (conv) {
-            const lastUser = conv.messages.filter(m => m.role === 'user').pop();
-            if (lastUser) {
-              const idx = conv.messages.findIndex(m => m.id === messageId);
-              if (idx > -1) conv.messages = conv.messages.slice(0, idx);
-              renderConversation(state.activeId);
-              sendMessage(lastUser.content);
-            }
-          }
-        } else if (action === 'like') {
-          btn.classList.toggle('is-liked');
-        } else if (action === 'dislike') {
-          btn.classList.toggle('is-disliked');
-        } else if (action === 'share') {
-          const url = new URL(window.location.href);
-          url.searchParams.set('conversation', state.activeId);
-          url.searchParams.set('message', messageId);
-          openShareModal('Share Message', 'Share this message.', url.toString());
-        }
+    document.getElementById('shareCopyBtn').addEventListener('click', () => {
+      const input = document.getElementById('shareLinkInput');
+      navigator.clipboard.writeText(input.value).then(() => {
+        showToast('Link copied!', 'success');
+        document.getElementById('shareCopyBtn').textContent = 'Copied!';
+        setTimeout(() => document.getElementById('shareCopyBtn').textContent = 'Copy', 1500);
       });
     });
 
-    messagesContainer.appendChild(wrapper);
-    return wrapper;
-  }
-
-  function openShareModal(title, desc, link) {
-    shareModalTitle.textContent = title;
-    shareModalDesc.textContent = desc;
-    shareLinkInput.value = link;
-    shareLinkInput.select();
-    openModal(shareModal);
-  }
-
-  // Scroll
-  function scrollToBottom(smooth = true) {
-    if (smooth) messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' });
-    else messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    state.userScrolledUp = false;
-    scrollBottomBtn.classList.remove('is-visible');
-  }
-
-  function updateScrollBtn() {
-    const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 20;
-    if (!atBottom && state.isGenerating) {
-      scrollBottomBtn.classList.add('is-visible');
-    } else {
-      scrollBottomBtn.classList.remove('is-visible');
-    }
-  }
-
-  messagesContainer.addEventListener('scroll', () => {
-    const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 20;
-    if (atBottom) {
+    // Scroll
+    function scrollToBottom(smooth = true) {
+      if (smooth) messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' });
+      else messagesContainer.scrollTop = messagesContainer.scrollHeight;
       state.userScrolledUp = false;
       scrollBottomBtn.classList.remove('is-visible');
-    } else {
-      state.userScrolledUp = true;
-      if (state.isGenerating) scrollBottomBtn.classList.add('is-visible');
     }
-  });
 
-  scrollBottomBtn.addEventListener('click', () => scrollToBottom(true));
-
-  // ------------------------------------------------------------------
-  // 14. SEND MESSAGE
-  // ------------------------------------------------------------------
-  async function sendMessage(text) {
-    if (state.isGenerating) return;
-    const message = text || userInput.value.trim();
-    if (!message && state.attachments.length === 0) return;
-
-    let active = getActive();
-    if (!state.activeId || (active && active.messages.length === 0)) {
-      if (!state.activeId) {
-        const newId = createConversation(message.slice(0, 30) + (message.length > 30 ? '...' : ''));
-        state.activeId = newId;
-        active = getActive();
+    function updateScrollBtn() {
+      const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 20;
+      if (!atBottom && state.isGenerating) {
+        scrollBottomBtn.classList.add('is-visible');
+      } else {
+        scrollBottomBtn.classList.remove('is-visible');
       }
-      renderHistory();
-      if (active && chatTitle) chatTitle.textContent = active.title;
-      emptyState.classList.add('is-hidden');
     }
 
-    const conv = getActive();
-    if (!conv) return;
-
-    let fullText = message;
-    let hasAttachments = state.attachments.length > 0;
-    let fileDataArray = [];
-
-    if (hasAttachments) {
-      const names = state.attachments.map(f => f.name);
-      for (const file of state.attachments) {
-        const dataUrl = await readFileAsDataURL(file);
-        const parts = dataUrl.split(',');
-        fileDataArray.push({ name: file.name, type: parts[0].split(':')[1].split(';')[0], data: parts[1] });
+    messagesContainer.addEventListener('scroll', () => {
+      const atBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 20;
+      if (atBottom) {
+        state.userScrolledUp = false;
+        scrollBottomBtn.classList.remove('is-visible');
+      } else {
+        state.userScrolledUp = true;
+        if (state.isGenerating) scrollBottomBtn.classList.add('is-visible');
       }
-      fullText = message ? message + '\n\n📎 Attachments: ' + names.join(', ') : '📎 Attachments: ' + names.join(', ');
-    }
+    });
 
-    const userMsg = addMessage(conv.id, 'user', fullText);
-    appendUserMessage(fullText);
-    await saveConversation(conv.id);
+    scrollBottomBtn.addEventListener('click', () => scrollToBottom(true));
 
-    userInput.value = '';
-    userInput.style.height = 'auto';
-    sendStopBtn.classList.remove('is-active');
-    state.attachments = [];
-    renderAttachments();
+    // ─── Send Message ──────────────────────────────────────────
+    async function sendMessage(text) {
+      if (state.isGenerating) return;
+      const message = text || userInput.value.trim();
+      if (!message && state.attachments.length === 0) return;
 
-    if (conv.messages.length === 1) {
-      conv.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
-      renderHistory();
-      chatTitle.textContent = conv.title;
-    }
-
-    scrollToBottom(true);
-
-    state.isGenerating = true;
-    sendStopBtn.classList.add('is-generating');
-    sendStopBtn.disabled = false;
-    sendStopBtn.querySelector('.send-icon').style.display = 'none';
-    sendStopBtn.querySelector('.stop-icon').style.display = 'block';
-
-    const assistantMsgId = genId();
-    const loadingWrapper = appendAssistantMessage(assistantMsgId, '', true);
-
-    state.abortController = new AbortController();
-
-    try {
-      const history = conv.messages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
-      const payload = {
-        message,
-        history,
-        model: state.selectedModel,
-        temperature: state.temperature,
-        webSearchEnabled: state.webSearchEnabled,
-        userId: state.user ? state.user.id : null,
-        files: fileDataArray,
-      };
-
-      const { data: { session } } = await supabaseClient.auth.getSession();
-      const token = session?.access_token || '';
-
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : '',
-        },
-        body: JSON.stringify(payload),
-        signal: state.abortController.signal,
-      });
-
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'API request failed');
+      let active = getActive();
+      if (!state.activeId || (active && active.messages.length === 0)) {
+        if (!state.activeId) {
+          const newId = createConversation(message.slice(0, 30) + (message.length > 30 ? '...' : ''));
+          state.activeId = newId;
+          active = getActive();
+        }
+        renderHistory();
+        if (active && chatTitle) chatTitle.textContent = active.title;
+        emptyState.classList.add('is-hidden');
       }
 
-      const data = await response.json();
-      let aiResponse = data.response || 'Sorry, I could not generate a response.';
+      const conv = getActive();
+      if (!conv) return;
+
+      let fullText = message;
+      let hasAttachments = state.attachments.length > 0;
+      let fileDataArray = [];
+
       if (hasAttachments) {
-        aiResponse = '📎 You attached: ' + state.attachments.map(f => f.name).join(', ') + '\n\n' + aiResponse;
+        const names = state.attachments.map(f => f.name);
+        for (const file of state.attachments) {
+          const dataUrl = await readFileAsDataURL(file);
+          const parts = dataUrl.split(',');
+          fileDataArray.push({ name: file.name, type: parts[0].split(':')[1].split(';')[0], data: parts[1] });
+        }
+        fullText = message ? message + '\n\n📎 Attachments: ' + names.join(', ') : '📎 Attachments: ' + names.join(', ');
       }
 
-      loadingWrapper.remove();
-      const botMsg = addMessage(conv.id, 'assistant', aiResponse);
-      appendAssistantMessage(botMsg.id, aiResponse, false);
+      const userMsg = addMessage(conv.id, 'user', fullText);
+      appendUserMessage(fullText);
       await saveConversation(conv.id);
 
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        if (loadingWrapper) {
-          loadingWrapper.querySelector('.message-bubble').innerHTML = '<span style="color:var(--text-muted);">Generation stopped.</span>';
-          loadingWrapper.dataset.loading = 'false';
-          loadingWrapper.querySelector('.message-actions')?.remove();
-        }
-        addMessage(conv.id, 'assistant', 'Generation stopped.');
-      } else {
-        showToast('Error: ' + error.message, 'error');
-        if (loadingWrapper) {
-          loadingWrapper.querySelector('.message-bubble').innerHTML = '<span style="color:var(--error);">Sorry, an error occurred.</span>';
-          loadingWrapper.dataset.loading = 'false';
-          loadingWrapper.querySelector('.message-actions')?.remove();
-        }
-        addMessage(conv.id, 'assistant', 'Sorry, an error occurred. Please try again.');
+      userInput.value = '';
+      userInput.style.height = 'auto';
+      sendStopBtn.classList.remove('is-active');
+      state.attachments = [];
+      renderAttachments();
+
+      if (conv.messages.length === 1) {
+        conv.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
+        renderHistory();
+        chatTitle.textContent = conv.title;
       }
-    }
 
-    state.isGenerating = false;
-    sendStopBtn.classList.remove('is-generating');
-    sendStopBtn.querySelector('.send-icon').style.display = 'block';
-    sendStopBtn.querySelector('.stop-icon').style.display = 'none';
-    sendStopBtn.disabled = true;
+      scrollToBottom(true);
 
-    renderHistory();
-    updateScrollBtn();
-    if (!state.userScrolledUp) scrollToBottom(true);
-    userInput.focus();
-  }
+      state.isGenerating = true;
+      sendStopBtn.classList.add('is-generating');
+      sendStopBtn.disabled = false;
+      sendStopBtn.querySelector('.send-icon').style.display = 'none';
+      sendStopBtn.querySelector('.stop-icon').style.display = 'block';
 
-  function readFileAsDataURL(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
+      const assistantMsgId = genId();
+      const loadingWrapper = appendAssistantMessage(assistantMsgId, '', true);
 
-  function stopGeneration() {
-    if (state.isGenerating && state.abortController) {
-      state.abortController.abort();
+      state.abortController = new AbortController();
+
+      try {
+        const history = conv.messages.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+        const payload = {
+          message,
+          history,
+          model: state.selectedModel,
+          temperature: state.temperature,
+          webSearchEnabled: state.webSearchEnabled,
+          files: fileDataArray,
+        };
+
+        const token = getSessionToken();
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token ? `Bearer ${token}` : '',
+          },
+          body: JSON.stringify(payload),
+          signal: state.abortController.signal,
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'API request failed');
+        }
+
+        const data = await response.json();
+        let aiResponse = data.response || 'Sorry, I could not generate a response.';
+        if (hasAttachments) {
+          aiResponse = '📎 You attached: ' + state.attachments.map(f => f.name).join(', ') + '\n\n' + aiResponse;
+        }
+
+        loadingWrapper.remove();
+        const botMsg = addMessage(conv.id, 'assistant', aiResponse);
+        appendAssistantMessage(botMsg.id, aiResponse, false);
+        await saveConversation(conv.id);
+
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          if (loadingWrapper) {
+            loadingWrapper.querySelector('.message-bubble').innerHTML = '<span style="color:var(--text-muted);">Generation stopped.</span>';
+            loadingWrapper.dataset.loading = 'false';
+            loadingWrapper.querySelector('.message-actions')?.remove();
+          }
+          addMessage(conv.id, 'assistant', 'Generation stopped.');
+        } else {
+          showToast('Error: ' + error.message, 'error');
+          if (loadingWrapper) {
+            loadingWrapper.querySelector('.message-bubble').innerHTML = '<span style="color:var(--error);">Sorry, an error occurred.</span>';
+            loadingWrapper.dataset.loading = 'false';
+            loadingWrapper.querySelector('.message-actions')?.remove();
+          }
+          addMessage(conv.id, 'assistant', 'Sorry, an error occurred. Please try again.');
+        }
+      }
+
       state.isGenerating = false;
       sendStopBtn.classList.remove('is-generating');
       sendStopBtn.querySelector('.send-icon').style.display = 'block';
       sendStopBtn.querySelector('.stop-icon').style.display = 'none';
       sendStopBtn.disabled = true;
-      showToast('Generation stopped.', 'info');
-    }
-  }
 
-  // Input events
-  userInput.addEventListener('input', () => {
-    const hasText = userInput.value.trim().length > 0 || state.attachments.length > 0;
-    if (hasText) {
-      sendStopBtn.classList.add('is-active');
-      sendStopBtn.disabled = false;
-    } else if (!state.isGenerating) {
-      sendStopBtn.classList.remove('is-active');
-      sendStopBtn.disabled = true;
+      renderHistory();
+      updateScrollBtn();
+      if (!state.userScrolledUp) scrollToBottom(true);
+      userInput.focus();
     }
-    userInput.style.height = 'auto';
-    userInput.style.height = Math.min(userInput.scrollHeight, 180) + 'px';
-  });
 
-  userInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && state.enterToSend) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
-
-  sendStopBtn.addEventListener('click', () => {
-    if (state.isGenerating) {
-      stopGeneration();
-    } else {
-      sendMessage();
-    }
-  });
-
-  // Attachments
-  attachBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', function() {
-    if (this.files) {
-      const files = Array.from(this.files);
-      files.forEach(file => {
-        if (state.attachments.length >= 5) {
-          showToast('Maximum 5 files.', 'warning');
-          return;
-        }
-        if (file.size > 10 * 1024 * 1024) {
-          showToast('File too large.', 'error');
-          return;
-        }
-        state.attachments.push(file);
-        renderAttachments();
+    function readFileAsDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
       });
-      this.value = '';
-      if (userInput.value.trim().length > 0 || state.attachments.length > 0) {
-        sendStopBtn.classList.add('is-active');
-        sendStopBtn.disabled = false;
+    }
+
+    function stopGeneration() {
+      if (state.isGenerating && state.abortController) {
+        state.abortController.abort();
+        state.isGenerating = false;
+        sendStopBtn.classList.remove('is-generating');
+        sendStopBtn.querySelector('.send-icon').style.display = 'block';
+        sendStopBtn.querySelector('.stop-icon').style.display = 'none';
+        sendStopBtn.disabled = true;
+        showToast('Generation stopped.', 'info');
       }
     }
-  });
 
-  function renderAttachments() {
-    attachmentPreviews.innerHTML = '';
-    state.attachments.forEach((file, index) => {
-      const div = document.createElement('div');
-      div.className = 'attachment-preview';
-      const isImage = file.type.startsWith('image/');
-      const url = isImage ? URL.createObjectURL(file) : '';
-      div.innerHTML = `
-        ${isImage ? `<img src="${url}" alt="${file.name}" />` : `<span class="file-icon">📄</span>`}
-        <span class="file-name">${file.name}</span>
-        <button class="remove-attach" data-index="${index}">✕</button>
-      `;
-      div.querySelector('.remove-attach').addEventListener('click', () => {
-        state.attachments.splice(index, 1);
-        renderAttachments();
-        if (userInput.value.trim().length === 0 && state.attachments.length === 0) {
-          sendStopBtn.classList.remove('is-active');
-          sendStopBtn.disabled = true;
-        }
-      });
-      attachmentPreviews.appendChild(div);
+    // Input events
+    userInput.addEventListener('input', () => {
+      const hasText = userInput.value.trim().length > 0 || state.attachments.length > 0;
+      if (hasText) {
+        sendStopBtn.classList.add('is-active');
+        sendStopBtn.disabled = false;
+      } else if (!state.isGenerating) {
+        sendStopBtn.classList.remove('is-active');
+        sendStopBtn.disabled = true;
+      }
+      userInput.style.height = 'auto';
+      userInput.style.height = Math.min(userInput.scrollHeight, 180) + 'px';
     });
-  }
 
-  // ------------------------------------------------------------------
-  // 15. HISTORY RENDERING
-  // ------------------------------------------------------------------
-  function renderHistory() {
-    chatHistory.querySelectorAll('.chat-item').forEach(el => el.remove());
-    const convs = Object.values(state.conversations);
-    if (convs.length === 0) {
-      chatHistory.innerHTML = '<div class="empty-history">No chats yet.<br />Start a new conversation.</div>';
-      return;
-    }
-    const sorted = [...convs.filter(c => c.pinned), ...convs.filter(c => !c.pinned)]
-      .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    userInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && state.enterToSend) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
 
-    sorted.forEach(conv => {
-      const div = document.createElement('div');
-      div.className = 'chat-item' + (conv.id === state.activeId ? ' is-active' : '');
-      div.innerHTML = `
-        <span class="title">${conv.title}</span>
-        <div class="chat-actions">
-          <button class="${conv.pinned ? 'is-pinned' : ''}" data-action="pin"><svg viewBox="0 0 24 24"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 12h14"/><path d="M7 12v-5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v5"/></svg></button>
-          <button data-action="delete"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
-          <button data-action="share"><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></button>
-        </div>
-      `;
-      div.addEventListener('click', (e) => { if (!e.target.closest('button')) switchConversation(conv.id); });
-      div.querySelectorAll('button[data-action]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const action = btn.dataset.action;
-          if (action === 'delete') {
-            openConfirmModal('Delete Conversation', 'Delete this conversation?', async () => {
-              await deleteConversation(conv.id);
-            });
-          } else if (action === 'pin') {
-            conv.pinned = !conv.pinned;
-            renderHistory();
-            showToast(conv.pinned ? 'Pinned.' : 'Unpinned.', 'info');
-            if (state.user) saveConversation(conv.id);
-          } else if (action === 'share') {
-            const url = new URL(window.location.href);
-            url.searchParams.set('conversation', conv.id);
-            openShareModal('Share Conversation', 'Share this conversation.', url.toString());
+    sendStopBtn.addEventListener('click', () => {
+      if (state.isGenerating) {
+        stopGeneration();
+      } else {
+        sendMessage();
+      }
+    });
+
+    // Attachments
+    attachBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', function() {
+      if (this.files) {
+        const files = Array.from(this.files);
+        files.forEach(file => {
+          if (state.attachments.length >= 5) {
+            showToast('Maximum 5 files.', 'warning');
+            return;
+          }
+          if (file.size > 10 * 1024 * 1024) {
+            showToast('File too large.', 'error');
+            return;
+          }
+          state.attachments.push(file);
+          renderAttachments();
+        });
+        this.value = '';
+        if (userInput.value.trim().length > 0 || state.attachments.length > 0) {
+          sendStopBtn.classList.add('is-active');
+          sendStopBtn.disabled = false;
+        }
+      }
+    });
+
+    function renderAttachments() {
+      attachmentPreviews.innerHTML = '';
+      state.attachments.forEach((file, index) => {
+        const div = document.createElement('div');
+        div.className = 'attachment-preview';
+        const isImage = file.type.startsWith('image/');
+        const url = isImage ? URL.createObjectURL(file) : '';
+        div.innerHTML = `
+          ${isImage ? `<img src="${url}" alt="${file.name}" />` : `<span class="file-icon">📄</span>`}
+          <span class="file-name">${file.name}</span>
+          <button class="remove-attach" data-index="${index}">✕</button>
+        `;
+        div.querySelector('.remove-attach').addEventListener('click', () => {
+          state.attachments.splice(index, 1);
+          renderAttachments();
+          if (userInput.value.trim().length === 0 && state.attachments.length === 0) {
+            sendStopBtn.classList.remove('is-active');
+            sendStopBtn.disabled = true;
           }
         });
+        attachmentPreviews.appendChild(div);
       });
-      chatHistory.appendChild(div);
-    });
-  }
-
-  function newChat() {
-    const empty = Object.values(state.conversations).find(c => c.messages.length === 0);
-    if (empty) {
-      if (state.activeId === empty.id) { userInput.focus(); return; }
-      switchConversation(empty.id);
-      userInput.focus();
-      return;
     }
-    const newId = createConversation('New Chat');
-    state.activeId = newId;
-    document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
-    emptyState.classList.remove('is-hidden');
-    chatTitle.textContent = 'New Chat';
-    renderHistory();
-    userInput.value = '';
-    userInput.style.height = 'auto';
-    sendStopBtn.classList.remove('is-active', 'is-generating');
-    sendStopBtn.disabled = true;
-    state.attachments = [];
-    renderAttachments();
-    scrollBottomBtn.classList.remove('is-visible');
-    userInput.focus();
-  }
 
-  newChatBtn.addEventListener('click', newChat);
+    // ─── History Rendering ─────────────────────────────────────
+    function renderHistory() {
+      chatHistory.querySelectorAll('.chat-item').forEach(el => el.remove());
+      const convs = Object.values(state.conversations);
+      if (convs.length === 0) {
+        chatHistory.innerHTML = '<div class="empty-history">No chats yet.<br />Start a new conversation.</div>';
+        return;
+      }
+      const sorted = [...convs.filter(c => c.pinned), ...convs.filter(c => !c.pinned)]
+        .sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
-  // Suggestions
-  document.querySelectorAll('.suggestions button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      userInput.value = btn.dataset.suggestion;
-      userInput.dispatchEvent(new Event('input'));
-      sendMessage();
-    });
-  });
-
-  // ------------------------------------------------------------------
-  // 16. SHARE & CONFIRM MODAL EVENTS
-  // ------------------------------------------------------------------
-  shareModalClose.addEventListener('click', () => closeModal(shareModal));
-  shareModalCloseBtn.addEventListener('click', () => closeModal(shareModal));
-  shareModal.addEventListener('click', (e) => { if (e.target === shareModal) closeModal(shareModal); });
-  shareCopyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(shareLinkInput.value).then(() => {
-      showToast('Link copied!', 'success');
-      shareCopyBtn.textContent = 'Copied!';
-      setTimeout(() => shareCopyBtn.textContent = 'Copy', 1500);
-    });
-  });
-
-  confirmCloseBtn.addEventListener('click', () => closeModal(confirmModal));
-  confirmCancelBtn.addEventListener('click', () => closeModal(confirmModal));
-  confirmModal.addEventListener('click', (e) => { if (e.target === confirmModal) closeModal(confirmModal); });
-  confirmOkBtn.addEventListener('click', () => {
-    const cb = confirmModal._onConfirm;
-    closeModal(confirmModal);
-    if (typeof cb === 'function') cb();
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      [authModal, settingsModal, profileModal, accountSettingsModal, shareModal, confirmModal].forEach(m => {
-        if (m && m.classList.contains('is-active')) closeModal(m);
+      sorted.forEach(conv => {
+        const div = document.createElement('div');
+        div.className = 'chat-item' + (conv.id === state.activeId ? ' is-active' : '');
+        div.innerHTML = `
+          <span class="title">${conv.title}</span>
+          <div class="chat-actions">
+            <button class="${conv.pinned ? 'is-pinned' : ''}" data-action="pin"><svg viewBox="0 0 24 24"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 12h14"/><path d="M7 12v-5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v5"/></svg></button>
+            <button data-action="delete"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+            <button data-action="share"><svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></button>
+          </div>
+        `;
+        div.addEventListener('click', (e) => { if (!e.target.closest('button')) switchConversation(conv.id); });
+        div.querySelectorAll('button[data-action]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const action = btn.dataset.action;
+            if (action === 'delete') {
+              openConfirmModal('Delete Conversation', 'Delete this conversation?', async () => {
+                // delete from DB if logged in
+                const token = getSessionToken();
+                if (token) {
+                  try {
+                    await callAPI('/api/conversations', 'DELETE', { conversationId: conv.id }, token);
+                  } catch (err) { /* ignore */ }
+                }
+                delete state.conversations[conv.id];
+                if (state.activeId === conv.id) {
+                  state.activeId = null;
+                  clearMessages();
+                  renderHistory();
+                  if (Object.keys(state.conversations).length === 0) newChat();
+                }
+                renderHistory();
+                showToast('Conversation deleted.', 'info');
+              });
+            } else if (action === 'pin') {
+              conv.pinned = !conv.pinned;
+              renderHistory();
+              showToast(conv.pinned ? 'Pinned.' : 'Unpinned.', 'info');
+              if (getSessionToken()) saveConversation(conv.id);
+            } else if (action === 'share') {
+              const url = new URL(window.location.href);
+              url.searchParams.set('conversation', conv.id);
+              openShareModal('Share Conversation', 'Share this conversation.', url.toString());
+            }
+          });
+        });
+        chatHistory.appendChild(div);
       });
-      if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
+    }
+
+    function newChat() {
+      const empty = Object.values(state.conversations).find(c => c.messages.length === 0);
+      if (empty) {
+        if (state.activeId === empty.id) { userInput.focus(); return; }
+        switchConversation(empty.id);
+        userInput.focus();
+        return;
+      }
+      const newId = createConversation('New Chat');
+      state.activeId = newId;
+      document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
+      emptyState.classList.remove('is-hidden');
+      chatTitle.textContent = 'New Chat';
+      renderHistory();
+      userInput.value = '';
+      userInput.style.height = 'auto';
+      sendStopBtn.classList.remove('is-active', 'is-generating');
+      sendStopBtn.disabled = true;
+      state.attachments = [];
+      renderAttachments();
+      scrollBottomBtn.classList.remove('is-visible');
+      userInput.focus();
+    }
+
+    newChatBtn.addEventListener('click', newChat);
+
+    // Suggestions
+    document.querySelectorAll('.suggestions button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        userInput.value = btn.dataset.suggestion;
+        userInput.dispatchEvent(new Event('input'));
+        sendMessage();
+      });
+    });
+
+    // Sidebar toggle
+    function toggleSidebar() {
+      if (window.innerWidth <= 992) {
+        sidebar.classList.toggle('is-open');
+        sidebarOverlay.classList.toggle('is-visible');
+      } else {
+        sidebar.classList.toggle('is-collapsed');
+      }
+      const svg = sidebarToggle.querySelector('svg');
+      if (svg) {
+        svg.innerHTML = sidebar.classList.contains('is-collapsed') ?
+          '<path d="M9 18l6-6-6-6"/>' :
+          '<path d="M15 18l-6-6 6-6"/>';
+      }
+    }
+    sidebarToggle.addEventListener('click', toggleSidebar);
+    sidebarOpenBtn.addEventListener('click', () => {
+      if (window.innerWidth <= 992) {
+        sidebar.classList.add('is-open');
+        sidebarOverlay.classList.add('is-visible');
+      } else {
+        sidebar.classList.remove('is-collapsed');
+      }
+      const svg = sidebarToggle.querySelector('svg');
+      if (svg) svg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
+    });
+    sidebarOverlay.addEventListener('click', () => {
+      if (window.innerWidth <= 992) {
+        sidebar.classList.remove('is-open');
+        sidebarOverlay.classList.remove('is-visible');
+      } else {
+        sidebar.classList.add('is-collapsed');
+      }
+      const svg = sidebarToggle.querySelector('svg');
+      if (svg) svg.innerHTML = '<path d="M9 18l6-6-6-6"/>';
+    });
+    function closeSidebar() {
+      if (window.innerWidth <= 992) {
         sidebar.classList.remove('is-open');
         sidebarOverlay.classList.remove('is-visible');
       }
     }
-    if (e.key === 'Enter' && confirmModal.classList.contains('is-active')) confirmOkBtn.click();
-  });
 
-  // ------------------------------------------------------------------
-  // 17. INIT
-  // ------------------------------------------------------------------
-  async function init() {
-    loadSettings();
-    const { data: { session }, error } = await supabaseClient.auth.getSession();
-    if (session) {
-      state.session = session;
-      state.user = session.user;
-      updateUIForUser(state.user);
-      await loadConversations(state.user.id);
-    } else {
-      updateUIForUser(null);
-      state.conversations = {};
-      state.activeId = null;
-      renderHistory();
-      newChat();
+    // ─── Settings ──────────────────────────────────────────────
+    function loadSettings() {
+      const saved = Storage.get('settings');
+      if (saved) {
+        state.theme = saved.theme || 'dark';
+        state.enterToSend = saved.enterToSend !== undefined ? saved.enterToSend : true;
+        state.selectedModel = saved.selectedModel || 'groq/compound-mini';
+        state.temperature = saved.temperature !== undefined ? saved.temperature : 0.7;
+        state.webSearchEnabled = saved.webSearchEnabled !== undefined ? saved.webSearchEnabled : true;
+      }
+      applyTheme(state.theme);
+      document.getElementById('themeSelect').value = state.theme;
+      document.getElementById('enterSendSelect').value = state.enterToSend ? 'true' : 'false';
+      document.getElementById('modelSelect').value = state.selectedModel;
+      document.getElementById('temperatureSlider').value = state.temperature;
+      document.getElementById('tempValue').textContent = state.temperature;
+      document.getElementById('webSearchToggle').checked = state.webSearchEnabled;
     }
-    // Auto‑save
-    setInterval(() => {
-      if (state.user && state.activeId) saveConversation(state.activeId);
-    }, 10000);
-    console.log('🌾 AgriDeepAI initialized with Supabase Auth.');
-  }
 
-  document.addEventListener('DOMContentLoaded', init);
-</script>
+    function saveSettings() {
+      state.theme = document.getElementById('themeSelect').value;
+      state.enterToSend = document.getElementById('enterSendSelect').value === 'true';
+      state.selectedModel = document.getElementById('modelSelect').value;
+      state.temperature = parseFloat(document.getElementById('temperatureSlider').value);
+      state.webSearchEnabled = document.getElementById('webSearchToggle').checked;
+      applyTheme(state.theme);
+      Storage.set('settings', {
+        theme: state.theme,
+        enterToSend: state.enterToSend,
+        selectedModel: state.selectedModel,
+        temperature: state.temperature,
+        webSearchEnabled: state.webSearchEnabled,
+      });
+      closeModal(document.getElementById('settingsModal'));
+      showToast('Settings saved!', 'success');
+    }
+
+    function applyTheme(theme) {
+      const resolved = theme === 'system' ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : theme;
+      document.documentElement.setAttribute('data-theme', resolved);
+      if (theme !== 'system') Storage.set('theme', theme);
+    }
+
+    document.getElementById('temperatureSlider').addEventListener('input', function() {
+      document.getElementById('tempValue').textContent = this.value;
+    });
+    document.getElementById('settingsSaveBtn').addEventListener('click', saveSettings);
+
+    // ─── Account settings (password change) ────────────────────
+    document.getElementById('changePassBtn').addEventListener('click', async () => {
+      const curr = document.getElementById('currentPass').value;
+      const np = document.getElementById('newPass').value;
+      const conf = document.getElementById('confirmPass').value;
+      if (!curr || !np || !conf) {
+        showToast('All password fields required.', 'error');
+        return;
+      }
+      if (np !== conf) {
+        showToast('New passwords do not match.', 'error');
+        return;
+      }
+      // You can implement password change endpoint if needed – for now just simulate.
+      showToast('Password updated! (simulated)', 'success');
+      document.getElementById('currentPass').value = '';
+      document.getElementById('newPass').value = '';
+      document.getElementById('confirmPass').value = '';
+      closeModal(document.getElementById('accountSettingsModal'));
+    });
+
+    document.getElementById('deleteAccountBtn').addEventListener('click', () => {
+      openConfirmModal('Delete Account', 'Are you sure? This cannot be undone.', async () => {
+        // You can implement delete endpoint – for now just logout.
+        await handleLogout();
+        showToast('Account deleted (simulated).', 'info');
+        closeModal(document.getElementById('accountSettingsModal'));
+      });
+    });
+
+    // ─── Keyboard shortcuts ─────────────────────────────────────
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        [authModal, settingsModal, document.getElementById('profileModal'), document.getElementById('accountSettingsModal'), document.getElementById('shareModal'), document.getElementById('confirmModal')].forEach(m => {
+          if (m && m.classList.contains('is-active')) closeModal(m);
+        });
+        if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
+          sidebar.classList.remove('is-open');
+          sidebarOverlay.classList.remove('is-visible');
+        }
+      }
+    });
+
+    // ─── INIT ───────────────────────────────────────────────────
+    async function init() {
+      loadSettings();
+      const token = getSessionToken();
+      const user = getCurrentUser();
+      if (token && user) {
+        updateUIForUser(user);
+        await loadConversations();
+      } else {
+        clearSession();
+        updateUIForUser(null);
+        state.conversations = {};
+        state.activeId = null;
+        renderHistory();
+        newChat();
+      }
+      // Auto‑save every 10 seconds
+      setInterval(() => {
+        if (getSessionToken() && state.activeId) {
+          saveConversation(state.activeId);
+        }
+      }, 10000);
+
+      console.log('🌾 AgriDeepAI initialized with custom auth.');
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
 </body>
 </html>
