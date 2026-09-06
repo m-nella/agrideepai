@@ -1,0 +1,16 @@
+{
+  "name": "agrideepai-backend",
+  "version": "1.0.0",
+  "description": "AgriDeepAI backend for Vercel",
+  "main": "api/chat.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.6",
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "start": "node api/chat.js"
+  },
+  "author": "Ornella Mutuyimana",
+  "license": "MIT"
+}
