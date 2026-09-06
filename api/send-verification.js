@@ -28,7 +28,6 @@ export default async function handler(req, res) {
 
     const logoUrl = 'https://agrideepai.vercel.app/logo.png';
 
-    // Try to send via Brevo
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: {
@@ -66,7 +65,7 @@ export default async function handler(req, res) {
               <div class="logo">
                 <img src="${logoUrl}" alt="AgriDeepAI Logo" />
               </div>
-              <h1>🌾 AgriDeepAI</h1>
+              <h1>AgriDeepAI</h1>
               <p class="subtitle">Your verification code</p>
               <div class="code-box">
                 <div class="code">${code}</div>
