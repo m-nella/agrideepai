@@ -30,7 +30,6 @@
     <style>
         /* ==========================================================
            DESIGN TOKENS — Professional Green Accent
-           (Full styles from your original working version)
            ========================================================== */
         :root {
             --bg-app: #0c0c0d;
@@ -1813,7 +1812,7 @@
             padding: 0 !important;
         }
 
-        /* ===== PASSWORD TOGGLE ===== */
+        /* ===== PASSWORD TOGGLE & RESEND ===== */
         .password-wrapper {
             position: relative;
             width: 100%;
@@ -1844,7 +1843,6 @@
             outline-offset: 2px;
         }
 
-        /* Error message styling */
         .auth-error {
             color: var(--error);
             font-size: 13px;
@@ -1857,6 +1855,32 @@
         }
         .auth-error.is-visible {
             display: block;
+        }
+
+        .resend-btn {
+            padding: 6px 14px;
+            font-size: 13px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: var(--transition-fast);
+            font-family: inherit;
+            white-space: nowrap;
+        }
+        .resend-btn:hover:not(:disabled) {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        .resend-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .resend-timer {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
         }
     </style>
 </head>
@@ -2010,7 +2034,11 @@
                 </div>
                 <div class="field" id="authCodeField" style="display:none;">
                     <label for="authCode">Verification Code</label>
-                    <input type="text" id="authCode" placeholder="Enter 6-digit code" />
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="text" id="authCode" placeholder="Enter 6-digit code" style="flex:1;" />
+                        <button class="resend-btn" id="resendCodeBtn">Resend</button>
+                    </div>
+                    <div class="resend-timer" id="resendTimer"></div>
                 </div>
                 <div class="auth-error" id="authError">Invalid credentials.</div>
             </div>
@@ -2227,6 +2255,7 @@
                 codeExpiry: null,
                 loginEmail: null,
                 loginUserId: null,
+                resendCooldown: false,
             };
 
             // ==========================================================
@@ -2275,6 +2304,8 @@
             const authNameField = $('authNameField');
             const authConfirmField = $('authConfirmField');
             const authCodeField = $('authCodeField');
+            const resendCodeBtn = $('resendCodeBtn');
+            const resendTimer = $('resendTimer');
 
             // Settings Modal
             const settingsModal = $('settingsModal');
@@ -2324,6 +2355,13 @@
             const confirmCloseBtn = $('confirmCloseBtn');
 
             const toastContainer = $('toastContainer');
+
+            // ==========================================================
+            // EMAIL VALIDATION
+            // ==========================================================
+            function isValidEmail(email) {
+                return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+            }
 
             // ==========================================================
             // PASSWORD TOGGLE
@@ -2393,11 +2431,14 @@
 
             function closeModal(modal) {
                 if (modal) modal.classList.remove('is-active');
-                // Clear error when closing any modal
                 if (authError) {
                     authError.classList.remove('is-visible');
                     authError.textContent = '';
                 }
+                if (resendTimer) resendTimer.textContent = '';
+                if (resendCodeBtn) resendCodeBtn.disabled = false;
+                state.resendCooldown = false;
+                if (window._resendInterval) clearInterval(window._resendInterval);
             }
 
             function openShareModal(title, desc, link, note) {
@@ -2416,6 +2457,66 @@
                 confirmMessage.textContent = message;
                 confirmModal._onConfirm = onConfirm || null;
                 openModal(confirmModal);
+            }
+
+            // ==========================================================
+            // RESEND CODE LOGIC
+            // ==========================================================
+            function startResendCooldown(seconds = 30) {
+                state.resendCooldown = true;
+                resendCodeBtn.disabled = true;
+                let remaining = seconds;
+                resendTimer.textContent = `Resend available in ${remaining}s`;
+                if (window._resendInterval) clearInterval(window._resendInterval);
+                window._resendInterval = setInterval(() => {
+                    remaining--;
+                    if (remaining <= 0) {
+                        clearInterval(window._resendInterval);
+                        resendCodeBtn.disabled = false;
+                        resendTimer.textContent = '';
+                        state.resendCooldown = false;
+                    } else {
+                        resendTimer.textContent = `Resend available in ${remaining}s`;
+                    }
+                }, 1000);
+            }
+
+            async function resendCode() {
+                if (state.resendCooldown) return;
+                const email = authEmail.value.trim();
+                if (!isValidEmail(email)) {
+                    showToast('Please enter a valid email address.', 'error');
+                    return;
+                }
+                let mode = 'signup';
+                if (state.pendingEmail) mode = 'signup';
+                else if (state.loginEmail) mode = 'login';
+                else {
+                    showToast('No pending verification. Please start again.', 'error');
+                    return;
+                }
+                try {
+                    const code = Math.floor(100000 + Math.random() * 900000).toString();
+                    const response = await fetch('/api/send-verification', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, code }),
+                    });
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.error || 'Failed to resend code');
+                    }
+                    state.verificationCode = code;
+                    state.codeExpiry = Date.now() + 5 * 60 * 1000;
+                    showToast('New code sent!', 'success');
+                    startResendCooldown(30);
+                } catch (err) {
+                    showToast('Failed to resend code: ' + err.message, 'error');
+                }
+            }
+
+            if (resendCodeBtn) {
+                resendCodeBtn.addEventListener('click', resendCode);
             }
 
             // ==========================================================
@@ -2484,15 +2585,13 @@
                 renderHistory();
             }
 
-            // Clear error on input change
+            // Clear error on input
             function clearErrorOnInput() {
                 if (authError) {
                     authError.classList.remove('is-visible');
                     authError.textContent = '';
                 }
             }
-
-            // Attach clear error to all auth inputs
             const authInputs = [authEmail, authPassword, authConfirmPassword, authCode, authName];
             authInputs.forEach(inp => {
                 if (inp) {
@@ -2563,9 +2662,16 @@
             }
 
             // ==========================================================
-            // SIGN-UP FLOW
+            // SIGN-UP
             // ==========================================================
             async function handleSignUp(name, email, password) {
+                if (!isValidEmail(email)) {
+                    if (authError) {
+                        authError.textContent = 'Please enter a valid email address (e.g., name@domain.com).';
+                        authError.classList.add('is-visible');
+                    }
+                    return;
+                }
                 try {
                     const code = Math.floor(100000 + Math.random() * 900000).toString();
                     const sendRes = await fetch('/api/send-verification', {
@@ -2596,6 +2702,7 @@
                         authError.textContent = '';
                     }
                     showToast('Verification code sent!', 'success');
+                    startResendCooldown(30);
                 } catch (err) {
                     showToast(err.message, 'error');
                 }
@@ -2642,9 +2749,16 @@
             }
 
             // ==========================================================
-            // SIGN-IN FLOW
+            // SIGN-IN
             // ==========================================================
             async function signIn(email, password) {
+                if (!isValidEmail(email)) {
+                    if (authError) {
+                        authError.textContent = 'Please enter a valid email address.';
+                        authError.classList.add('is-visible');
+                    }
+                    return;
+                }
                 try {
                     const response = await fetch('/api/auth/login', {
                         method: 'POST',
@@ -2670,6 +2784,7 @@
                         authError.textContent = '';
                     }
                     showToast('Verification code sent!', 'success');
+                    startResendCooldown(30);
                 } catch (err) {
                     showToast(err.message, 'error');
                 }
@@ -2772,6 +2887,12 @@
                     const input = document.getElementById(targetId);
                     if (input) input.type = 'password';
                 });
+                // Reset resend timer
+                if (resendTimer) resendTimer.textContent = '';
+                if (resendCodeBtn) resendCodeBtn.disabled = false;
+                state.resendCooldown = false;
+                if (window._resendInterval) clearInterval(window._resendInterval);
+
                 if (mode === 'signin') {
                     if (authModalTitle) authModalTitle.textContent = 'Sign In';
                     if (authModalDesc) authModalDesc.textContent = 'Sign in to save your chats across devices.';
@@ -3135,7 +3256,7 @@
             }
 
             // ==========================================================
-            // CHAT FUNCTIONS (unchanged from previous, included for completeness)
+            // CHAT FUNCTIONS
             // ==========================================================
             function genId() { return 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
 
