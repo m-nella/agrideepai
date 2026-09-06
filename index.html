@@ -30,7 +30,6 @@
     <style>
         /* ==========================================================
            DESIGN TOKENS — Professional Green Accent
-           (All styles kept exactly as your original working version)
            ========================================================== */
         :root {
             --bg-app: #0c0c0d;
@@ -152,7 +151,7 @@
             overflow: hidden;
         }
 
-        /* SIDEBAR */
+        /* ===== SIDEBAR ===== */
         .sidebar {
             width: var(--sidebar-width);
             height: 100vh;
@@ -598,7 +597,7 @@
             margin: 4px 12px;
         }
 
-        /* MAIN CHAT */
+        /* ===== MAIN CHAT ===== */
         .main-chat {
             flex: 1;
             display: flex;
@@ -1296,7 +1295,7 @@
             line-height: 1.4;
         }
 
-        /* MODALS */
+        /* ===== MODALS ===== */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -1535,7 +1534,7 @@
             max-width: 400px;
         }
 
-        /* TOASTS */
+        /* ===== TOASTS ===== */
         .toast-container {
             position: fixed;
             bottom: 24px;
@@ -1622,7 +1621,7 @@
             color: var(--accent);
         }
 
-        /* RESPONSIVE */
+        /* ===== RESPONSIVE ===== */
         @media (max-width: 992px) {
             .sidebar {
                 position: fixed;
@@ -2113,21 +2112,15 @@
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- ==========================================================
-    JAVASCRIPT — Full with Brevo Email Verification
+    JAVASCRIPT — Clean (No Supabase, Uses Brevo + localStorage)
     ========================================================== -->
     <script>
         // Global error handler
         window.onerror = function(message, source, lineno, colno, error) {
             console.error('❌ Global error:', message, error);
-            try {
-                if (typeof showToast === 'function') {
-                    showToast('Error: ' + message, 'error');
-                }
-            } catch (e) { /* ignore */ }
             return false;
         };
 
-        // Wait for DOM
         document.addEventListener('DOMContentLoaded', function() {
 
             console.log('🚀 AgriDeepAI script started.');
@@ -2140,7 +2133,6 @@
                 version: '3.0.0',
                 apiEndpoint: '/api/chat',
                 enableAttachments: true,
-                enableLocalStorage: false,
                 maxFileSize: 10 * 1024 * 1024,
                 allowedFileTypes: ['image/*', '.pdf', '.doc', '.docx', '.txt'],
                 maxAttachments: 5,
@@ -2159,14 +2151,13 @@
                 enterToSend: true,
                 user: null,
                 attachments: [],
-                draft: '',
                 selectedModel: 'groq/compound-mini',
                 temperature: 0.7,
                 webSearchEnabled: true,
                 userScrolledUp: false,
                 isAuthenticated: false,
                 dropdownOpen: false,
-                // Email verification state
+                // Email verification
                 pendingEmail: null,
                 pendingPassword: null,
                 pendingName: null,
@@ -2187,7 +2178,6 @@
             const sidebarOverlay = $('sidebarOverlay');
             const newChatBtn = $('newChatBtn');
             const chatHistory = $('chatHistory');
-            const emptyHistory = $('emptyHistory');
             const messagesContainer = $('messagesContainer');
             const emptyState = $('emptyState');
             const userInput = $('userInput');
@@ -2272,7 +2262,7 @@
             const toastContainer = $('toastContainer');
 
             // ==========================================================
-            // STORAGE (for settings)
+            // STORAGE
             // ==========================================================
             const Storage = {
                 get(key) {
@@ -2326,12 +2316,12 @@
                 if (modal) modal.classList.remove('is-active');
             }
 
-            function openShareModal(title, desc, link, note = 'Anyone with the link can view this content.') {
+            function openShareModal(title, desc, link, note) {
                 if (!shareModal) return;
                 shareModalTitle.textContent = title;
                 shareModalDesc.textContent = desc;
                 shareLinkInput.value = link;
-                shareNote.textContent = note;
+                shareNote.textContent = note || 'Anyone with the link can view this content.';
                 shareLinkInput.select();
                 openModal(shareModal);
             }
@@ -2345,9 +2335,9 @@
             }
 
             // ==========================================================
-            // AUTH SYSTEM — Using Brevo for email verification
+            // AUTH SYSTEM — Brevo + localStorage
             // ==========================================================
-            let authMode = 'signin'; // 'signin', 'signup', 'confirm'
+            let authMode = 'signin';
 
             function updateUIForUser(user) {
                 if (user) {
@@ -2364,14 +2354,12 @@
                 }
             }
 
-            // Load saved user from localStorage (simple)
             function loadSavedUser() {
                 const saved = Storage.get('user');
                 if (saved) {
                     state.user = saved;
                     state.isAuthenticated = true;
                     updateUIForUser(saved);
-                    // Load conversations (simulated)
                     const convs = Storage.get('conversations');
                     if (convs) {
                         state.conversations = convs;
@@ -2399,17 +2387,14 @@
 
             async function handleSignUp(name, email, password) {
                 try {
-                    // 1. Generate a 6-digit code
                     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
-                    // 2. Store pending user data
                     state.pendingEmail = email;
                     state.pendingPassword = password;
                     state.pendingName = name;
                     state.verificationCode = code;
-                    state.codeExpiry = Date.now() + 5 * 60 * 1000; // 5 minutes
+                    state.codeExpiry = Date.now() + 5 * 60 * 1000;
 
-                    // 3. Send the code via Brevo
                     const response = await fetch('/api/send-verification', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -2423,7 +2408,6 @@
 
                     showToast('Verification code sent to your email!', 'success');
 
-                    // 4. Switch to verification mode
                     authMode = 'confirm';
                     if (authModalTitle) authModalTitle.textContent = 'Verify Your Email';
                     if (authModalDesc) authModalDesc.textContent = `We sent a 6-digit code to ${email}. Please enter it below.`;
@@ -2450,7 +2434,6 @@
                     return;
                 }
 
-                // Check if expired
                 if (Date.now() > state.codeExpiry) {
                     if (authError) {
                         authError.textContent = 'Verification code has expired. Please sign up again.';
@@ -2459,7 +2442,6 @@
                     return;
                 }
 
-                // Check if code matches
                 if (code !== state.verificationCode) {
                     if (authError) {
                         authError.textContent = 'Invalid verification code. Please try again.';
@@ -2468,25 +2450,21 @@
                     return;
                 }
 
-                // Code is valid – create user account
                 if (authError) authError.classList.remove('is-visible');
                 showToast('Email verified! Creating your account...', 'success');
 
-                // Create user object
                 const user = {
                     name: state.pendingName,
                     email: state.pendingEmail,
                     createdAt: new Date().toISOString(),
                 };
 
-                // Save to storage
                 state.user = user;
                 state.isAuthenticated = true;
                 saveUserToStorage(user);
                 updateUIForUser(user);
                 closeModal(authModal);
 
-                // Clear pending data
                 state.pendingEmail = null;
                 state.pendingPassword = null;
                 state.pendingName = null;
@@ -2497,16 +2475,13 @@
             }
 
             async function signIn(email, password) {
-                // Simple local authentication (demo only – for real use, connect to a database)
                 const savedUser = Storage.get('user');
                 if (savedUser && savedUser.email === email) {
-                    // In a real app, you'd verify the password (hashed)
                     state.user = savedUser;
                     state.isAuthenticated = true;
                     updateUIForUser(savedUser);
                     closeModal(authModal);
                     showToast('Signed in successfully!', 'success');
-                    // Load conversations
                     const convs = Storage.get('conversations');
                     if (convs) {
                         state.conversations = convs;
@@ -2754,7 +2729,6 @@
                         showToast('New passwords do not match.', 'error');
                         return;
                     }
-                    // Simulate password change
                     showToast('Password updated successfully! (simulated)', 'success');
                     currentPass.value = '';
                     newPass.value = '';
@@ -2766,7 +2740,6 @@
             if (deleteAccountBtn) {
                 deleteAccountBtn.addEventListener('click', function() {
                     openConfirmModal('Delete Account', 'Are you sure you want to permanently delete your account? This cannot be undone.', async function() {
-                        // Simulate deletion
                         await signOut();
                         showToast('Account deleted (simulated).', 'info');
                         closeModal(accountSettingsModal);
@@ -2774,7 +2747,6 @@
                 });
             }
 
-            // Profile modal
             if (profileCloseBtn) profileCloseBtn.addEventListener('click', () => closeModal(profileModal));
             if (profileCloseActionBtn) profileCloseActionBtn.addEventListener('click', () => closeModal(profileModal));
             if (profileModal) profileModal.addEventListener('click', function(e) { if (e.target === this) closeModal(profileModal); });
@@ -2867,7 +2839,8 @@
                 }
             }
 
-            function openSidebar() {
+            if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
+            if (sidebarOpenBtn) sidebarOpenBtn.addEventListener('click', function() {
                 if (window.innerWidth <= 992) {
                     if (sidebar) sidebar.classList.add('is-open');
                     if (sidebarOverlay) sidebarOverlay.classList.add('is-visible');
@@ -2876,9 +2849,8 @@
                 }
                 const svg = sidebarToggle ? sidebarToggle.querySelector('svg') : null;
                 if (svg) svg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
-            }
-
-            function closeSidebar() {
+            });
+            if (sidebarOverlay) sidebarOverlay.addEventListener('click', function() {
                 if (window.innerWidth <= 992) {
                     if (sidebar) sidebar.classList.remove('is-open');
                     if (sidebarOverlay) sidebarOverlay.classList.remove('is-visible');
@@ -2887,11 +2859,7 @@
                 }
                 const svg = sidebarToggle ? sidebarToggle.querySelector('svg') : null;
                 if (svg) svg.innerHTML = '<path d="M9 18l6-6-6-6"/>';
-            }
-
-            if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
-            if (sidebarOpenBtn) sidebarOpenBtn.addEventListener('click', openSidebar);
-            if (sidebarOverlay) sidebarOverlay.addEventListener('click', closeSidebar);
+            });
 
             let resizeTimer;
             window.addEventListener('resize', function() {
@@ -2909,10 +2877,6 @@
                 if (sidebar) sidebar.classList.remove('is-open');
             } else {
                 if (sidebar) sidebar.classList.remove('is-collapsed');
-            }
-            const initSvg = sidebarToggle ? sidebarToggle.querySelector('svg') : null;
-            if (initSvg && sidebar && !sidebar.classList.contains('is-collapsed')) {
-                initSvg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
             }
 
             // ==========================================================
@@ -2955,7 +2919,6 @@
                 if (window.innerWidth <= 992) closeSidebar();
                 state.attachments = [];
                 renderAttachments();
-                state.draft = '';
                 if (userInput) userInput.value = '';
                 if (userInput) userInput.style.height = 'auto';
                 if (sendStopBtn) {
@@ -3385,7 +3348,6 @@
                         model: state.selectedModel,
                         temperature: state.temperature,
                         webSearchEnabled: state.webSearchEnabled,
-                        userId: state.isAuthenticated ? state.user.id : null,
                     };
 
                     if (fileDataArray.length > 0) {
@@ -3790,7 +3752,6 @@
 
                 loadFromURL();
 
-                // Auto-save conversations for authenticated users
                 if (state.isAuthenticated) {
                     setInterval(() => {
                         const active = getActive();
@@ -3801,7 +3762,6 @@
                 }
 
                 console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized.');
-                console.log('📋 Features: Brevo email verification, chat, sharing.');
             }
 
             window.addEventListener('beforeunload', function() {
@@ -3875,7 +3835,7 @@
                 }
             });
 
-        }); // end DOMContentLoaded
+        });
     </script>
 </body>
 </html>
