@@ -1812,6 +1812,52 @@
             background: transparent !important;
             padding: 0 !important;
         }
+
+        /* ===== PASSWORD TOGGLE ===== */
+        .password-wrapper {
+            position: relative;
+            width: 100%;
+        }
+        .password-wrapper input {
+            width: 100%;
+            padding-right: 40px;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            font-size: 18px;
+            line-height: 1;
+            transition: var(--transition-fast);
+        }
+        .password-toggle:hover {
+            color: var(--text-primary);
+        }
+        .password-toggle:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* Error message styling */
+        .auth-error {
+            color: var(--error);
+            font-size: 13px;
+            margin-top: 4px;
+            padding: 6px 10px;
+            background: rgba(255, 59, 48, 0.1);
+            border-radius: var(--radius-sm);
+            border-left: 3px solid var(--error);
+            display: none;
+        }
+        .auth-error.is-visible {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -1950,17 +1996,23 @@
                 </div>
                 <div class="field">
                     <label for="authPassword">Password</label>
-                    <input type="password" id="authPassword" placeholder="••••••••" />
+                    <div class="password-wrapper">
+                        <input type="password" id="authPassword" placeholder="••••••••" />
+                        <button class="password-toggle" type="button" data-target="authPassword" aria-label="Toggle password visibility">👁</button>
+                    </div>
                 </div>
                 <div class="field" id="authConfirmField" style="display:none;">
                     <label for="authConfirmPassword">Confirm Password</label>
-                    <input type="password" id="authConfirmPassword" placeholder="••••••••" />
+                    <div class="password-wrapper">
+                        <input type="password" id="authConfirmPassword" placeholder="••••••••" />
+                        <button class="password-toggle" type="button" data-target="authConfirmPassword" aria-label="Toggle password visibility">👁</button>
+                    </div>
                 </div>
                 <div class="field" id="authCodeField" style="display:none;">
                     <label for="authCode">Verification Code</label>
                     <input type="text" id="authCode" placeholder="Enter 6-digit code" />
                 </div>
-                <div class="error-msg" id="authError">Invalid credentials.</div>
+                <div class="auth-error" id="authError">Invalid credentials.</div>
             </div>
             <div class="modal-actions">
                 <button class="btn-primary" id="authSubmitBtn">Sign In</button>
@@ -2058,9 +2110,18 @@
             <p class="modal-desc">Manage your account.</p>
             <div class="field">
                 <label>Change Password</label>
-                <input type="password" id="currentPass" placeholder="Current password" style="margin-bottom:8px;" />
-                <input type="password" id="newPass" placeholder="New password" style="margin-bottom:8px;" />
-                <input type="password" id="confirmPass" placeholder="Confirm new password" />
+                <div class="password-wrapper">
+                    <input type="password" id="currentPass" placeholder="Current password" style="margin-bottom:8px;" />
+                    <button class="password-toggle" type="button" data-target="currentPass" aria-label="Toggle password visibility">👁</button>
+                </div>
+                <div class="password-wrapper">
+                    <input type="password" id="newPass" placeholder="New password" style="margin-bottom:8px;" />
+                    <button class="password-toggle" type="button" data-target="newPass" aria-label="Toggle password visibility">👁</button>
+                </div>
+                <div class="password-wrapper">
+                    <input type="password" id="confirmPass" placeholder="Confirm new password" />
+                    <button class="password-toggle" type="button" data-target="confirmPass" aria-label="Toggle password visibility">👁</button>
+                </div>
             </div>
             <button class="btn-primary" id="changePassBtn" style="width:100%; margin-bottom:12px;">Update Password</button>
             <hr style="border-color:var(--border-subtle); margin:12px 0;" />
@@ -2113,7 +2174,7 @@
     <div class="toast-container" id="toastContainer"></div>
 
     <!-- ==========================================================
-    JAVASCRIPT — Complete with all functions
+    JAVASCRIPT — Complete with all fixes
     ========================================================== -->
     <script>
         // Global error handler
@@ -2159,7 +2220,6 @@
                 userScrolledUp: false,
                 isAuthenticated: false,
                 dropdownOpen: false,
-                // Email verification
                 pendingEmail: null,
                 pendingPassword: null,
                 pendingName: null,
@@ -2266,6 +2326,21 @@
             const toastContainer = $('toastContainer');
 
             // ==========================================================
+            // PASSWORD TOGGLE
+            // ==========================================================
+            document.querySelectorAll('.password-toggle').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const targetId = this.dataset.target;
+                    const input = document.getElementById(targetId);
+                    if (input) {
+                        const isPassword = input.type === 'password';
+                        input.type = isPassword ? 'text' : 'password';
+                        this.textContent = isPassword ? '🙈' : '👁';
+                    }
+                });
+            });
+
+            // ==========================================================
             // STORAGE
             // ==========================================================
             const Storage = {
@@ -2318,6 +2393,11 @@
 
             function closeModal(modal) {
                 if (modal) modal.classList.remove('is-active');
+                // Clear error when closing any modal
+                if (authError) {
+                    authError.classList.remove('is-visible');
+                    authError.textContent = '';
+                }
             }
 
             function openShareModal(title, desc, link, note) {
@@ -2339,7 +2419,7 @@
             }
 
             // ==========================================================
-            // PASSWORD STRENGTH VALIDATION
+            // PASSWORD STRENGTH
             // ==========================================================
             function isStrongPassword(password) {
                 const minLength = 8;
@@ -2351,7 +2431,7 @@
             }
 
             // ==========================================================
-            // AUTH SYSTEM — Backend API
+            // AUTH SYSTEM
             // ==========================================================
             let authMode = 'signin';
 
@@ -2370,7 +2450,6 @@
                 }
             }
 
-            // Load session from localStorage (if any)
             function loadSavedSession() {
                 const saved = Storage.get('session');
                 if (saved && saved.user && saved.sessionToken) {
@@ -2405,9 +2484,26 @@
                 renderHistory();
             }
 
-            // ------------------------------
-            // Load conversations from server
-            // ------------------------------
+            // Clear error on input change
+            function clearErrorOnInput() {
+                if (authError) {
+                    authError.classList.remove('is-visible');
+                    authError.textContent = '';
+                }
+            }
+
+            // Attach clear error to all auth inputs
+            const authInputs = [authEmail, authPassword, authConfirmPassword, authCode, authName];
+            authInputs.forEach(inp => {
+                if (inp) {
+                    inp.addEventListener('input', clearErrorOnInput);
+                    inp.addEventListener('focus', clearErrorOnInput);
+                }
+            });
+
+            // ==========================================================
+            // LOAD CONVERSATIONS
+            // ==========================================================
             async function loadConversations(userId) {
                 try {
                     const response = await fetch(`/api/conversations?userId=${userId}`, {
@@ -2445,9 +2541,9 @@
                 }
             }
 
-            // ------------------------------
-            // Save conversations to server
-            // ------------------------------
+            // ==========================================================
+            // SAVE CONVERSATIONS
+            // ==========================================================
             async function saveConversationsToServer() {
                 if (!state.isAuthenticated || !state.user) return;
                 const convs = Object.values(state.conversations);
@@ -2471,7 +2567,6 @@
             // ==========================================================
             async function handleSignUp(name, email, password) {
                 try {
-                    // First, send verification code
                     const code = Math.floor(100000 + Math.random() * 900000).toString();
                     const sendRes = await fetch('/api/send-verification', {
                         method: 'POST',
@@ -2482,14 +2577,12 @@
                         const err = await sendRes.json();
                         throw new Error(err.error || 'Failed to send code');
                     }
-                    // Store pending data
                     state.pendingEmail = email;
                     state.pendingPassword = password;
                     state.pendingName = name;
                     state.verificationCode = code;
                     state.codeExpiry = Date.now() + 5 * 60 * 1000;
 
-                    // Switch to verification mode
                     authMode = 'confirm';
                     if (authModalTitle) authModalTitle.textContent = 'Verify Your Email';
                     if (authModalDesc) authModalDesc.textContent = `We sent a 6-digit code to ${email}. Please enter it below.`;
@@ -2498,7 +2591,10 @@
                     if (authNameField) authNameField.style.display = 'none';
                     if (authConfirmField) authConfirmField.style.display = 'none';
                     if (authCodeField) authCodeField.style.display = 'block';
-                    if (authError) authError.classList.remove('is-visible');
+                    if (authError) {
+                        authError.classList.remove('is-visible');
+                        authError.textContent = '';
+                    }
                     showToast('Verification code sent!', 'success');
                 } catch (err) {
                     showToast(err.message, 'error');
@@ -2507,8 +2603,10 @@
 
             async function finalizeSignUp(code) {
                 if (!state.pendingEmail) {
-                    authError.textContent = 'No pending sign-up. Please start over.';
-                    authError.classList.add('is-visible');
+                    if (authError) {
+                        authError.textContent = 'No pending sign-up. Please start over.';
+                        authError.classList.add('is-visible');
+                    }
                     return;
                 }
                 try {
@@ -2526,21 +2624,20 @@
                     if (!response.ok) {
                         throw new Error(data.error || 'Sign-up failed');
                     }
-                    // Success
                     saveSession(data.user, data.sessionToken);
                     closeModal(authModal);
                     showToast('Account created!', 'success');
-                    // Load conversations
                     await loadConversations(data.user.id);
-                    // Clear pending
                     state.pendingEmail = null;
                     state.pendingPassword = null;
                     state.pendingName = null;
                     state.verificationCode = null;
                     state.codeExpiry = null;
                 } catch (err) {
-                    authError.textContent = err.message;
-                    authError.classList.add('is-visible');
+                    if (authError) {
+                        authError.textContent = err.message;
+                        authError.classList.add('is-visible');
+                    }
                 }
             }
 
@@ -2558,10 +2655,8 @@
                     if (!response.ok) {
                         throw new Error(data.error || 'Login failed');
                     }
-                    // Store login state for code verification
                     state.loginEmail = email;
                     state.loginUserId = data.userId;
-                    // Switch to verification mode
                     authMode = 'confirm';
                     if (authModalTitle) authModalTitle.textContent = 'Verify Your Email';
                     if (authModalDesc) authModalDesc.textContent = `We sent a 6-digit code to ${email}. Please enter it to complete sign-in.`;
@@ -2570,7 +2665,10 @@
                     if (authNameField) authNameField.style.display = 'none';
                     if (authConfirmField) authConfirmField.style.display = 'none';
                     if (authCodeField) authCodeField.style.display = 'block';
-                    if (authError) authError.classList.remove('is-visible');
+                    if (authError) {
+                        authError.classList.remove('is-visible');
+                        authError.textContent = '';
+                    }
                     showToast('Verification code sent!', 'success');
                 } catch (err) {
                     showToast(err.message, 'error');
@@ -2579,8 +2677,10 @@
 
             async function finalizeLogin(code) {
                 if (!state.loginEmail) {
-                    authError.textContent = 'No pending login. Please start over.';
-                    authError.classList.add('is-visible');
+                    if (authError) {
+                        authError.textContent = 'No pending login. Please start over.';
+                        authError.classList.add('is-visible');
+                    }
                     return;
                 }
                 try {
@@ -2593,7 +2693,6 @@
                     if (!response.ok) {
                         throw new Error(data.error || 'Verification failed');
                     }
-                    // Success
                     saveSession(data.user, data.sessionToken);
                     closeModal(authModal);
                     showToast('Signed in!', 'success');
@@ -2601,8 +2700,10 @@
                     state.loginEmail = null;
                     state.loginUserId = null;
                 } catch (err) {
-                    authError.textContent = err.message;
-                    authError.classList.add('is-visible');
+                    if (authError) {
+                        authError.textContent = err.message;
+                        authError.classList.add('is-visible');
+                    }
                 }
             }
 
@@ -2613,7 +2714,6 @@
                 clearSession();
                 showToast('Logged out.', 'info');
                 closeDropdown();
-                // Clear UI
                 const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
                 wrappers.forEach(el => el.remove());
                 if (emptyState) emptyState.classList.remove('is-hidden');
@@ -2622,27 +2722,29 @@
             }
 
             // ==========================================================
-            // VERIFY CODE (unified)
+            // VERIFY CODE
             // ==========================================================
             async function verifyCode(enteredCode) {
                 const code = enteredCode || authCode.value.trim();
                 if (!code) {
-                    authError.textContent = 'Please enter the verification code.';
-                    authError.classList.add('is-visible');
+                    if (authError) {
+                        authError.textContent = 'Please enter the verification code.';
+                        authError.classList.add('is-visible');
+                    }
                     return;
                 }
-                // If we have pending sign-up data, finalize sign-up
                 if (state.pendingEmail && state.pendingPassword && state.pendingName) {
                     await finalizeSignUp(code);
                     return;
                 }
-                // If we have login data, finalize login
                 if (state.loginEmail && state.loginUserId) {
                     await finalizeLogin(code);
                     return;
                 }
-                // Otherwise, generic verification (fallback)
-                showToast('No pending action. Please start over.', 'error');
+                if (authError) {
+                    authError.textContent = 'No pending action. Please start over.';
+                    authError.classList.add('is-visible');
+                }
             }
 
             // ==========================================================
@@ -2650,7 +2752,10 @@
             // ==========================================================
             function openAuthModal(mode = 'signin') {
                 authMode = mode;
-                if (authError) authError.classList.remove('is-visible');
+                if (authError) {
+                    authError.classList.remove('is-visible');
+                    authError.textContent = '';
+                }
                 if (authName) authName.value = '';
                 if (authEmail) authEmail.value = '';
                 if (authPassword) authPassword.value = '';
@@ -2660,6 +2765,13 @@
                 if (authConfirmField) authConfirmField.style.display = 'none';
                 if (authCodeField) authCodeField.style.display = 'none';
                 if (authSwitchBtn) authSwitchBtn.style.display = 'block';
+                // Reset password toggle icons
+                document.querySelectorAll('.password-toggle').forEach(btn => {
+                    btn.textContent = '👁';
+                    const targetId = btn.dataset.target;
+                    const input = document.getElementById(targetId);
+                    if (input) input.type = 'password';
+                });
                 if (mode === 'signin') {
                     if (authModalTitle) authModalTitle.textContent = 'Sign In';
                     if (authModalDesc) authModalDesc.textContent = 'Sign in to save your chats across devices.';
@@ -2770,7 +2882,6 @@
                     } else if (authMode === 'signup') {
                         openAuthModal('signin');
                     } else {
-                        // In confirm mode, switch back to signin
                         openAuthModal('signin');
                     }
                 });
@@ -2779,7 +2890,6 @@
             if (authGuestBtn) {
                 authGuestBtn.addEventListener('click', function() {
                     closeModal(authModal);
-                    // Clear any pending states
                     state.pendingEmail = null;
                     state.pendingPassword = null;
                     state.pendingName = null;
@@ -2787,7 +2897,6 @@
                     state.loginUserId = null;
                     state.verificationCode = null;
                     state.codeExpiry = null;
-                    // Clear conversations
                     state.conversations = {};
                     state.activeId = null;
                     state.isAuthenticated = false;
@@ -2807,7 +2916,6 @@
                     const email = authEmail.value.trim();
                     const password = authPassword.value.trim();
 
-                    // If in confirm mode, verify code
                     if (authMode === 'confirm') {
                         await verifyCode();
                         return;
@@ -2834,7 +2942,6 @@
                                 }
                                 return;
                             }
-                            // Validate password strength
                             if (!isStrongPassword(password)) {
                                 if (authError) {
                                     authError.textContent = 'Password must be at least 8 characters with uppercase, lowercase, number, and special character.';
@@ -2877,7 +2984,6 @@
                         showToast('New passwords do not match.', 'error');
                         return;
                     }
-                    // Simulate password change (in production, call API)
                     showToast('Password updated successfully! (simulated)', 'success');
                     currentPass.value = '';
                     newPass.value = '';
@@ -2889,7 +2995,6 @@
             if (deleteAccountBtn) {
                 deleteAccountBtn.addEventListener('click', function() {
                     openConfirmModal('Delete Account', 'Are you sure you want to permanently delete your account? This cannot be undone.', async function() {
-                        // Simulate deletion (in production, call API)
                         await signOut();
                         showToast('Account deleted (simulated).', 'info');
                         closeModal(accountSettingsModal);
@@ -3030,7 +3135,7 @@
             }
 
             // ==========================================================
-            // CHAT FUNCTIONS
+            // CHAT FUNCTIONS (unchanged from previous, included for completeness)
             // ==========================================================
             function genId() { return 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
 
@@ -3107,9 +3212,6 @@
                 scrollToBottom(false);
             }
 
-            // ==========================================================
-            // USER MESSAGE
-            // ==========================================================
             function appendUserMessage(content) {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'message-wrapper is-user';
@@ -3195,9 +3297,6 @@
                 });
             }
 
-            // ==========================================================
-            // ASSISTANT MESSAGE
-            // ==========================================================
             function appendAssistantMessage(messageId, content, isLoading = false) {
                 const wrapper = document.createElement('div');
                 wrapper.className = 'message-wrapper is-bot';
@@ -3228,7 +3327,6 @@
                     });
                     bubble.innerHTML = safeHtml;
 
-                    // Enhance code blocks
                     bubble.querySelectorAll('pre code').forEach(codeBlock => {
                         const parentPre = codeBlock.closest('pre');
                         if (!parentPre) return;
@@ -3288,7 +3386,6 @@
 
                 wrapper.appendChild(bubble);
 
-                // Actions
                 const actions = document.createElement('div');
                 actions.className = 'message-actions';
                 actions.innerHTML = `
@@ -3867,7 +3964,7 @@
             });
 
             // ==========================================================
-            // LOAD FROM URL (sharing)
+            // LOAD FROM URL
             // ==========================================================
             function loadFromURL() {
                 const params = new URLSearchParams(window.location.search);
@@ -3896,7 +3993,6 @@
                 loadSettings();
                 loadSavedSession();
 
-                // If not authenticated and no conversations, show empty state
                 if (!state.isAuthenticated && Object.keys(state.conversations).length === 0) {
                     state.activeId = null;
                     renderHistory();
@@ -3907,7 +4003,6 @@
 
                 loadFromURL();
 
-                // Auto-save conversations periodically (every 10 seconds)
                 setInterval(() => {
                     if (state.isAuthenticated) {
                         const active = getActive();
