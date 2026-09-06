@@ -21,7 +21,7 @@ if (!supabase) {
 // 2. BREVO CONFIG
 // ------------------------------
 const brevoApiKey = process.env.BREVO_API_KEY;
-const emailFrom = process.env.EMAIL_FROM || 'noreply@agrideepai.agentdomains.co';
+const emailFrom = process.env.EMAIL_FROM || 'mutuyimanaornella00@gmail.com';
 
 // Helper: email validation
 function isValidEmail(email) {
@@ -33,7 +33,7 @@ function generateCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Helper: send verification email via Brevo (always resolves/throws as JSON)
+// Helper: send verification email via Brevo (always throws on error)
 async function sendVerificationEmail(email, code) {
   if (!brevoApiKey) throw new Error('BREVO_API_KEY is not set');
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -42,6 +42,8 @@ async function sendVerificationEmail(email, code) {
       'api-key': brevoApiKey,
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      // Added User-Agent to avoid Brevo browser detection issues
+      'User-Agent': 'AgriDeepAI-Backend/2.0',
     },
     body: JSON.stringify({
       sender: { email: emailFrom, name: 'AgriDeepAI' },
@@ -77,11 +79,11 @@ async function sendVerificationEmail(email, code) {
       `,
     }),
   });
+
   if (!response.ok) {
-    const text = await response.text();
-    // Parse error if possible
     let errorMsg = `Brevo API error: ${response.status} ${response.statusText}`;
     try {
+      const text = await response.text();
       const json = JSON.parse(text);
       if (json.message) errorMsg = json.message;
     } catch (e) {
@@ -93,7 +95,7 @@ async function sendVerificationEmail(email, code) {
 }
 
 // ==========================================================
-// ROUTER (with global error handler)
+// ROUTER (global try-catch ensures JSON)
 // ==========================================================
 export default async function handler(req, res) {
   // CORS
@@ -141,10 +143,10 @@ export default async function handler(req, res) {
 // HANDLERS (all return JSON)
 // ==========================================================
 
-// ----- CHAT (placeholder) -----
+// ----- CHAT (placeholder – replace with your real AI) -----
 async function handleChat(req, res) {
-  // Replace with your real AI logic
-  res.status(200).json({ response: 'AI response placeholder' });
+  // Temporary dummy response
+  res.status(200).json({ response: 'AI response placeholder – replace with your Groq/Gemini logic' });
 }
 
 // ----- SIGNUP -----
