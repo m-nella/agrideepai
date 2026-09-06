@@ -15,7 +15,7 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Check environment
+  // Env check
   if (!supabaseUrl || !supabaseAnonKey) {
     return res.status(500).json({ error: 'Server misconfigured: SUPABASE_URL and SUPABASE_ANON_KEY required' });
   }
@@ -34,16 +34,19 @@ module.exports = async (req, res) => {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
-  // Now proceed with AI
+  // AI request
   const { message, history, model, temperature, webSearchEnabled } = req.body;
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
   }
 
   try {
-    // ---- 🧠 INSERT YOUR GROQ/GEMINI LOGIC HERE ----
-    // This is a placeholder – replace with your AI call.
+    // ════════════════════════════════════════════
+    // INSERT YOUR GROQ / GEMINI / SEARCH LOGIC HERE
+    // ════════════════════════════════════════════
+    // Example placeholder:
     const aiResponse = `You said: "${message}". Replace with AI integration.`;
+
     return res.status(200).json({ response: aiResponse });
   } catch (error) {
     console.error('AI error:', error);
