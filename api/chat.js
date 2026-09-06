@@ -15,6 +15,11 @@ const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabase
 const brevoApiKey = process.env.BREVO_API_KEY;
 const emailFrom = process.env.EMAIL_FROM || 'noreply@agrideepai.agentdomains.co';
 
+// Helper: email validation
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 // Helper: send verification email via Brevo
 async function sendVerificationEmail(email, code) {
   if (!brevoApiKey) throw new Error('BREVO_API_KEY not set');
@@ -158,6 +163,11 @@ async function handleSignup(req, res) {
   try {
     const { email, password, name, verificationCode } = req.body;
 
+    // Validate email
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+
     // Verify the code
     const stored = verificationStore[email];
     if (!stored || stored.code !== verificationCode || Date.now() > stored.expiry) {
@@ -199,6 +209,11 @@ async function handleLoginRequest(req, res) {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
+    // Validate email
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+
     const { data, error } = await supabase
       .from('users')
       .select('id, email, name, password_hash')
@@ -229,6 +244,11 @@ async function handleVerifyLogin(req, res) {
   try {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+
+    // Validate email
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
 
     const stored = verificationStore[email];
     if (!stored || stored.code !== code || Date.now() > stored.expiry) {
@@ -319,6 +339,12 @@ async function handleSendVerification(req, res) {
   try {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+
+    // Validate email
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+
     // Store the code temporarily so the frontend can verify it later.
     verificationStore[email] = { code, expiry: Date.now() + 5 * 60 * 1000 };
     await sendVerificationEmail(email, code);
