@@ -2665,88 +2665,90 @@
             // SIGN-UP
             // ==========================================================
             async function handleSignUp(name, email, password) {
-                if (!isValidEmail(email)) {
-                    if (authError) {
-                        authError.textContent = 'Please enter a valid email address (e.g., name@domain.com).';
-                        authError.classList.add('is-visible');
-                    }
-                    return;
-                }
-                try {
-                    const code = Math.floor(100000 + Math.random() * 900000).toString();
-                    const sendRes = await fetch('/api/send-verification', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email, code }),
-                    });
-                    if (!sendRes.ok) {
-                        const err = await sendRes.json();
-                        throw new Error(err.error || 'Failed to send code');
-                    }
-                    state.pendingEmail = email;
-                    state.pendingPassword = password;
-                    state.pendingName = name;
-                    state.verificationCode = code;
-                    state.codeExpiry = Date.now() + 5 * 60 * 1000;
+  if (!isValidEmail(email)) {
+    if (authError) {
+      authError.textContent = 'Please enter a valid email address (e.g., name@domain.com).';
+      authError.classList.add('is-visible');
+    }
+    return;
+  }
+  try {
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Correct endpoint: /api/send-verification (not /api/end-verification)
+    const sendRes = await fetch('/api/send-verification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code }),
+    });
+    if (!sendRes.ok) {
+      const err = await sendRes.json();
+      throw new Error(err.error || 'Failed to send code');
+    }
+    state.pendingEmail = email;
+    state.pendingPassword = password;
+    state.pendingName = name;
+    state.verificationCode = code;
+    state.codeExpiry = Date.now() + 5 * 60 * 1000;
 
-                    authMode = 'confirm';
-                    if (authModalTitle) authModalTitle.textContent = 'Verify Your Email';
-                    if (authModalDesc) authModalDesc.textContent = `We sent a 6-digit code to ${email}. Please enter it below.`;
-                    if (authSubmitBtn) authSubmitBtn.textContent = 'Verify';
-                    if (authSwitchBtn) authSwitchBtn.style.display = 'none';
-                    if (authNameField) authNameField.style.display = 'none';
-                    if (authConfirmField) authConfirmField.style.display = 'none';
-                    if (authCodeField) authCodeField.style.display = 'block';
-                    if (authError) {
-                        authError.classList.remove('is-visible');
-                        authError.textContent = '';
-                    }
-                    showToast('Verification code sent!', 'success');
-                    startResendCooldown(30);
-                } catch (err) {
-                    showToast(err.message, 'error');
-                }
-            }
+    authMode = 'confirm';
+    if (authModalTitle) authModalTitle.textContent = 'Verify Your Email';
+    if (authModalDesc) authModalDesc.textContent = `We sent a 6-digit code to ${email}. Please enter it below.`;
+    if (authSubmitBtn) authSubmitBtn.textContent = 'Verify';
+    if (authSwitchBtn) authSwitchBtn.style.display = 'none';
+    if (authNameField) authNameField.style.display = 'none';
+    if (authConfirmField) authConfirmField.style.display = 'none';
+    if (authCodeField) authCodeField.style.display = 'block';
+    if (authError) {
+      authError.classList.remove('is-visible');
+      authError.textContent = '';
+    }
+    showToast('Verification code sent!', 'success');
+    startResendCooldown(30);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
 
             async function finalizeSignUp(code) {
-                if (!state.pendingEmail) {
-                    if (authError) {
-                        authError.textContent = 'No pending sign-up. Please start over.';
-                        authError.classList.add('is-visible');
-                    }
-                    return;
-                }
-                try {
-                    const response = await fetch('/api/auth/signup', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            email: state.pendingEmail,
-                            password: state.pendingPassword,
-                            name: state.pendingName,
-                            verificationCode: code,
-                        }),
-                    });
-                    const data = await response.json();
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Sign-up failed');
-                    }
-                    saveSession(data.user, data.sessionToken);
-                    closeModal(authModal);
-                    showToast('Account created!', 'success');
-                    await loadConversations(data.user.id);
-                    state.pendingEmail = null;
-                    state.pendingPassword = null;
-                    state.pendingName = null;
-                    state.verificationCode = null;
-                    state.codeExpiry = null;
-                } catch (err) {
-                    if (authError) {
-                        authError.textContent = err.message;
-                        authError.classList.add('is-visible');
-                    }
-                }
-            }
+  if (!state.pendingEmail) {
+    if (authError) {
+      authError.textContent = 'No pending sign-up. Please start over.';
+      authError.classList.add('is-visible');
+    }
+    return;
+  }
+  try {
+    // Correct endpoint: /api/auth/signup
+    const response = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: state.pendingEmail,
+        password: state.pendingPassword,
+        name: state.pendingName,
+        verificationCode: code,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Sign-up failed');
+    }
+    saveSession(data.user, data.sessionToken);
+    closeModal(authModal);
+    showToast('Account created!', 'success');
+    await loadConversations(data.user.id);
+    state.pendingEmail = null;
+    state.pendingPassword = null;
+    state.pendingName = null;
+    state.verificationCode = null;
+    state.codeExpiry = null;
+  } catch (err) {
+    if (authError) {
+      authError.textContent = err.message;
+      authError.classList.add('is-visible');
+    }
+  }
+}
 
             // ==========================================================
             // SIGN-IN
@@ -2791,36 +2793,36 @@
             }
 
             async function finalizeLogin(code) {
-                if (!state.loginEmail) {
-                    if (authError) {
-                        authError.textContent = 'No pending login. Please start over.';
-                        authError.classList.add('is-visible');
-                    }
-                    return;
-                }
-                try {
-                    const response = await fetch('/api/auth/verify-login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: state.loginEmail, code }),
-                    });
-                    const data = await response.json();
-                    if (!response.ok) {
-                        throw new Error(data.error || 'Verification failed');
-                    }
-                    saveSession(data.user, data.sessionToken);
-                    closeModal(authModal);
-                    showToast('Signed in!', 'success');
-                    await loadConversations(data.user.id);
-                    state.loginEmail = null;
-                    state.loginUserId = null;
-                } catch (err) {
-                    if (authError) {
-                        authError.textContent = err.message;
-                        authError.classList.add('is-visible');
-                    }
-                }
-            }
+  if (!state.loginEmail) {
+    if (authError) {
+      authError.textContent = 'No pending login. Please start over.';
+      authError.classList.add('is-visible');
+    }
+    return;
+  }
+  try {
+    const response = await fetch('/api/auth/verify-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: state.loginEmail, code }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Verification failed');
+    }
+    saveSession(data.user, data.sessionToken);
+    closeModal(authModal);
+    showToast('Signed in!', 'success');
+    await loadConversations(data.user.id);
+    state.loginEmail = null;
+    state.loginUserId = null;
+  } catch (err) {
+    if (authError) {
+      authError.textContent = err.message;
+      authError.classList.add('is-visible');
+    }
+  }
+}
 
             // ==========================================================
             // LOGOUT
@@ -3033,55 +3035,55 @@
             }
 
             if (authSubmitBtn) {
-                authSubmitBtn.addEventListener('click', async function() {
-                    const email = authEmail.value.trim();
-                    const password = authPassword.value.trim();
+  authSubmitBtn.addEventListener('click', async function() {
+    const email = authEmail.value.trim();
+    const password = authPassword.value.trim();
 
-                    if (authMode === 'confirm') {
-                        await verifyCode();
-                        return;
-                    }
+    if (authMode === 'confirm') {
+      await verifyCode();
+      return;
+    }
 
-                    if (!email || !password) {
-                        if (authError) {
-                            authError.textContent = 'Please fill in all fields.';
-                            authError.classList.add('is-visible');
-                        }
-                        return;
-                    }
+    if (!email || !password) {
+      if (authError) {
+        authError.textContent = 'Please fill in all fields.';
+        authError.classList.add('is-visible');
+      }
+      return;
+    }
 
-                    try {
-                        if (authMode === 'signin') {
-                            await signIn(email, password);
-                        } else if (authMode === 'signup') {
-                            const name = authName.value.trim() || 'User';
-                            const confirm = authConfirmPassword.value.trim();
-                            if (password !== confirm) {
-                                if (authError) {
-                                    authError.textContent = 'Passwords do not match.';
-                                    authError.classList.add('is-visible');
-                                }
-                                return;
-                            }
-                            if (!isStrongPassword(password)) {
-                                if (authError) {
-                                    authError.textContent = 'Password must be at least 8 characters with uppercase, lowercase, number, and special character.';
-                                    authError.classList.add('is-visible');
-                                }
-                                return;
-                            }
-                            await handleSignUp(name, email, password);
-                        }
-                    } catch (err) {
-                        console.error('Auth error:', err);
-                        if (authError) {
-                            authError.textContent = err.message || 'Authentication failed. Please try again.';
-                            authError.classList.add('is-visible');
-                        }
-                        showToast('Authentication error: ' + (err.message || 'Unknown error'), 'error');
-                    }
-                });
-            }
+    try {
+      if (authMode === 'signin') {
+        await signIn(email, password);
+      } else if (authMode === 'signup') {
+        const name = authName.value.trim() || 'User';
+        const confirm = authConfirmPassword.value.trim();
+        if (password !== confirm) {
+          if (authError) {
+            authError.textContent = 'Passwords do not match.';
+            authError.classList.add('is-visible');
+          }
+          return;
+        }
+        if (!isStrongPassword(password)) {
+          if (authError) {
+            authError.textContent = 'Password must be at least 8 characters with uppercase, lowercase, number, and special character.';
+            authError.classList.add('is-visible');
+          }
+          return;
+        }
+        await handleSignUp(name, email, password);
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+      if (authError) {
+        authError.textContent = err.message || 'Authentication failed. Please try again.';
+        authError.classList.add('is-visible');
+      }
+      showToast('Authentication error: ' + (err.message || 'Unknown error'), 'error');
+    }
+  });
+}
 
             // ==========================================================
             // ACCOUNT SETTINGS
