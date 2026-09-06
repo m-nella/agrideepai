@@ -24,6 +24,8 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
     /* ==========================================================
@@ -2162,7 +2164,7 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- ==========================================================
-  JAVASCRIPT — Complete with custom auth (no Supabase SDK)
+  JAVASCRIPT — Complete with Supabase Auth
   ========================================================== -->
   <script>
     // Global error handler
@@ -2188,6 +2190,13 @@
       };
 
       // ==========================================================
+      // SUPABASE CLIENT
+      // ==========================================================
+      const SUPABASE_URL = 'https://cfazulpmzvuzwszcoirt.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmYXp1bHBtenZ1endzemNvaXJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjU2NjU5ODMsImV4cCI6MjA0MTI0MTk4M30.8nBm4l_lvTVSgk-6s4FGNx3Kq5K2Mq8yJzUc7qQm5fY';
+      const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      // ==========================================================
       // STATE
       // ==========================================================
       const state = {
@@ -2199,7 +2208,6 @@
         theme: 'dark',
         enterToSend: true,
         user: null,
-        sessionToken: null,
         attachments: [],
         selectedModel: 'groq/compound-mini',
         temperature: 0.7,
@@ -2207,12 +2215,6 @@
         userScrolledUp: false,
         isAuthenticated: false,
         dropdownOpen: false,
-        pendingEmail: null,
-        pendingPassword: null,
-        pendingName: null,
-        loginEmail: null,
-        loginUserId: null,
-        resendCooldown: false,
       };
 
       // ==========================================================
@@ -2253,16 +2255,12 @@
       const authEmail = $('authEmail');
       const authPassword = $('authPassword');
       const authConfirmPassword = $('authConfirmPassword');
-      const authCode = $('authCode');
       const authError = $('authError');
       const authSubmitBtn = $('authSubmitBtn');
       const authSwitchBtn = $('authSwitchBtn');
       const authGuestBtn = $('authGuestBtn');
       const authNameField = $('authNameField');
       const authConfirmField = $('authConfirmField');
-      const authCodeField = $('authCodeField');
-      const resendCodeBtn = $('resendCodeBtn');
-      const resendTimer = $('resendTimer');
 
       // Settings Modal
       const settingsModal = $('settingsModal');
@@ -2392,10 +2390,6 @@
           authError.classList.remove('is-visible');
           authError.textContent = '';
         }
-        if (resendTimer) resendTimer.textContent = '';
-        if (resendCodeBtn) resendCodeBtn.disabled = false;
-        state.resendCooldown = false;
-        if (window._resendInterval) clearInterval(window._resendInterval);
       }
 
       function openShareModal(title, desc, link, note) {
@@ -2417,29 +2411,86 @@
       }
 
       // ==========================================================
-      // API HELPERS (CUSTOM AUTH)
+      // AUTH FUNCTIONS (Supabase)
       // ==========================================================
-      async function callAPI(endpoint, method, body, token) {
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        const resp = await fetch(endpoint, {
-          method,
-          headers,
-          body: body ? JSON.stringify(body) : undefined,
+      async function handleSignUp(email, password, name) {
+        const { data, error } = await supabaseClient.auth.signUp({
+          email,
+          password,
+          options: { data: { name } }
         });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || 'Request failed');
+        if (error) throw new Error(error.message);
+        showToast('Verification email sent! Please confirm.', 'success');
+        closeModal(authModal);
         return data;
       }
 
-      // ==========================================================
-      // AUTH SYSTEM
-      // ==========================================================
-      let authMode = 'signin';
+      async function handleSignIn(email, password) {
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw new Error(error.message);
+        showToast('Signed in!', 'success');
+        closeModal(authModal);
+        return data;
+      }
 
+      async function handleSignOut() {
+        await supabaseClient.auth.signOut();
+      }
+
+      // ==========================================================
+      // AUTH STATE LISTENER
+      // ==========================================================
+      supabaseClient.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          const user = session?.user || null;
+          state.user = user;
+          state.isAuthenticated = !!user;
+          if (user) {
+            updateUIForUser(user);
+            loadConversations();
+          }
+          closeModal(authModal);
+        } else if (event === 'SIGNED_OUT') {
+          state.user = null;
+          state.isAuthenticated = false;
+          state.conversations = {};
+          state.activeId = null;
+          updateUIForUser(null);
+          clearMessages();
+          renderHistory();
+          showToast('Signed out.', 'info');
+          if (emptyState) emptyState.classList.remove('is-hidden');
+          if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
+        }
+      });
+
+      // ==========================================================
+      // LOAD SESSION ON START
+      // ==========================================================
+      async function loadSession() {
+        const { data: { session }, error } = await supabaseClient.auth.getSession();
+        if (session) {
+          state.user = session.user;
+          state.isAuthenticated = true;
+          updateUIForUser(session.user);
+          await loadConversations();
+        } else {
+          state.user = null;
+          state.isAuthenticated = false;
+          updateUIForUser(null);
+          state.conversations = {};
+          state.activeId = null;
+          renderHistory();
+          newChat();
+        }
+      }
+
+      // ==========================================================
+      // UI UPDATE
+      // ==========================================================
       function updateUIForUser(user) {
         if (user) {
-          const name = user.name || user.email?.split('@')[0] || 'User';
+          const name = user.user_metadata?.name || user.email?.split('@')[0] || 'User';
           if (avatarDisplay) avatarDisplay.textContent = name.charAt(0).toUpperCase();
           if (userNameDisplay) userNameDisplay.textContent = name;
           if (userSubDisplay) userSubDisplay.textContent = user.email || 'signed in';
@@ -2452,222 +2503,95 @@
         }
       }
 
-      function loadSavedSession() {
-        const saved = Storage.get('session');
-        if (saved && saved.user && saved.sessionToken) {
-          state.user = saved.user;
-          state.sessionToken = saved.sessionToken;
-          state.isAuthenticated = true;
-          updateUIForUser(saved.user);
-          loadConversations();
-        }
-      }
-
-      function saveSession(user, token) {
-        Storage.set('session', { user, sessionToken: token });
-        state.user = user;
-        state.sessionToken = token;
-        state.isAuthenticated = true;
-        updateUIForUser(user);
-      }
-
-      function clearSession() {
-        Storage.remove('session');
-        state.user = null;
-        state.sessionToken = null;
-        state.isAuthenticated = false;
-        state.conversations = {};
-        state.activeId = null;
-        updateUIForUser(null);
+      function clearMessages() {
         const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
         wrappers.forEach(el => el.remove());
         if (emptyState) emptyState.classList.remove('is-hidden');
-        if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
-        renderHistory();
-      }
-
-      // Clear error on input
-      function clearErrorOnInput() {
-        if (authError) {
-          authError.classList.remove('is-visible');
-          authError.textContent = '';
-        }
-      }
-      const authInputs = [authEmail, authPassword, authConfirmPassword, authCode, authName];
-      authInputs.forEach(inp => {
-        if (inp) {
-          inp.addEventListener('input', clearErrorOnInput);
-          inp.addEventListener('focus', clearErrorOnInput);
-        }
-      });
-
-      // ==========================================================
-      // SIGN-UP
-      // ==========================================================
-      async function handleSignUp(name, email, password) {
-        if (!isValidEmail(email)) {
-          if (authError) {
-            authError.textContent = 'Please enter a valid email address (e.g., name@domain.com).';
-            authError.classList.add('is-visible');
-          }
-          return;
-        }
-        try {
-          // Step 1: send verification code
-          await callAPI('/api/send-verification', 'POST', { email });
-          showToast('Verification code sent to your email.', 'success');
-          state.pendingEmail = email;
-          state.pendingPassword = password;
-          state.pendingName = name;
-
-          // Step 2: show code input (using prompt for simplicity)
-          const code = prompt('Enter the 6-digit verification code sent to your email:');
-          if (!code) return;
-
-          // Step 3: complete sign-up
-          const result = await callAPI('/api/auth/signup', 'POST', {
-            email: state.pendingEmail,
-            password: state.pendingPassword,
-            name: state.pendingName,
-            verificationCode: code,
-          });
-
-          saveSession(result.user, result.token);
-          closeModal(authModal);
-          showToast('Account created!', 'success');
-          await loadConversations();
-          state.pendingEmail = null;
-          state.pendingPassword = null;
-          state.pendingName = null;
-        } catch (err) {
-          if (authError) {
-            authError.textContent = err.message;
-            authError.classList.add('is-visible');
-          }
-          showToast(err.message, 'error');
-        }
       }
 
       // ==========================================================
-      // SIGN-IN
-      // ==========================================================
-      async function signIn(email, password) {
-        if (!isValidEmail(email)) {
-          if (authError) {
-            authError.textContent = 'Please enter a valid email address.';
-            authError.classList.add('is-visible');
-          }
-          return;
-        }
-        try {
-          // Step 1: request login code
-          const loginRes = await callAPI('/api/auth/login', 'POST', { email, password });
-          state.loginEmail = email;
-          state.loginUserId = loginRes.userId;
-          showToast('Verification code sent to your email.', 'success');
-
-          // Step 2: get code from user
-          const code = prompt('Enter the 6-digit verification code sent to your email:');
-          if (!code) return;
-
-          // Step 3: verify login code
-          const verifyRes = await callAPI('/api/auth/verify-login', 'POST', {
-            email: state.loginEmail,
-            code,
-          });
-
-          saveSession(verifyRes.user, verifyRes.token);
-          closeModal(authModal);
-          showToast('Signed in!', 'success');
-          await loadConversations();
-          state.loginEmail = null;
-          state.loginUserId = null;
-        } catch (err) {
-          if (authError) {
-            authError.textContent = err.message;
-            authError.classList.add('is-visible');
-          }
-          showToast(err.message, 'error');
-        }
-      }
-
-      // ==========================================================
-      // LOGOUT
-      // ==========================================================
-      async function signOut() {
-        const token = state.sessionToken;
-        if (token) {
-          try { await callAPI('/api/auth/logout', 'POST', {}, token); } catch (e) {}
-        }
-        clearSession();
-        showToast('Logged out.', 'info');
-        closeDropdown();
-        const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
-        wrappers.forEach(el => el.remove());
-        if (emptyState) emptyState.classList.remove('is-hidden');
-        if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
-        renderHistory();
-      }
-
-      // ==========================================================
-      // LOAD CONVERSATIONS
+      // CONVERSATIONS (direct Supabase CRUD)
       // ==========================================================
       async function loadConversations() {
-        const token = state.sessionToken;
-        if (!token) return;
-        try {
-          const data = await callAPI('/api/conversations', 'GET', null, token);
-          const convs = {};
-          for (const conv of data.conversations) {
-            convs[conv.id] = {
-              id: conv.id,
-              title: conv.title || 'New Chat',
-              messages: conv.messages || [],
-              createdAt: conv.created_at,
-              updatedAt: conv.updated_at,
-              pinned: conv.pinned || false,
-            };
-          }
-          state.conversations = convs;
+        if (!state.user) return;
+        const { data, error } = await supabaseClient
+          .from('conversations')
+          .select('*')
+          .eq('user_id', state.user.id)
+          .order('updated_at', { ascending: false });
+        if (error) {
+          console.error('load error:', error);
+          showToast('Failed to load conversations', 'error');
+          return;
+        }
+        const convs = {};
+        for (const row of data) {
+          convs[row.id] = {
+            id: row.id,
+            title: row.title || 'New Chat',
+            messages: row.messages || [],
+            pinned: row.pinned || false,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+          };
+        }
+        state.conversations = convs;
+        renderHistory();
+        const ids = Object.keys(convs);
+        if (ids.length === 0) {
+          newChat();
+        } else {
+          const latest = ids.sort((a,b) => new Date(convs[b].updated_at) - new Date(convs[a].updated_at))[0];
+          switchConversation(latest);
+        }
+      }
+
+      async function saveConversation(convId) {
+        const conv = state.conversations[convId];
+        if (!conv || !state.user) return;
+        const { error } = await supabaseClient
+          .from('conversations')
+          .upsert({
+            id: convId,
+            user_id: state.user.id,
+            title: conv.title,
+            messages: conv.messages,
+            pinned: conv.pinned,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'id' });
+        if (error) {
+          console.error('save error:', error);
+          showToast('Failed to save conversation', 'error');
+        }
+      }
+
+      async function deleteConversation(convId) {
+        if (!state.user) return;
+        const { error } = await supabaseClient
+          .from('conversations')
+          .delete()
+          .eq('id', convId);
+        if (error) {
+          console.error('delete error:', error);
+          showToast('Failed to delete', 'error');
+          return;
+        }
+        delete state.conversations[convId];
+        if (state.activeId === convId) {
+          state.activeId = null;
+          clearMessages();
           renderHistory();
-          const ids = Object.keys(convs);
-          if (ids.length > 0) {
-            const latest = ids.sort((a, b) => new Date(convs[b].updatedAt) - new Date(convs[a].updatedAt))[0];
-            switchConversation(latest);
-          } else {
-            newChat();
-          }
-        } catch (e) {
-          console.warn('Error loading conversations:', e);
-          showToast('Failed to load conversations.', 'error');
+          if (Object.keys(state.conversations).length === 0) newChat();
         }
+        renderHistory();
+        showToast('Conversation deleted.', 'info');
       }
 
       // ==========================================================
-      // SAVE CONVERSATIONS
+      // AUTH MODAL EVENTS
       // ==========================================================
-      async function saveConversationsToServer() {
-        if (!state.isAuthenticated || !state.user) return;
-        const convs = Object.values(state.conversations);
-        if (convs.length === 0) return;
-        try {
-          await callAPI('/api/conversations', 'POST', {
-            conversations: convs.map(c => ({
-              id: c.id,
-              title: c.title,
-              messages: c.messages,
-              pinned: c.pinned,
-              updatedAt: c.updatedAt,
-            }))
-          }, state.sessionToken);
-        } catch (e) {
-          console.warn('Failed to save conversations:', e);
-        }
-      }
+      let authMode = 'signin';
 
-      // ==========================================================
-      // AUTH MODAL UI
-      // ==========================================================
       function openAuthModal(mode = 'signin') {
         authMode = mode;
         if (authError) {
@@ -2678,12 +2602,9 @@
         if (authEmail) authEmail.value = '';
         if (authPassword) authPassword.value = '';
         if (authConfirmPassword) authConfirmPassword.value = '';
-        if (authCode) authCode.value = '';
         if (authNameField) authNameField.style.display = 'none';
         if (authConfirmField) authConfirmField.style.display = 'none';
-        if (authCodeField) authCodeField.style.display = 'none';
         if (authSwitchBtn) authSwitchBtn.style.display = 'block';
-        // Reset password toggle icons
         document.querySelectorAll('.password-toggle').forEach(btn => {
           btn.textContent = '👁';
           const targetId = btn.dataset.target;
@@ -2708,6 +2629,84 @@
         }
         openModal(authModal);
       }
+
+      if (authSubmitBtn) {
+        authSubmitBtn.addEventListener('click', async function() {
+          const email = authEmail.value.trim();
+          const password = authPassword.value.trim();
+
+          if (!email || !password) {
+            if (authError) {
+              authError.textContent = 'Please fill in all fields.';
+              authError.classList.add('is-visible');
+            }
+            return;
+          }
+
+          try {
+            if (authMode === 'signin') {
+              await handleSignIn(email, password);
+            } else if (authMode === 'signup') {
+              const name = authName.value.trim() || 'User';
+              const confirm = authConfirmPassword.value.trim();
+              if (password !== confirm) {
+                if (authError) {
+                  authError.textContent = 'Passwords do not match.';
+                  authError.classList.add('is-visible');
+                }
+                return;
+              }
+              if (password.length < 8) {
+                if (authError) {
+                  authError.textContent = 'Password must be at least 8 characters.';
+                  authError.classList.add('is-visible');
+                }
+                return;
+              }
+              await handleSignUp(email, password, name);
+            }
+          } catch (err) {
+            console.error('Auth error:', err);
+            if (authError) {
+              authError.textContent = err.message || 'Authentication failed. Please try again.';
+              authError.classList.add('is-visible');
+            }
+            showToast('Authentication error: ' + (err.message || 'Unknown error'), 'error');
+          }
+        });
+      }
+
+      if (authSwitchBtn) {
+        authSwitchBtn.addEventListener('click', function() {
+          if (authMode === 'signin') {
+            openAuthModal('signup');
+          } else if (authMode === 'signup') {
+            openAuthModal('signin');
+          } else {
+            openAuthModal('signin');
+          }
+        });
+      }
+
+      if (authGuestBtn) {
+        authGuestBtn.addEventListener('click', function() {
+          closeModal(authModal);
+          showToast('Continuing as guest. Chats will not be synced.', 'info');
+          // Keep guest state
+          state.isAuthenticated = false;
+          state.user = null;
+          updateUIForUser(null);
+          state.conversations = {};
+          state.activeId = null;
+          renderHistory();
+          newChat();
+        });
+      }
+
+      if (authModalClose) authModalClose.addEventListener('click', () => closeModal(authModal));
+      if (authModal) authModal.addEventListener('click', function(e) {
+        if (e.target === this) closeModal(authModal);
+      });
 
       // ==========================================================
       // AUTH BUTTON & DROPDOWN
@@ -2753,7 +2752,7 @@
             switch (action) {
               case 'profile':
                 if (state.user) {
-                  if (profileName) profileName.value = state.user.name || '';
+                  if (profileName) profileName.value = state.user.user_metadata?.name || '';
                   if (profileEmail) profileEmail.value = state.user.email || '';
                   openModal(profileModal);
                 }
@@ -2765,7 +2764,10 @@
                 openModal(settingsModal);
                 break;
               case 'logout':
-                openConfirmModal('Logout', 'Logout from your account?', signOut);
+                openConfirmModal('Logout', 'Logout from your account?', async function() {
+                  await handleSignOut();
+                  closeDropdown();
+                });
                 break;
             }
           });
@@ -2780,89 +2782,6 @@
             else openDropdown();
           } else {
             openAuthModal('signin');
-          }
-        });
-      }
-
-      // ==========================================================
-      // AUTH MODAL EVENTS
-      // ==========================================================
-      if (authModalClose) authModalClose.addEventListener('click', () => closeModal(authModal));
-      if (authModal) authModal.addEventListener('click', function(e) {
-        if (e.target === this) closeModal(authModal);
-      });
-
-      if (authSwitchBtn) {
-        authSwitchBtn.addEventListener('click', function() {
-          if (authMode === 'signin') {
-            openAuthModal('signup');
-          } else if (authMode === 'signup') {
-            openAuthModal('signin');
-          } else {
-            openAuthModal('signin');
-          }
-        });
-      }
-
-      if (authGuestBtn) {
-        authGuestBtn.addEventListener('click', function() {
-          closeModal(authModal);
-          clearSession();
-          state.conversations = {};
-          state.activeId = null;
-          updateUIForUser(null);
-          const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
-          wrappers.forEach(el => el.remove());
-          if (emptyState) emptyState.classList.remove('is-hidden');
-          if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
-          renderHistory();
-          showToast('Continuing as guest. Chats will not be saved.', 'info');
-        });
-      }
-
-      if (authSubmitBtn) {
-        authSubmitBtn.addEventListener('click', async function() {
-          const email = authEmail.value.trim();
-          const password = authPassword.value.trim();
-
-          if (!email || !password) {
-            if (authError) {
-              authError.textContent = 'Please fill in all fields.';
-              authError.classList.add('is-visible');
-            }
-            return;
-          }
-
-          try {
-            if (authMode === 'signin') {
-              await signIn(email, password);
-            } else if (authMode === 'signup') {
-              const name = authName.value.trim() || 'User';
-              const confirm = authConfirmPassword.value.trim();
-              if (password !== confirm) {
-                if (authError) {
-                  authError.textContent = 'Passwords do not match.';
-                  authError.classList.add('is-visible');
-                }
-                return;
-              }
-              // Password strength (optional)
-              if (password.length < 8) {
-                if (authError) {
-                  authError.textContent = 'Password must be at least 8 characters.';
-                  authError.classList.add('is-visible');
-                }
-                return;
-              }
-              await handleSignUp(name, email, password);
-            }
-          } catch (err) {
-            console.error('Auth error:', err);
-            if (authError) {
-              authError.textContent = err.message || 'Authentication failed. Please try again.';
-              authError.classList.add('is-visible');
-            }
-            showToast('Authentication error: ' + (err.message || 'Unknown error'), 'error');
           }
         });
       }
@@ -2889,6 +2808,8 @@
             showToast('New passwords do not match.', 'error');
             return;
           }
+          // For Supabase, password change is handled via the SDK or auth flow.
+          // For simplicity, we just simulate.
           showToast('Password updated successfully! (simulated)', 'success');
           currentPass.value = '';
           newPass.value = '';
@@ -2900,7 +2821,9 @@
       if (deleteAccountBtn) {
         deleteAccountBtn.addEventListener('click', function() {
           openConfirmModal('Delete Account', 'Are you sure you want to permanently delete your account? This cannot be undone.', async function() {
-            await signOut();
+            // You would need to call a Supabase admin function or handle this on the backend.
+            // For now, we just sign out.
+            await handleSignOut();
             showToast('Account deleted (simulated).', 'info');
             closeModal(accountSettingsModal);
           });
@@ -3037,6 +2960,13 @@
         if (sidebar) sidebar.classList.remove('is-open');
       } else {
         if (sidebar) sidebar.classList.remove('is-collapsed');
+      }
+
+      function closeSidebar() {
+        if (window.innerWidth <= 992) {
+          if (sidebar) sidebar.classList.remove('is-open');
+          if (sidebarOverlay) sidebarOverlay.classList.remove('is-visible');
+        }
       }
 
       // ==========================================================
@@ -3178,7 +3108,7 @@
         ta.focus();
         ta.setSelectionRange(ta.value.length, ta.value.length);
 
-        editDiv.querySelector('.save-edit').addEventListener('click', function() {
+        editDiv.querySelector('.save-edit').addEventListener('click', async function() {
           const newText = ta.value.trim();
           if (newText) {
             const conv = getActive();
@@ -3189,6 +3119,7 @@
                 const idx = conv.messages.indexOf(msg);
                 conv.messages = conv.messages.slice(0, idx + 1);
                 renderConversation(state.activeId);
+                await saveConversation(state.activeId);
                 sendMessage(newText);
               }
             }
@@ -3458,6 +3389,7 @@
 
         const userMsg = addMessage(conv.id, 'user', fullText);
         appendUserMessage(fullText);
+        await saveConversation(conv.id);
 
         if (userInput) {
           userInput.value = '';
@@ -3507,7 +3439,10 @@
             payload.files = fileDataArray;
           }
 
-          const token = state.sessionToken;
+          // Get JWT token
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          const token = session?.access_token || '';
+
           const response = await fetch('/api/chat', {
             method: 'POST',
             headers: {
@@ -3535,10 +3470,7 @@
 
           const botMsg = addMessage(conv.id, 'assistant', aiResponse);
           appendAssistantMessage(botMsg.id, aiResponse, false);
-
-          if (state.isAuthenticated) {
-            await saveConversationsToServer();
-          }
+          await saveConversation(conv.id);
 
         } catch (error) {
           if (error.name === 'AbortError') {
@@ -3691,23 +3623,7 @@
               const action = btn.dataset.action;
               if (action === 'delete') {
                 openConfirmModal('Delete Conversation', 'Delete this conversation?', async function() {
-                  // Delete from server if authenticated
-                  if (state.isAuthenticated) {
-                    try {
-                      await callAPI('/api/conversations', 'DELETE', { conversationId: conv.id }, state.sessionToken);
-                    } catch (err) {}
-                  }
-                  delete state.conversations[conv.id];
-                  if (state.activeId === conv.id) {
-                    state.activeId = null;
-                    if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
-                    const wrappers = messagesContainer.querySelectorAll('.message-wrapper');
-                    wrappers.forEach(el => el.remove());
-                    if (emptyState) emptyState.classList.remove('is-hidden');
-                    if (scrollBottomBtn) scrollBottomBtn.classList.remove('is-visible');
-                  }
-                  renderHistory();
-                  showToast('Conversation deleted.', 'info');
+                  await deleteConversation(conv.id);
                 });
               } else if (action === 'pin') {
                 togglePin(conv.id);
@@ -3738,7 +3654,7 @@
         }
         showToast(conv.pinned ? 'Pinned.' : 'Unpinned.', 'info');
         if (state.isAuthenticated) {
-          saveConversationsToServer();
+          saveConversation(id);
         }
       }
 
@@ -3894,33 +3810,21 @@
       // ==========================================================
       async function init() {
         loadSettings();
-        loadSavedSession();
-
-        if (!state.isAuthenticated && Object.keys(state.conversations).length === 0) {
-          state.activeId = null;
-          renderHistory();
-          renderConversation(null);
-          if (chatTitle) chatTitle.textContent = APP_CONFIG.name;
-          if (emptyState) emptyState.classList.remove('is-hidden');
-        }
-
+        await loadSession();
         loadFromURL();
 
         setInterval(() => {
-          if (state.isAuthenticated) {
-            const active = getActive();
-            if (active) {
-              saveConversationsToServer();
-            }
+          if (state.isAuthenticated && state.activeId) {
+            saveConversation(state.activeId);
           }
         }, 10000);
 
-        console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized with custom auth.');
+        console.log('🌾 ' + APP_CONFIG.name + ' v' + APP_CONFIG.version + ' initialized with Supabase Auth.');
       }
 
       window.addEventListener('beforeunload', function() {
-        if (state.isAuthenticated) {
-          saveConversationsToServer();
+        if (state.isAuthenticated && state.activeId) {
+          saveConversation(state.activeId);
         }
       });
 
