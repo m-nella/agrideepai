@@ -10,12 +10,12 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // Only POST /api/chat
+  // Only POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Environment check
+  // Env check
   if (!supabaseUrl || !supabaseAnonKey) {
     console.error('Missing SUPABASE_URL or SUPABASE_ANON_KEY');
     return res.status(500).json({ error: 'Server misconfigured' });
