@@ -54,7 +54,11 @@ body.dark .sidebar-header { border-color: #3a3f40; }
   font-weight: 700;
   font-size: 1.2rem;
 }
-.logo-icon { font-size: 1.6rem; }
+.logo-img {
+  height: 2rem;
+  width: auto;
+  display: block;
+}
 .logo-text { color: #2e7d32; }
 body.dark .logo-text { color: #66bb6a; }
 #closeSidebarBtn {
@@ -201,7 +205,11 @@ body.dark .top-actions button { border-color: #5a5f60; color: #e8e6e1; }
   text-align: center;
   gap: 1rem;
 }
-.welcome-icon { font-size: 4rem; }
+.welcome-logo {
+  height: 5rem;
+  width: auto;
+  margin-bottom: 0.5rem;
+}
 #welcomeScreen h1 { font-size: 1.8rem; font-weight: 500; }
 .suggestion-chips {
   display: flex;
@@ -276,7 +284,7 @@ body.dark .message .msg-actions button { color: #aaa; }
 .message .msg-actions button:hover { color: #000; }
 body.dark .message .msg-actions button:hover { color: #fff; }
 
-/* Sources in assistant messages */
+/* Sources */
 .message .sources {
   margin-top: 0.5rem;
   font-size: 0.85rem;
@@ -367,7 +375,7 @@ body.dark #attachBtn { color: #aaa !important; }
   margin-top: 0.5rem;
 }
 
-/* Modal (auth and settings) */
+/* Modal */
 .modal {
   position: fixed;
   top: 0;
@@ -475,6 +483,8 @@ body.dark hr { border-top-color: #3a3f40; }
   #closeSidebarBtn { display: block; }
   .top-actions #authTopBtn, .top-actions #themeTopBtn { font-size: 0.8rem; padding: 0.1rem 0.6rem; }
   .modal-content { max-width: 95%; padding: 1.5rem; }
+  .logo-img { height: 1.6rem; }
+  .welcome-logo { height: 4rem; }
 }
 @media (min-width: 769px) {
   #closeSidebarBtn { display: none; }
