@@ -1,14 +1,3 @@
-// --- Global state ---
-let currentChatId = null;
-let conversations = [];
-let messages = [];
-let isGenerating = false;
-let abortController = null;
-let supabase = null;
-let currentUser = null;
-let currentProfile = null;
-let selectedFiles = [];
-
 // --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
 const openSidebarBtn = document.getElementById('openSidebarBtn');
@@ -28,7 +17,17 @@ const authModalBody = document.getElementById('authModalBody');
 const modalClose = document.querySelector('.modal-close');
 const composer = document.getElementById('composer');
 
-// --- Always dark – no theme toggle ---
+// --- State ---
+let state = {
+  activeChatId: null,
+  chats: [],
+  messages: [],
+  isGenerating: false,
+  abortController: null,
+  supabase: null,
+  currentUser: null,
+  attachments: [],
+};
 
 // --- Supabase init ---
 async function initSupabase() {
@@ -36,39 +35,37 @@ async function initSupabase() {
     const res = await fetch('/api/config');
     const config = await res.json();
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
-    supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
-    supabase.auth.onAuthStateChange((event, session) => {
+    state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
+    state.supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        currentUser = session.user;
+        state.currentUser = session.user;
         updateAuthUI();
-        loadConversations(); // load cloud chats
+        loadCloudConversations();
       } else {
-        currentUser = null;
+        state.currentUser = null;
         updateAuthUI();
-        // Switch to local storage
         loadLocalConversations();
       }
     });
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await state.supabase.auth.getSession();
     if (session) {
-      currentUser = session.user;
+      state.currentUser = session.user;
       updateAuthUI();
-      await loadConversations();
+      await loadCloudConversations();
     } else {
       updateAuthUI();
       loadLocalConversations();
     }
   } catch (err) {
     console.error('Supabase init error:', err);
-    // Fallback to local
     loadLocalConversations();
   }
 }
 
 // --- Auth UI ---
 function updateAuthUI() {
-  if (currentUser) {
-    authSidebarBtn.textContent = '👤 ' + (currentUser.email?.split('@')[0] || 'User');
+  if (state.currentUser) {
+    authSidebarBtn.textContent = '👤 ' + (state.currentUser.email?.split('@')[0] || 'User');
     authSidebarBtn.onclick = () => openSettingsModal();
   } else {
     authSidebarBtn.textContent = 'Sign In';
@@ -76,79 +73,9 @@ function updateAuthUI() {
   }
 }
 
-// --- LocalStorage helpers ---
-function loadLocalConversations() {
-  const stored = localStorage.getItem('agrideep_local_conversations');
-  conversations = stored ? JSON.parse(stored) : [];
-  const currentId = localStorage.getItem('agrideep_local_current');
-  if (currentId) {
-    const exists = conversations.find(c => c.id === currentId);
-    currentChatId = exists ? currentId : null;
-  }
-  renderChatList();
-  if (currentChatId) {
-    const chat = conversations.find(c => c.id === currentChatId);
-    if (chat) {
-      messages = chat.messages || [];
-      renderMessages(chat);
-      chatTitle.textContent = chat.title || 'New Chat';
-    }
-  } else {
-    messages = [];
-    renderMessages(null);
-    chatTitle.textContent = 'AgriDeepAI';
-  }
-}
-
-function saveLocalConversations() {
-  localStorage.setItem('agrideep_local_conversations', JSON.stringify(conversations));
-  if (currentChatId) {
-    localStorage.setItem('agrideep_local_current', currentChatId);
-  } else {
-    localStorage.removeItem('agrideep_local_current');
-  }
-}
-
-// --- Load cloud conversations ---
-async function loadConversations() {
-  if (!currentUser) return;
-  try {
-    const res = await apiFetch('/api/chat/conversations');
-    conversations = await res.json();
-    renderChatList();
-    if (currentChatId) {
-      const exists = conversations.find(c => c.id === currentChatId);
-      if (!exists) currentChatId = null;
-    }
-    if (currentChatId) {
-      await loadMessages(currentChatId);
-    } else {
-      messages = [];
-      renderMessages(null);
-      chatTitle.textContent = 'AgriDeepAI';
-    }
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-async function loadMessages(chatId) {
-  if (!currentUser) return;
-  try {
-    const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
-    messages = await res.json();
-    const chat = conversations.find(c => c.id === chatId);
-    if (chat) chatTitle.textContent = chat.title || 'New Chat';
-    renderMessages(chat);
-    renderChatList();
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-// --- API helper (for authenticated requests) ---
+// --- API helper (authenticated) ---
 async function apiFetch(endpoint, options = {}) {
-  const session = await supabase.auth.getSession();
+  const session = await state.supabase.auth.getSession();
   const token = session.data.session?.access_token;
   const headers = {
     'Content-Type': 'application/json',
@@ -163,21 +90,92 @@ async function apiFetch(endpoint, options = {}) {
   return res;
 }
 
+// --- Local storage helpers ---
+function loadLocalConversations() {
+  const stored = localStorage.getItem('agrideep_local_chats');
+  state.chats = stored ? JSON.parse(stored) : [];
+  const currentId = localStorage.getItem('agrideep_local_current');
+  if (currentId && state.chats.some(c => c.id === currentId)) {
+    state.activeChatId = currentId;
+  } else {
+    state.activeChatId = null;
+  }
+  renderChatList();
+  if (state.activeChatId) {
+    const chat = state.chats.find(c => c.id === state.activeChatId);
+    if (chat) {
+      state.messages = chat.messages || [];
+      renderMessages();
+      chatTitle.textContent = chat.title || 'New Chat';
+    }
+  } else {
+    state.messages = [];
+    renderMessages();
+    chatTitle.textContent = 'AgriDeepAI';
+  }
+}
+
+function saveLocalConversations() {
+  localStorage.setItem('agrideep_local_chats', JSON.stringify(state.chats));
+  if (state.activeChatId) {
+    localStorage.setItem('agrideep_local_current', state.activeChatId);
+  } else {
+    localStorage.removeItem('agrideep_local_current');
+  }
+}
+
+// --- Cloud conversation loading ---
+async function loadCloudConversations() {
+  if (!state.currentUser) return;
+  try {
+    const res = await apiFetch('/api/chat/conversations');
+    state.chats = await res.json();
+    renderChatList();
+    if (state.activeChatId) {
+      const exists = state.chats.find(c => c.id === state.activeChatId);
+      if (!exists) state.activeChatId = null;
+    }
+    if (state.activeChatId) {
+      await loadCloudMessages(state.activeChatId);
+    } else {
+      state.messages = [];
+      renderMessages();
+      chatTitle.textContent = 'AgriDeepAI';
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function loadCloudMessages(chatId) {
+  if (!state.currentUser) return;
+  try {
+    const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
+    state.messages = await res.json();
+    const chat = state.chats.find(c => c.id === chatId);
+    if (chat) chatTitle.textContent = chat.title || 'New Chat';
+    renderMessages();
+    renderChatList();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
 // --- Render chat list ---
 function renderChatList() {
   chatList.innerHTML = '';
-  if (!conversations.length) {
+  if (!state.chats.length) {
     chatList.innerHTML = '<div style="text-align:center;color:#777;padding:1rem;">No chats yet</div>';
     return;
   }
-  const sorted = [...conversations].sort((a,b) => {
+  const sorted = [...state.chats].sort((a,b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
     return new Date(b.updated_at || b.updatedAt) - new Date(a.updated_at || a.updatedAt);
   });
   sorted.forEach(chat => {
     const div = document.createElement('div');
-    div.className = `chat-item${chat.id === currentChatId ? ' active' : ''}`;
+    div.className = `chat-item${chat.id === state.activeChatId ? ' active' : ''}`;
     div.dataset.id = chat.id;
     const titleSpan = document.createElement('span');
     titleSpan.className = 'title';
@@ -215,22 +213,30 @@ function renderChatList() {
   });
 }
 
-// --- Render messages (with sources) ---
-function renderMessages(chat) {
+// --- Render messages ---
+function renderMessages() {
   messageList.innerHTML = '';
-  if (!chat || !messages.length) {
+  if (!state.messages.length) {
     welcomeScreen.style.display = 'flex';
     messageList.style.display = 'none';
     return;
   }
   welcomeScreen.style.display = 'none';
   messageList.style.display = 'flex';
-  messages.forEach((msg, index) => {
-    const div = document.createElement('div');
-    div.className = `message ${msg.role}`;
+  state.messages.forEach((msg, index) => {
+    const row = document.createElement('div');
+    row.className = `message-row ${msg.role}`;
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${msg.role}`;
+    if (msg.role === 'assistant') {
+      const header = document.createElement('div');
+      header.className = 'assistant-header';
+      header.innerHTML = `<img src="/logo.png" alt="AgriDeepAI" /> AgriDeepAI`;
+      msgDiv.appendChild(header);
+    }
     const contentSpan = document.createElement('span');
     contentSpan.textContent = msg.content;
-    div.appendChild(contentSpan);
+    msgDiv.appendChild(contentSpan);
     // Files / Sources
     if (msg.files && msg.files.length > 0) {
       const fileDiv = document.createElement('div');
@@ -242,7 +248,7 @@ function renderMessages(chat) {
           sourcesDiv.innerHTML = '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
             f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`).join('') +
             '</ul>';
-          div.appendChild(sourcesDiv);
+          msgDiv.appendChild(sourcesDiv);
         } else if (f.public_url) {
           const link = document.createElement('a');
           link.href = f.public_url;
@@ -252,7 +258,7 @@ function renderMessages(chat) {
           fileDiv.appendChild(document.createTextNode(' '));
         }
       });
-      if (fileDiv.children.length > 0) div.appendChild(fileDiv);
+      if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
     }
     // Actions
     const actionsDiv = document.createElement('div');
@@ -278,109 +284,23 @@ function renderMessages(chat) {
       regenBtn.addEventListener('click', () => regenerateMessage(index));
       actionsDiv.appendChild(regenBtn);
     }
-    div.appendChild(actionsDiv);
-    messageList.appendChild(div);
+    msgDiv.appendChild(actionsDiv);
+    row.appendChild(msgDiv);
+    messageList.appendChild(row);
   });
-  messageList.scrollTop = messageList.scrollHeight;
-}
-
-// --- Edit & Regenerate (simplified for guest) ---
-async function editUserMessage(index) {
-  const msg = messages[index];
-  if (!msg || msg.role !== 'user') return;
-  const newContent = prompt('Edit your message:', msg.content);
-  if (newContent === null || newContent.trim() === '') return;
-  const trimmed = newContent.trim();
-  if (currentUser) {
-    try {
-      const res = await apiFetch(`/api/chat/messages/${msg.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content: trimmed, truncate: true })
-      });
-      const updatedMsg = await res.json();
-      messages[index].content = trimmed;
-      messages = messages.slice(0, index + 1);
-      alert('Message updated. Please send a new message to get a new response.');
-    } catch (err) {
-      alert('Failed to edit: ' + err.message);
-    }
-  } else {
-    // Guest: update locally
-    messages[index].content = trimmed;
-    messages = messages.slice(0, index + 1);
-    const chat = conversations.find(c => c.id === currentChatId);
-    if (chat) {
-      chat.messages = messages;
-      saveLocalConversations();
-      renderMessages(chat);
-    }
-    alert('Message updated. Please send a new message.');
+  // Scroll to bottom if user is near bottom
+  const container = document.getElementById('chatContainer');
+  if (isNearBottom(container)) {
+    container.scrollTop = container.scrollHeight;
   }
 }
 
-async function regenerateMessage(index) {
-  const msg = messages[index];
-  if (!msg || msg.role !== 'assistant') return;
-  const chat = conversations.find(c => c.id === currentChatId);
-  if (!chat) return;
-  // For guest, we can't regenerate via API without history; we'll just clear from this index and re-send last user message.
-  if (!currentUser) {
-    // Remove from index onward
-    messages = messages.slice(0, index);
-    chat.messages = messages;
-    saveLocalConversations();
-    renderMessages(chat);
-    // Resend the last user message
-    const lastUser = messages[messages.length - 1];
-    if (lastUser && lastUser.role === 'user') {
-      // We'll use the guest send flow
-      await sendGuestMessage(lastUser.content, chat);
-    }
-    return;
-  }
-  // Cloud regeneration
-  try {
-    const res = await apiFetch(`/api/chat/conversations/${chat.id}/regenerate`, {
-      method: 'POST',
-      body: JSON.stringify({ messageIndex: index })
-    });
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    messages = messages.slice(0, index);
-    messages.push({ id: Date.now().toString() + '-temp', role: 'assistant', content: '' });
-    renderMessages(chat);
-    let assistantContent = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.text) {
-              assistantContent += parsed.text;
-              const last = messages[messages.length - 1];
-              if (last.role === 'assistant') {
-                last.content = assistantContent;
-                renderMessages(chat);
-              }
-            }
-          } catch (e) {}
-        }
-      }
-    }
-    await loadMessages(chat.id);
-    await loadConversations();
-  } catch (err) {
-    alert('Regenerate failed: ' + err.message);
-  }
+// --- Helper: is near bottom ---
+function isNearBottom(container, threshold = 150) {
+  return (container.scrollHeight - container.scrollTop - container.clientHeight) < threshold;
 }
 
-// --- Chat CRUD (works for both guest & cloud) ---
+// --- Chat CRUD (guest + cloud) ---
 function createLocalChat(title = 'New Chat') {
   const chat = {
     id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
@@ -390,21 +310,21 @@ function createLocalChat(title = 'New Chat') {
     updatedAt: new Date().toISOString(),
     createdAt: new Date().toISOString()
   };
-  conversations.unshift(chat);
+  state.chats.unshift(chat);
   saveLocalConversations();
   renderChatList();
   return chat;
 }
 
 async function createChat(title = 'New Chat') {
-  if (currentUser) {
+  if (state.currentUser) {
     try {
       const res = await apiFetch('/api/chat/conversations', {
         method: 'POST',
         body: JSON.stringify({ title })
       });
       const chat = await res.json();
-      conversations.unshift(chat);
+      state.chats.unshift(chat);
       renderChatList();
       return chat;
     } catch (err) {
@@ -417,15 +337,15 @@ async function createChat(title = 'New Chat') {
 }
 
 async function selectChat(id) {
-  currentChatId = id;
-  if (currentUser) {
-    await loadMessages(id);
+  state.activeChatId = id;
+  if (state.currentUser) {
+    await loadCloudMessages(id);
     renderChatList();
   } else {
-    const chat = conversations.find(c => c.id === id);
+    const chat = state.chats.find(c => c.id === id);
     if (chat) {
-      messages = chat.messages || [];
-      renderMessages(chat);
+      state.messages = chat.messages || [];
+      renderMessages();
       chatTitle.textContent = chat.title || 'New Chat';
       renderChatList();
       saveLocalConversations();
@@ -436,14 +356,14 @@ async function selectChat(id) {
 
 async function deleteChat(id) {
   if (!confirm('Delete this chat?')) return;
-  if (currentUser) {
+  if (state.currentUser) {
     try {
       await apiFetch(`/api/chat/conversations/${id}`, { method: 'DELETE' });
-      conversations = conversations.filter(c => c.id !== id);
-      if (currentChatId === id) {
-        currentChatId = null;
-        messages = [];
-        renderMessages(null);
+      state.chats = state.chats.filter(c => c.id !== id);
+      if (state.activeChatId === id) {
+        state.activeChatId = null;
+        state.messages = [];
+        renderMessages();
         chatTitle.textContent = 'AgriDeepAI';
       }
       renderChatList();
@@ -451,11 +371,11 @@ async function deleteChat(id) {
       alert('Failed to delete');
     }
   } else {
-    conversations = conversations.filter(c => c.id !== id);
-    if (currentChatId === id) {
-      currentChatId = null;
-      messages = [];
-      renderMessages(null);
+    state.chats = state.chats.filter(c => c.id !== id);
+    if (state.activeChatId === id) {
+      state.activeChatId = null;
+      state.messages = [];
+      renderMessages();
       chatTitle.textContent = 'AgriDeepAI';
     }
     saveLocalConversations();
@@ -464,21 +384,21 @@ async function deleteChat(id) {
 }
 
 async function renameChat(id) {
-  const chat = conversations.find(c => c.id === id);
+  const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
   const newTitle = prompt('New title:', chat.title);
   if (newTitle && newTitle.trim()) {
-    if (currentUser) {
+    if (state.currentUser) {
       try {
         const res = await apiFetch(`/api/chat/conversations/${id}`, {
           method: 'PUT',
           body: JSON.stringify({ title: newTitle.trim() })
         });
         const updated = await res.json();
-        const idx = conversations.findIndex(c => c.id === id);
-        if (idx !== -1) conversations[idx] = updated;
+        const idx = state.chats.findIndex(c => c.id === id);
+        if (idx !== -1) state.chats[idx] = updated;
         renderChatList();
-        if (currentChatId === id) chatTitle.textContent = updated.title;
+        if (state.activeChatId === id) chatTitle.textContent = updated.title;
       } catch (err) {
         alert('Failed to rename');
       }
@@ -487,23 +407,23 @@ async function renameChat(id) {
       chat.updatedAt = new Date().toISOString();
       saveLocalConversations();
       renderChatList();
-      if (currentChatId === id) chatTitle.textContent = chat.title;
+      if (state.activeChatId === id) chatTitle.textContent = chat.title;
     }
   }
 }
 
 async function togglePin(id) {
-  const chat = conversations.find(c => c.id === id);
+  const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
-  if (currentUser) {
+  if (state.currentUser) {
     try {
       const res = await apiFetch(`/api/chat/conversations/${id}`, {
         method: 'PUT',
         body: JSON.stringify({ pinned: !chat.pinned })
       });
       const updated = await res.json();
-      const idx = conversations.findIndex(c => c.id === id);
-      if (idx !== -1) conversations[idx] = updated;
+      const idx = state.chats.findIndex(c => c.id === id);
+      if (idx !== -1) state.chats[idx] = updated;
       renderChatList();
     } catch (err) {
       alert('Failed to update pin');
@@ -516,15 +436,30 @@ async function togglePin(id) {
   }
 }
 
+// --- Composer auto-resize ---
+function resizeComposer() {
+  messageInput.style.height = '0px';
+  const maxHeight = 120;
+  const scrollHeight = messageInput.scrollHeight;
+  messageInput.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+  messageInput.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+
+// --- Update send button opacity ---
+function updateSendButton() {
+  const hasContent = messageInput.value.trim() !== '' || state.attachments.length > 0;
+  sendBtn.style.opacity = hasContent ? '1' : '0.35';
+}
+
 // --- File preview ---
 function showFilePreview() {
   const oldPreview = document.getElementById('filePreviewContainer');
   if (oldPreview) oldPreview.remove();
-  if (selectedFiles.length === 0) return;
+  if (state.attachments.length === 0) return;
   const container = document.createElement('div');
   container.id = 'filePreviewContainer';
   container.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.5rem;padding:0.25rem 0.5rem;';
-  selectedFiles.forEach((file, idx) => {
+  state.attachments.forEach((file, idx) => {
     const pill = document.createElement('span');
     pill.style.cssText = 'background:#3a3f40;padding:0.2rem 0.6rem;border-radius:1rem;font-size:0.85rem;display:flex;align-items:center;gap:0.3rem;color:#e8e6e1;';
     pill.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + 'KB)';
@@ -532,8 +467,9 @@ function showFilePreview() {
     removeBtn.textContent = '✕';
     removeBtn.style.cssText = 'background:none;border:none;cursor:pointer;font-weight:bold;color:#aaa;';
     removeBtn.addEventListener('click', () => {
-      selectedFiles.splice(idx, 1);
+      state.attachments.splice(idx, 1);
       showFilePreview();
+      updateSendButton();
     });
     pill.appendChild(removeBtn);
     container.appendChild(pill);
@@ -541,78 +477,95 @@ function showFilePreview() {
   composer.parentNode.insertBefore(container, composer);
 }
 
-// --- Send message (guest or authenticated) ---
+// --- Send message ---
 async function sendMessage() {
   const text = messageInput.value.trim();
-  if (!text && selectedFiles.length === 0) return;
-  if (isGenerating) return;
-  let chat = conversations.find(c => c.id === currentChatId);
+  if (!text && state.attachments.length === 0) return;
+  if (state.isGenerating) return;
+
+  // Ensure we have a chat
+  let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     chat = await createChat(text.substring(0, 30) + (text.length > 30 ? '...' : '') || 'New Chat');
     if (!chat) return;
-    currentChatId = chat.id;
-    messages = [];
+    state.activeChatId = chat.id;
+    state.messages = [];
     chatTitle.textContent = chat.title;
-    if (!currentUser) {
-      // For guest, we need to update the chat's messages
-      chat.messages = messages;
+    if (!state.currentUser) {
+      chat.messages = state.messages;
+      saveLocalConversations();
     }
   }
 
-  // Build FormData (always send search=true)
-  const formData = new FormData();
-  formData.append('message', text || '');
-  formData.append('search', 'true'); // always on
-  selectedFiles.forEach(file => {
-    formData.append('file', file);
-  });
-
-  // Optimistic user message
-  const tempUserMsg = {
-    id: Date.now().toString(),
+  // Create user message
+  const userMsg = {
+    id: 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
     role: 'user',
     content: text || '[File attached]',
-    files: selectedFiles.map(f => ({ filename: f.name, mime_type: f.type, size: f.size })),
+    files: state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size })),
     created_at: new Date().toISOString()
   };
-  messages.push(tempUserMsg);
-  if (!currentUser) {
-    chat.messages = messages;
+  state.messages.push(userMsg);
+  if (!state.currentUser) {
+    chat.messages = state.messages;
     saveLocalConversations();
   }
-  renderMessages(chat);
-  messageInput.value = '';
-  messageInput.style.height = 'auto';
-  messageInput.disabled = true;
-  selectedFiles = [];
-  showFilePreview();
+  renderMessages();
 
-  isGenerating = true;
+  // Clear input and attachments
+  messageInput.value = '';
+  state.attachments = [];
+  showFilePreview();
+  resizeComposer();
+  updateSendButton();
+  messageInput.disabled = true;
+
+  // Prepare assistant placeholder
+  const assistantMsg = {
+    id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+    role: 'assistant',
+    content: '',
+    files: [],
+    created_at: new Date().toISOString()
+  };
+  state.messages.push(assistantMsg);
+  if (!state.currentUser) {
+    chat.messages = state.messages;
+    saveLocalConversations();
+  }
+  renderMessages();
+
+  state.isGenerating = true;
   sendBtn.classList.add('generating');
-  sendBtn.disabled = true;
-  abortController = new AbortController();
+  sendBtn.disabled = false; // allow stop
+  state.abortController = new AbortController();
 
   try {
     let response;
-    if (currentUser) {
-      // Authenticated – use cloud endpoint
-      const session = await supabase.auth.getSession();
+    const formData = new FormData();
+    formData.append('message', text || '');
+    formData.append('search', 'true'); // always on
+    state.attachments.forEach(f => formData.append('file', f));
+
+    if (state.currentUser) {
+      const session = await state.supabase.auth.getSession();
       const token = session.data.session?.access_token;
       response = await fetch(`/api/chat/conversations/${chat.id}/messages`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
-        signal: abortController.signal
+        signal: state.abortController.signal
       });
     } else {
-      // Guest – use guest endpoint
-      const payload = { messages: messages.map(m => ({ role: m.role, content: m.content })) };
-      // For guest, we don't have conversation id; we'll send the whole history.
+      // Guest – send whole history
+      const payload = {
+        messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }))
+      };
       response = await fetch('/api/chat/guest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal: abortController.signal
+        signal: state.abortController.signal
       });
     }
 
@@ -623,14 +576,16 @@ async function sendMessage() {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let assistantMsg = '';
-    const tempAssistantId = Date.now().toString() + '-assistant';
-    messages.push({ id: tempAssistantId, role: 'assistant', content: '', created_at: new Date().toISOString() });
-    if (!currentUser) {
-      chat.messages = messages;
-      saveLocalConversations();
+    let fullContent = '';
+    const lastMsg = state.messages[state.messages.length - 1];
+    if (lastMsg.role !== 'assistant') {
+      // safety fallback
+      state.messages.push(assistantMsg);
+      if (!state.currentUser) {
+        chat.messages = state.messages;
+        saveLocalConversations();
+      }
     }
-    renderMessages(chat);
 
     while (true) {
       const { done, value } = await reader.read();
@@ -644,145 +599,86 @@ async function sendMessage() {
           try {
             const parsed = JSON.parse(data);
             if (parsed.text) {
-              assistantMsg += parsed.text;
-              const last = messages[messages.length - 1];
+              fullContent += parsed.text;
+              const last = state.messages[state.messages.length - 1];
               if (last.role === 'assistant') {
-                last.content = assistantMsg;
-                renderMessages(chat);
+                last.content = fullContent;
+                if (!state.currentUser) {
+                  chat.messages = state.messages;
+                  saveLocalConversations();
+                }
+                renderMessages();
               }
             } else if (parsed.sources) {
-              // Add sources to the assistant message (will be saved later)
-              const last = messages[messages.length - 1];
+              const last = state.messages[state.messages.length - 1];
               if (last.role === 'assistant') {
                 if (!last.files) last.files = [];
                 last.files.push({ sources: parsed.sources });
+                if (!state.currentUser) {
+                  chat.messages = state.messages;
+                  saveLocalConversations();
+                }
+                renderMessages();
               }
             }
           } catch (e) {}
         }
       }
     }
-    // Save final state
-    if (currentUser) {
-      await loadMessages(chat.id);
-      await loadConversations();
+
+    // Finalise
+    if (state.currentUser) {
+      await loadCloudMessages(chat.id);
+      await loadCloudConversations();
     } else {
-      chat.messages = messages;
+      chat.messages = state.messages;
       saveLocalConversations();
-      renderMessages(chat);
+      renderMessages();
       renderChatList();
     }
+
   } catch (err) {
     if (err.name === 'AbortError') {
-      // User stopped – remove empty assistant if any
-      if (messages.length > 0 && messages[messages.length-1].role === 'assistant' && messages[messages.length-1].content === '') {
-        messages.pop();
-        if (!currentUser) {
-          chat.messages = messages;
+      // User stopped – mark last assistant as stopped (preserve text)
+      const last = state.messages[state.messages.length - 1];
+      if (last && last.role === 'assistant') {
+        last.status = 'stopped';
+        if (!state.currentUser) {
+          chat.messages = state.messages;
           saveLocalConversations();
         }
-        renderMessages(chat);
+        renderMessages();
       }
     } else {
       console.error(err);
       alert('Error: ' + err.message);
-      // Remove placeholder assistant
-      if (messages.length > 0 && messages[messages.length-1].role === 'assistant' && messages[messages.length-1].content === '') {
-        messages.pop();
-        if (!currentUser) {
-          chat.messages = messages;
+      // Remove empty assistant if any
+      const last = state.messages[state.messages.length - 1];
+      if (last && last.role === 'assistant' && last.content === '') {
+        state.messages.pop();
+        if (!state.currentUser) {
+          chat.messages = state.messages;
           saveLocalConversations();
         }
-        renderMessages(chat);
+        renderMessages();
       }
     }
   } finally {
-    isGenerating = false;
+    state.isGenerating = false;
     sendBtn.classList.remove('generating');
     sendBtn.disabled = false;
     messageInput.disabled = false;
-    abortController = null;
-    // Update send button visibility
-    updateSendButton();
-  }
-}
-
-// --- Guest send helper (for regeneration) ---
-async function sendGuestMessage(text, chat) {
-  // Similar to sendMessage but without adding a new user message (already in history)
-  // We'll just call the guest endpoint with the current messages.
-  const payload = { messages: messages.map(m => ({ role: m.role, content: m.content })) };
-  isGenerating = true;
-  sendBtn.classList.add('generating');
-  sendBtn.disabled = true;
-  abortController = new AbortController();
-  try {
-    const response = await fetch('/api/chat/guest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: abortController.signal
-    });
-    if (!response.ok) throw new Error('AI request failed');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let assistantMsg = '';
-    messages.push({ id: Date.now().toString() + '-assistant', role: 'assistant', content: '', created_at: new Date().toISOString() });
-    chat.messages = messages;
-    saveLocalConversations();
-    renderMessages(chat);
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.text) {
-              assistantMsg += parsed.text;
-              const last = messages[messages.length - 1];
-              if (last.role === 'assistant') {
-                last.content = assistantMsg;
-                renderMessages(chat);
-              }
-            }
-          } catch (e) {}
-        }
-      }
-    }
-    chat.messages = messages;
-    saveLocalConversations();
-    renderMessages(chat);
-    renderChatList();
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      alert('Error: ' + err.message);
-      if (messages.length > 0 && messages[messages.length-1].role === 'assistant' && messages[messages.length-1].content === '') {
-        messages.pop();
-        chat.messages = messages;
-        saveLocalConversations();
-        renderMessages(chat);
-      }
-    }
-  } finally {
-    isGenerating = false;
-    sendBtn.classList.remove('generating');
-    sendBtn.disabled = false;
-    abortController = null;
+    state.abortController = null;
     updateSendButton();
   }
 }
 
 // --- Stop generation ---
 function stopGeneration() {
-  if (abortController) {
-    abortController.abort();
-    abortController = null;
-    isGenerating = false;
+  if (state.abortController) {
+    state.abortController.abort();
+    state.abortController = null;
+    state.isGenerating = false;
     sendBtn.classList.remove('generating');
     sendBtn.disabled = false;
     messageInput.disabled = false;
@@ -790,77 +686,192 @@ function stopGeneration() {
   }
 }
 
-// --- Update send button visibility ---
-function updateSendButton() {
-  const hasContent = messageInput.value.trim() !== '' || selectedFiles.length > 0;
-  sendBtn.style.opacity = hasContent ? '1' : '0.35';
+// --- Edit user message (guest + cloud) ---
+async function editUserMessage(index) {
+  const msg = state.messages[index];
+  if (!msg || msg.role !== 'user') return;
+  const newContent = prompt('Edit your message:', msg.content);
+  if (newContent === null || newContent.trim() === '') return;
+  const trimmed = newContent.trim();
+  if (state.currentUser) {
+    try {
+      const res = await apiFetch(`/api/chat/messages/${msg.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content: trimmed, truncate: true })
+      });
+      const updated = await res.json();
+      msg.content = trimmed;
+      // Remove all messages after this one (we truncate)
+      state.messages = state.messages.slice(0, index + 1);
+      const chat = state.chats.find(c => c.id === state.activeChatId);
+      if (chat) {
+        if (!state.currentUser) {
+          chat.messages = state.messages;
+          saveLocalConversations();
+        }
+      }
+      renderMessages();
+      alert('Message updated. Please send a new message to get a new response.');
+    } catch (err) {
+      alert('Failed to edit: ' + err.message);
+    }
+  } else {
+    // Guest
+    msg.content = trimmed;
+    state.messages = state.messages.slice(0, index + 1);
+    const chat = state.chats.find(c => c.id === state.activeChatId);
+    if (chat) {
+      chat.messages = state.messages;
+      saveLocalConversations();
+      renderMessages();
+    }
+    alert('Message updated. Please send a new message.');
+  }
 }
 
-// --- Event listeners ---
-newChatBtn.addEventListener('click', async () => {
-  const chat = await createChat('New Chat');
-  if (chat) selectChat(chat.id);
-});
+// --- Regenerate message (guest + cloud) ---
+async function regenerateMessage(index) {
+  const msg = state.messages[index];
+  if (!msg || msg.role !== 'assistant') return;
+  const chat = state.chats.find(c => c.id === state.activeChatId);
+  if (!chat) return;
 
-openSidebarBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
-closeSidebarBtn.addEventListener('click', () => sidebar.classList.remove('open'));
-
-sendBtn.addEventListener('click', () => {
-  if (isGenerating) {
-    stopGeneration();
-  } else {
-    sendMessage();
-  }
-});
-
-messageInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
-messageInput.addEventListener('input', () => {
-  messageInput.style.height = 'auto';
-  messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
-  updateSendButton();
-});
-
-chips.forEach(chip => {
-  chip.addEventListener('click', () => {
-    messageInput.value = chip.dataset.prompt;
-    updateSendButton();
-    sendMessage();
-  });
-});
-
-attachBtn.addEventListener('click', () => {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*,.pdf,.txt,.doc,.docx';
-  input.multiple = true;
-  input.onchange = (e) => {
-    const files = Array.from(e.target.files);
-    const maxSize = 10 * 1024 * 1024;
-    const oversized = files.some(f => f.size > maxSize);
-    if (oversized) {
-      alert('Files must be smaller than 10MB.');
-      return;
+  if (!state.currentUser) {
+    // Guest: regenerate by removing from index and re‑sending last user message
+    state.messages = state.messages.slice(0, index);
+    const lastUser = state.messages[state.messages.length - 1];
+    if (lastUser && lastUser.role === 'user') {
+      chat.messages = state.messages;
+      saveLocalConversations();
+      renderMessages();
+      // We'll re‑send that user message using guest endpoint
+      await sendGuestMessage(lastUser.content, chat);
     }
-    selectedFiles = selectedFiles.concat(files);
-    showFilePreview();
-    updateSendButton();
+    return;
+  }
+
+  // Cloud regeneration
+  try {
+    const res = await apiFetch(`/api/chat/conversations/${chat.id}/regenerate`, {
+      method: 'POST',
+      body: JSON.stringify({ messageIndex: index })
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    state.messages = state.messages.slice(0, index);
+    // Add placeholder assistant
+    const newAssistant = { id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
+    state.messages.push(newAssistant);
+    renderMessages();
+    let fullContent = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.text) {
+              fullContent += parsed.text;
+              const last = state.messages[state.messages.length - 1];
+              if (last.role === 'assistant') {
+                last.content = fullContent;
+                renderMessages();
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    }
+    await loadCloudMessages(chat.id);
+    await loadCloudConversations();
+  } catch (err) {
+    alert('Regenerate failed: ' + err.message);
+  }
+}
+
+// --- Guest send helper (for regeneration) ---
+async function sendGuestMessage(text, chat) {
+  const payload = {
+    messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }))
   };
-  input.click();
-});
+  state.isGenerating = true;
+  sendBtn.classList.add('generating');
+  sendBtn.disabled = false;
+  state.abortController = new AbortController();
+  try {
+    const response = await fetch('/api/chat/guest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: state.abortController.signal
+    });
+    if (!response.ok) throw new Error('AI request failed');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = '';
+    const newAssistant = { id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
+    state.messages.push(newAssistant);
+    chat.messages = state.messages;
+    saveLocalConversations();
+    renderMessages();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.text) {
+              fullContent += parsed.text;
+              const last = state.messages[state.messages.length - 1];
+              if (last.role === 'assistant') {
+                last.content = fullContent;
+                renderMessages();
+              }
+            }
+          } catch (e) {}
+        }
+      }
+    }
+    chat.messages = state.messages;
+    saveLocalConversations();
+    renderMessages();
+    renderChatList();
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      alert('Error: ' + err.message);
+      const last = state.messages[state.messages.length - 1];
+      if (last && last.role === 'assistant' && last.content === '') {
+        state.messages.pop();
+        chat.messages = state.messages;
+        saveLocalConversations();
+        renderMessages();
+      }
+    }
+  } finally {
+    state.isGenerating = false;
+    sendBtn.classList.remove('generating');
+    sendBtn.disabled = false;
+    state.abortController = null;
+    updateSendButton();
+  }
+}
 
 // --- Auth Modal ---
 function openAuthModal(mode = 'login') {
   authModal.classList.remove('hidden');
   renderAuthForm(mode);
 }
-function closeAuthModal() {
-  authModal.classList.add('hidden');
-}
+function closeAuthModal() { authModal.classList.add('hidden'); }
 modalClose.addEventListener('click', closeAuthModal);
 authModal.addEventListener('click', (e) => {
   if (e.target === authModal) closeAuthModal();
@@ -902,12 +913,12 @@ function renderAuthForm(mode) {
     }
     try {
       if (isLogin) {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await state.supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         closeAuthModal();
       } else {
         const fullName = document.getElementById('authFullName')?.value.trim() || email.split('@')[0];
-        const { data, error } = await supabase.auth.signUp({
+        const { data, error } = await state.supabase.auth.signUp({
           email,
           password,
           options: { data: { full_name: fullName } }
@@ -949,9 +960,9 @@ function renderAuthForm(mode) {
   });
 }
 
-// --- Settings Modal (for logged in users) ---
+// --- Settings Modal ---
 function openSettingsModal() {
-  if (!currentUser) return;
+  if (!state.currentUser) return;
   const modal = document.createElement('div');
   modal.className = 'modal';
   modal.id = 'settingsModal';
@@ -959,7 +970,7 @@ function openSettingsModal() {
     <div class="modal-content">
       <span class="modal-close" id="settingsClose">&times;</span>
       <h2>Account Settings</h2>
-      <p style="margin-bottom:1rem;color:#aaa;">Email: ${currentUser.email}</p>
+      <p style="margin-bottom:1rem;color:#aaa;">Email: ${state.currentUser.email}</p>
       <div id="settingsError" class="error-msg" style="display:none;"></div>
       <h3>Change Password</h3>
       <label>Current Password</label>
@@ -1036,7 +1047,7 @@ function openSettingsModal() {
       const res = await apiFetch('/api/auth/delete-account', { method: 'DELETE' });
       const data = await res.json();
       alert(data.message || 'Account deleted');
-      await supabase.auth.signOut();
+      await state.supabase.auth.signOut();
       closeModal();
     } catch (err) {
       modal.querySelector('#settingsError').textContent = err.message;
@@ -1045,7 +1056,63 @@ function openSettingsModal() {
   });
 }
 
+// --- Event listeners ---
+newChatBtn.addEventListener('click', async () => {
+  const chat = await createChat('New Chat');
+  if (chat) selectChat(chat.id);
+});
+
+openSidebarBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+closeSidebarBtn.addEventListener('click', () => sidebar.classList.remove('open'));
+
+sendBtn.addEventListener('click', () => {
+  if (state.isGenerating) {
+    stopGeneration();
+  } else {
+    sendMessage();
+  }
+});
+
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+messageInput.addEventListener('input', () => {
+  resizeComposer();
+  updateSendButton();
+});
+
+chips.forEach(chip => {
+  chip.addEventListener('click', () => {
+    messageInput.value = chip.dataset.prompt;
+    updateSendButton();
+    sendMessage();
+  });
+});
+
+attachBtn.addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,.pdf,.txt,.doc,.docx';
+  input.multiple = true;
+  input.onchange = (e) => {
+    const files = Array.from(e.target.files);
+    const maxSize = 10 * 1024 * 1024;
+    const oversized = files.some(f => f.size > maxSize);
+    if (oversized) {
+      alert('Files must be smaller than 10MB.');
+      return;
+    }
+    state.attachments = state.attachments.concat(files);
+    showFilePreview();
+    updateSendButton();
+  };
+  input.click();
+});
+
 // --- Init ---
 initSupabase();
-// Initial send button state
+// Initial send button opacity
 updateSendButton();
