@@ -439,3 +439,42 @@ body.dark .modal-content .error-msg { color: #ef5350; }
 @media (min-width: 769px) {
   #closeSidebarBtn { display: none; }
 }
+/* Search toggle */
+#searchToggle {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  transition: opacity 0.2s;
+}
+#searchToggle:hover {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+/* Sources list */
+.message .sources {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  border-top: 1px solid #ddd;
+  padding-top: 0.3rem;
+}
+body.dark .message .sources {
+  border-top-color: #3a3f40;
+}
+.message .sources ul {
+  list-style: none;
+  padding-left: 0.5rem;
+  margin: 0.2rem 0;
+}
+.message .sources li {
+  margin: 0.1rem 0;
+}
+.message .sources a {
+  color: #2e7d32;
+  text-decoration: underline;
+}
+body.dark .message .sources a {
+  color: #66bb6a;
+}
