@@ -12,7 +12,12 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Rate limiting
+// --- Middleware ---
+app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// --- Rate Limiting ---
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -20,38 +25,54 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Middleware
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Supabase
+// --- Supabase ---
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// Resend
+// --- Resend ---
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// --- Gemini setup with fallback ---
+// --- Google Gemini with Model Fallback ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Try to use gemini-1.5-pro first, then fallback to gemini-pro
-let model;
-try {
-  model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
-  // Quick test to see if model is accessible (optional)
-} catch (e) {
-  console.warn('gemini-1.5-pro not available, falling back to gemini-pro');
-  model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+// List of models to try in order (newest to oldest)
+const MODEL_NAMES = [
+  'gemini-2.0-flash-exp',
+  'gemini-1.5-pro',
+  'gemini-1.5-flash',
+  'gemini-pro',
+  'gemini-1.0-pro'
+];
+
+let activeModel = null;
+
+function getModel() {
+  if (activeModel) return activeModel;
+  for (const name of MODEL_NAMES) {
+    try {
+      const model = genAI.getGenerativeModel({ model: name });
+      // Test the model with a small request
+      console.log(`✅ Using Gemini model: ${name}`);
+      activeModel = model;
+      return model;
+    } catch (e) {
+      console.warn(`⚠️ Model ${name} not available, trying next...`);
+    }
+  }
+  // Fallback: try the first one again (will throw a clear error)
+  activeModel = genAI.getGenerativeModel({ model: MODEL_NAMES[0] });
+  return activeModel;
 }
 
-// Tavily
+const model = getModel();
+
+// --- Tavily ---
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 
-// Logo URL for emails
+// --- Logo URL ---
 const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// --- SYSTEM PROMPT with Creator Identity ---
+// --- SYSTEM PROMPT (with Creator Identity) ---
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. You provide accurate, practical, actionable advice for farmers, students, researchers, and professionals worldwide, with a strong focus on Rwanda and African agriculture.
 
@@ -67,7 +88,7 @@ AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female tec
 When users ask about your creator, respond truthfully with the above information. Do not invent extra details. Do not mention creator unnecessarily in normal conversation.
 `;
 
-// Multer config
+// --- Multer for file uploads ---
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -79,7 +100,7 @@ const upload = multer({
   }
 });
 
-// --- Auth middleware ---
+// --- Auth Middleware ---
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -92,8 +113,9 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// --- Tavily helper ---
+// --- Tavily Search Helper ---
 async function tavilySearch(query) {
+  if (!TAVILY_API_KEY) return null;
   try {
     const response = await axios.post('https://api.tavily.com/search', {
       api_key: TAVILY_API_KEY,
@@ -111,8 +133,10 @@ async function tavilySearch(query) {
   }
 }
 
-// --- Verification code helper ---
-function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
+// --- Verification Code Helper ---
+function generateCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
 const verificationStore = {};
 
 // ======================== AUTH ROUTES ========================
@@ -139,11 +163,11 @@ app.post('/api/auth/signup', async (req, res) => {
       to: email,
       subject: 'Verify your AgriDeepAI account',
       html: `
-        <div style="text-align:center;">
+        <div style="text-align:center;font-family:sans-serif;">
           <img src="${LOGO_URL}" alt="AgriDeepAI" style="height:60px;margin-bottom:1rem;" />
           <h1>Welcome to AgriDeepAI!</h1>
           <p>Your verification code is:</p>
-          <h2 style="background:#f0f0f0;padding:0.5rem;border-radius:8px;display:inline-block;">${code}</h2>
+          <h2 style="background:#f0f0f0;padding:0.5rem;border-radius:8px;display:inline-block;font-family:monospace;">${code}</h2>
           <p>Valid for 10 minutes.</p>
           <p>If you didn't request this, please ignore this email.</p>
         </div>
@@ -189,10 +213,10 @@ app.post('/api/auth/resend-verification', async (req, res) => {
       to: email,
       subject: 'Verify your AgriDeepAI account',
       html: `
-        <div style="text-align:center;">
+        <div style="text-align:center;font-family:sans-serif;">
           <img src="${LOGO_URL}" alt="AgriDeepAI" style="height:60px;margin-bottom:1rem;" />
           <h1>Verification Code</h1>
-          <h2 style="background:#f0f0f0;padding:0.5rem;border-radius:8px;display:inline-block;">${code}</h2>
+          <h2 style="background:#f0f0f0;padding:0.5rem;border-radius:8px;display:inline-block;font-family:monospace;">${code}</h2>
           <p>Valid for 10 minutes.</p>
         </div>
       `
@@ -277,7 +301,10 @@ app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
 
 // --- Config endpoint ---
 app.get('/api/config', (req, res) => {
-  res.json({ supabaseUrl: process.env.SUPABASE_URL, supabaseAnonKey: process.env.SUPABASE_ANON_KEY });
+  res.json({
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+  });
 });
 
 // ======================== GUEST CHAT ENDPOINT ========================
@@ -287,6 +314,9 @@ app.post('/api/chat/guest', async (req, res) => {
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'Messages array required' });
     }
+
+    // Get the current model (with fallback)
+    const chatModel = getModel();
 
     // Always perform search
     const lastUserMsg = messages.filter(m => m.role === 'user').pop();
@@ -300,7 +330,7 @@ app.post('/api/chat/guest', async (req, res) => {
       finalUserPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer the following question using this information where relevant:\n${finalUserPrompt}`;
     }
 
-    const chat = model.startChat({
+    const chat = chatModel.startChat({
       history: messages.slice(0, -1).map(m => ({
         role: m.role === 'user' ? 'user' : 'model',
         parts: [{ text: m.content }]
@@ -331,7 +361,7 @@ app.post('/api/chat/guest', async (req, res) => {
     res.end();
 
   } catch (err) {
-    console.error(err);
+    console.error('Guest chat error:', err);
     if (!res.headersSent) {
       res.status(500).json({ error: err.message || 'AI request failed' });
     } else {
@@ -342,8 +372,397 @@ app.post('/api/chat/guest', async (req, res) => {
 });
 
 // ======================== AUTHENTICATED CHAT ROUTES ========================
-// (Keep your existing routes, but ensure they also use the same model and always search)
-// For completeness, we include a minimal version – you can copy your existing ones.
+app.get('/api/chat/conversations', authenticate, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch conversations' });
+  }
+});
+
+app.post('/api/chat/conversations', authenticate, async (req, res) => {
+  try {
+    const { title } = req.body;
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert({ user_id: req.user.id, title: title || 'New Chat' })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create conversation' });
+  }
+});
+
+app.put('/api/chat/conversations/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, pinned, archived } = req.body;
+    const { data: existing, error: checkErr } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', req.user.id)
+      .single();
+    if (checkErr || !existing) return res.status(404).json({ error: 'Conversation not found' });
+    const updates = { updated_at: new Date().toISOString() };
+    if (title !== undefined) updates.title = title;
+    if (pinned !== undefined) updates.pinned = pinned;
+    if (archived !== undefined) updates.archived = archived;
+    const { data, error } = await supabase
+      .from('conversations')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update conversation' });
+  }
+});
+
+app.delete('/api/chat/conversations/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', req.user.id);
+    if (error) throw error;
+    res.json({ message: 'Deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete' });
+  }
+});
+
+app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: conv, error: convErr } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', req.user.id)
+      .single();
+    if (convErr || !conv) return res.status(404).json({ error: 'Conversation not found' });
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', id)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// --- Send message (authenticated) ---
+app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('file'), async (req, res) => {
+  try {
+    const { id: conversationId } = req.params;
+    const { message } = req.body;
+    const file = req.file;
+
+    const { data: conv, error: convErr } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .eq('user_id', req.user.id)
+      .single();
+    if (convErr || !conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    // Handle file upload
+    let fileMetadata = null;
+    if (file) {
+      const fileExt = file.originalname.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
+      const filePath = `${req.user.id}/${fileName}`;
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from(storageBucket)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+      if (uploadErr) throw new Error('File upload failed: ' + uploadErr.message);
+      const { publicURL, error: urlErr } = supabase.storage
+        .from(storageBucket)
+        .getPublicUrl(filePath);
+      if (urlErr) throw new Error('Failed to get file URL');
+      fileMetadata = {
+        filename: file.originalname,
+        storage_path: filePath,
+        mime_type: file.mimetype,
+        size: file.size,
+        public_url: publicURL,
+      };
+    }
+
+    // Save user message
+    const messageData = {
+      conversation_id: conversationId,
+      role: 'user',
+      content: message || '',
+    };
+    if (fileMetadata) {
+      messageData.files = [fileMetadata];
+    }
+    const { data: userMsg, error: msgErr } = await supabase
+      .from('messages')
+      .insert(messageData)
+      .select()
+      .single();
+    if (msgErr) throw msgErr;
+
+    // Fetch history
+    const { data: history, error: histErr } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    if (histErr) throw histErr;
+
+    // Search
+    let searchResults = null;
+    if (TAVILY_API_KEY) {
+      const query = message || 'agriculture update';
+      searchResults = await tavilySearch(query);
+    }
+
+    // Build AI messages
+    let aiMessages = history.map(m => ({ role: m.role, content: m.content }));
+    let finalUserPrompt = aiMessages[aiMessages.length - 1].content;
+    if (searchResults && searchResults.answer) {
+      finalUserPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer the following question using this information where relevant:\n${finalUserPrompt}`;
+    }
+
+    // Get model
+    const chatModel = getModel();
+
+    // Vision support for images
+    let visionModel = chatModel;
+    let imageParts = [];
+    if (file && file.mimetype.startsWith('image/')) {
+      const base64Image = file.buffer.toString('base64');
+      imageParts = [{
+        inlineData: { data: base64Image, mimeType: file.mimetype }
+      }];
+    }
+
+    const chat = visionModel.startChat({
+      history: aiMessages.slice(0, -1).map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }]
+      })),
+      systemInstruction: SYSTEM_PROMPT,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    });
+
+    let result;
+    if (imageParts.length > 0) {
+      result = await chat.sendMessageStream([{ text: finalUserPrompt }, ...imageParts]);
+    } else {
+      result = await chat.sendMessageStream(finalUserPrompt);
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    let fullResponse = '';
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      fullResponse += text;
+      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    }
+
+    let sourcesData = null;
+    if (searchResults && searchResults.results) {
+      sourcesData = searchResults.results.slice(0, 5).map(r => ({ title: r.title, url: r.url, snippet: r.content }));
+    }
+    res.write(`data: ${JSON.stringify({ done: true, sources: sourcesData })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+
+    // Save assistant message
+    await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: fullResponse,
+        files: sourcesData ? [{ sources: sourcesData }] : null
+      });
+    await supabase
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+  } catch (err) {
+    console.error(err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message || 'Failed to send message' });
+    } else {
+      res.write(`event: error\ndata: ${JSON.stringify({ error: err.message || 'Generation failed' })}\n\n`);
+      res.end();
+    }
+  }
+});
+
+// --- Regenerate endpoint ---
+app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
+  try {
+    const { id: conversationId } = req.params;
+    const { messageIndex } = req.body;
+    if (messageIndex === undefined || typeof messageIndex !== 'number') {
+      return res.status(400).json({ error: 'messageIndex required (number)' });
+    }
+    const { data: conv, error: convErr } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .eq('user_id', req.user.id)
+      .single();
+    if (convErr || !conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    const { data: allMessages, error: fetchErr } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    if (fetchErr) throw fetchErr;
+
+    if (messageIndex >= allMessages.length) {
+      return res.status(400).json({ error: 'Index out of bounds' });
+    }
+    if (allMessages[messageIndex].role !== 'assistant') {
+      return res.status(400).json({ error: 'Message at index is not an assistant message' });
+    }
+
+    const idsToDelete = allMessages.slice(messageIndex).map(m => m.id);
+    if (idsToDelete.length > 0) {
+      await supabase.from('messages').delete().in('id', idsToDelete);
+    }
+
+    const { data: remaining, error: remErr } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    if (remErr) throw remErr;
+
+    const aiMessages = remaining.map(m => ({ role: m.role, content: m.content }));
+    if (aiMessages.length === 0 || aiMessages[aiMessages.length - 1].role !== 'user') {
+      return res.status(400).json({ error: 'No user message to regenerate from' });
+    }
+
+    const chatModel = getModel();
+    const chat = chatModel.startChat({
+      history: aiMessages.slice(0, -1).map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }]
+      })),
+      systemInstruction: SYSTEM_PROMPT,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    });
+    const result = await chat.sendMessageStream(aiMessages[aiMessages.length - 1].content);
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    let fullResponse = '';
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      fullResponse += text;
+      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    }
+    res.write('data: [DONE]\n\n');
+    res.end();
+
+    await supabase
+      .from('messages')
+      .insert({ conversation_id: conversationId, role: 'assistant', content: fullResponse });
+    await supabase
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+  } catch (err) {
+    console.error(err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message || 'Regeneration failed' });
+    } else {
+      res.write(`event: error\ndata: ${JSON.stringify({ error: err.message || 'Regeneration failed' })}\n\n`);
+      res.end();
+    }
+  }
+});
+
+// --- Edit message endpoint ---
+app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const { content, truncate } = req.body;
+    if (!content) return res.status(400).json({ error: 'Content required' });
+    const { data: msg, error: msgErr } = await supabase
+      .from('messages')
+      .select('*, conversation_id, conversations(user_id)')
+      .eq('id', messageId)
+      .single();
+    if (msgErr || !msg) return res.status(404).json({ error: 'Message not found' });
+    if (msg.conversations.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+    if (msg.role !== 'user') {
+      return res.status(400).json({ error: 'Only user messages can be edited' });
+    }
+    const { data, error } = await supabase
+      .from('messages')
+      .update({ content })
+      .eq('id', messageId)
+      .select()
+      .single();
+    if (error) throw error;
+    if (truncate) {
+      const { data: laterMessages, error: laterErr } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', msg.conversation_id)
+        .gt('created_at', msg.created_at)
+        .order('created_at', { ascending: true });
+      if (laterErr) throw laterErr;
+      if (laterMessages.length > 0) {
+        const ids = laterMessages.map(m => m.id);
+        await supabase.from('messages').delete().in('id', ids);
+      }
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', msg.conversation_id);
+    }
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to edit message' });
+  }
+});
 
 // --- Serve static frontend ---
 const frontendPath = path.join(__dirname, '../frontend');
@@ -354,4 +773,5 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ AgriDeepAI server running on http://localhost:${PORT}`);
+  console.log(`📦 Using Gemini model with fallback support`);
 });
