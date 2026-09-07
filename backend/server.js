@@ -14,8 +14,8 @@ const PORT = process.env.PORT || 5000;
 
 // --- Rate limiting ---
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per window
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/', limiter);
@@ -38,6 +38,9 @@ const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 // --- Tavily ---
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
+
+// --- Logo URL for emails ---
+const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
 // --- System prompt ---
 const SYSTEM_PROMPT = `
@@ -130,11 +133,21 @@ app.post('/api/auth/signup', async (req, res) => {
     });
     const code = generateCode();
     verificationStore[user.id] = { code, expires: Date.now() + 10 * 60 * 1000 };
+    // Email with logo
     await resend.emails.send({
       from: process.env.RESEND_FROM_EMAIL,
       to: email,
       subject: 'Verify your AgriDeepAI account',
-      html: `<h1>Welcome!</h1><p>Your verification code: <strong>${code}</strong></p><p>Valid for 10 minutes.</p>`
+      html: `
+        <div style="text-align:center;">
+          <img src="${LOGO_URL}" alt="AgriDeepAI" style="height:60px;margin-bottom:1rem;" />
+          <h1>Welcome to AgriDeepAI!</h1>
+          <p>Your verification code is:</p>
+          <h2 style="background:#f0f0f0;padding:0.5rem;border-radius:8px;display:inline-block;">${code}</h2>
+          <p>Valid for 10 minutes.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+        </div>
+      `
     });
     res.status(201).json({ message: 'User created. Please verify your email.', userId: user.id });
   } catch (err) {
@@ -175,7 +188,14 @@ app.post('/api/auth/resend-verification', async (req, res) => {
       from: process.env.RESEND_FROM_EMAIL,
       to: email,
       subject: 'Verify your AgriDeepAI account',
-      html: `<h1>Verification Code</h1><p>${code}</p>`
+      html: `
+        <div style="text-align:center;">
+          <img src="${LOGO_URL}" alt="AgriDeepAI" style="height:60px;margin-bottom:1rem;" />
+          <h1>Verification Code</h1>
+          <h2 style="background:#f0f0f0;padding:0.5rem;border-radius:8px;display:inline-block;">${code}</h2>
+          <p>Valid for 10 minutes.</p>
+        </div>
+      `
     });
     res.json({ message: 'Code resent' });
   } catch (err) {
@@ -212,16 +232,13 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
   }
 });
 
-// --- Account management (authenticated) ---
-
-// Change password
+// --- Account management ---
 app.post('/api/auth/change-password', authenticate, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Current and new password required' });
     }
-    // Re-authenticate with current password
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: req.user.email,
       password: currentPassword
@@ -229,7 +246,6 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
     if (signInError) {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
-    // Update password
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) throw error;
     res.json({ message: 'Password changed successfully' });
@@ -239,12 +255,10 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
   }
 });
 
-// Change email
 app.post('/api/auth/change-email', authenticate, async (req, res) => {
   try {
     const { newEmail } = req.body;
     if (!newEmail) return res.status(400).json({ error: 'New email required' });
-    // Send verification email to new address? Supabase handles this.
     const { error } = await supabase.auth.updateUser({ email: newEmail });
     if (error) throw error;
     res.json({ message: 'Email change requested. Please verify the new email.' });
@@ -254,11 +268,9 @@ app.post('/api/auth/change-email', authenticate, async (req, res) => {
   }
 });
 
-// Delete account
 app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
-    // Delete user from auth (cascades to profiles and all related data due to foreign keys)
     const { error } = await supabase.auth.admin.deleteUser(userId);
     if (error) throw error;
     res.json({ message: 'Account deleted successfully' });
@@ -377,7 +389,7 @@ app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) =
   }
 });
 
-// --- Send message with search and file ---
+// --- Send message ---
 app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('file'), async (req, res) => {
   try {
     const { id: conversationId } = req.params;
