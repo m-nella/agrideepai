@@ -3,48 +3,61 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AgriDeepAI – Smart AI for Agriculture</title>
+  <title>agrideepai – AI for Agriculture</title>
   <link rel="icon" href="/logo.png" type="image/png" />
-  <link rel="apple-touch-icon" href="/logo.png" />
   <link rel="stylesheet" href="style.css" />
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
   <div id="app">
     <!-- Sidebar -->
-    <aside id="sidebar">
+    <aside id="sidebar" class="sidebar-expanded">
       <div class="sidebar-header">
-        <div class="logo">
-          <img src="/logo.png" alt="AgriDeepAI" class="logo-img" />
-          <span class="logo-text">AgriDeepAI</span>
+        <div class="brand">
+          <img src="/logo.png" alt="agrideepai" class="logo-img" />
+          <span class="brand-name">agrideepai</span>
         </div>
-        <button id="closeSidebarBtn" aria-label="Close sidebar">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button id="sidebarToggle" class="icon-button" aria-label="Toggle sidebar">
+          <i data-lucide="panel-left-close"></i>
+          <i data-lucide="panel-left-open" style="display:none;"></i>
         </button>
       </div>
+
       <button id="newChatBtn" class="new-chat-btn">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        New Chat
+        <i data-lucide="square-pen"></i>
+        <span>New Chat</span>
       </button>
-      <div id="chatList"></div>
+
+      <div id="chatList" class="chat-history"></div>
+
       <div class="sidebar-footer">
-        <button id="authSidebarBtn">Sign In</button>
+        <button id="authSidebarBtn" class="auth-btn">
+          <i data-lucide="log-in"></i>
+          <span>Sign In</span>
+        </button>
       </div>
     </aside>
 
-    <!-- Main -->
-    <main id="mainContent">
+    <!-- Main Chat -->
+    <main id="mainContent" class="chat-layout">
       <header id="topBar">
-        <button id="openSidebarBtn" aria-label="Open sidebar">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        <button id="openSidebarBtn" class="icon-button" aria-label="Open sidebar">
+          <i data-lucide="menu"></i>
         </button>
-        <span id="chatTitle">AgriDeepAI</span>
+        <span id="chatTitle">agrideepai</span>
+        <div class="top-actions">
+          <button class="icon-button" aria-label="More options">
+            <i data-lucide="more-horizontal"></i>
+          </button>
+        </div>
       </header>
 
       <div id="chatContainer">
         <div id="welcomeScreen">
-          <img src="/logo.png" alt="AgriDeepAI" class="welcome-logo" />
+          <img src="/logo.png" alt="agrideepai" class="welcome-logo" />
           <h1>How can I help with agriculture today?</h1>
-          <p>Ask about crops, livestock, soil, and more.</p>
+          <p>Ask about crops, livestock, soil, farming, and more.</p>
           <div class="suggestion-chips">
             <button class="chip" data-prompt="Diagnose crop symptoms">🌿 Diagnose crop symptoms</button>
             <button class="chip" data-prompt="Ask about livestock">🐄 Ask about livestock</button>
@@ -57,16 +70,19 @@
 
       <footer id="composerArea">
         <div id="composer">
-          <button id="attachBtn" aria-label="Attach file">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          </button>
-          <textarea id="messageInput" rows="1" placeholder="Ask about agriculture or livestock..."></textarea>
-          <button id="sendBtn" aria-label="Send">
-            <svg class="send-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            <svg class="stop-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-          </button>
+          <div id="attachmentPreview"></div>
+          <div class="composer-main">
+            <button id="attachBtn" class="icon-button" aria-label="Attach file">
+              <i data-lucide="paperclip"></i>
+            </button>
+            <textarea id="messageInput" rows="1" placeholder="Ask about agriculture or livestock..."></textarea>
+            <button id="sendBtn" class="send-button" aria-label="Send message">
+              <i data-lucide="send"></i>
+              <i data-lucide="square" style="display:none;"></i>
+            </button>
+          </div>
         </div>
-        <div class="footer-note">AgriDeepAI can make a mistake. Check for reference.</div>
+        <div class="footer-note">agrideepai can make a mistake. Check for reference.</div>
       </footer>
     </main>
   </div>
@@ -80,5 +96,13 @@
   </div>
 
   <script src="main.js" type="module"></script>
+  <script>
+    // Initialize Lucide icons after DOM load
+    document.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+    });
+    // Re-run after dynamic content updates
+    window.refreshIcons = () => lucide.createIcons();
+  </script>
 </body>
 </html>
