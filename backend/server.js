@@ -2,36 +2,44 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 const { Resend } = require('resend');
 const multer = require('multer');
-const fs = require('fs');
-const axios = require('axios'); // for Tavily
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// --- Rate limiting ---
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per window
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
+
+// --- Middleware ---
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Supabase
+// --- Supabase ---
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// Resend
+// --- Resend ---
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Gemini
+// --- Gemini ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-// Tavily
+// --- Tavily ---
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 
-// System prompt (base)
+// --- System prompt ---
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. You provide accurate, practical, actionable advice for farmers, students, researchers, and professionals worldwide, with a strong focus on Rwanda and African agriculture.
 
@@ -43,7 +51,7 @@ Guidelines:
 - Creator: Ornella Mutuyimana, a Rwandan technology enthusiast.
 `;
 
-// --- Multer config ---
+// --- Multer ---
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -77,7 +85,7 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// --- Helper: Tavily search ---
+// --- Tavily helper ---
 async function tavilySearch(query) {
   try {
     const response = await axios.post('https://api.tavily.com/search', {
@@ -96,13 +104,14 @@ async function tavilySearch(query) {
   }
 }
 
-// --- Helper: generate verification code ---
+// --- Verification code helper ---
 function generateCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 const verificationStore = {};
 
-// --- Auth Routes (unchanged) ---
+// ======================== AUTH ROUTES ========================
+
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -203,6 +212,62 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
   }
 });
 
+// --- Account management (authenticated) ---
+
+// Change password
+app.post('/api/auth/change-password', authenticate, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current and new password required' });
+    }
+    // Re-authenticate with current password
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: req.user.email,
+      password: currentPassword
+    });
+    if (signInError) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    // Update password
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to change password' });
+  }
+});
+
+// Change email
+app.post('/api/auth/change-email', authenticate, async (req, res) => {
+  try {
+    const { newEmail } = req.body;
+    if (!newEmail) return res.status(400).json({ error: 'New email required' });
+    // Send verification email to new address? Supabase handles this.
+    const { error } = await supabase.auth.updateUser({ email: newEmail });
+    if (error) throw error;
+    res.json({ message: 'Email change requested. Please verify the new email.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to change email' });
+  }
+});
+
+// Delete account
+app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    // Delete user from auth (cascades to profiles and all related data due to foreign keys)
+    const { error } = await supabase.auth.admin.deleteUser(userId);
+    if (error) throw error;
+    res.json({ message: 'Account deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to delete account' });
+  }
+});
+
 // --- Config endpoint ---
 app.get('/api/config', (req, res) => {
   res.json({
@@ -211,7 +276,8 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// --- Chat Routes ---
+// ======================== CHAT ROUTES ========================
+
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -311,14 +377,13 @@ app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) =
   }
 });
 
-// --- SEND MESSAGE with optional search ---
+// --- Send message with search and file ---
 app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('file'), async (req, res) => {
   try {
     const { id: conversationId } = req.params;
-    const { message, search } = req.body; // search flag (true/false)
+    const { message, search } = req.body;
     const file = req.file;
 
-    // Verify ownership
     const { data: conv, error: convErr } = await supabase
       .from('conversations')
       .select('id')
@@ -327,7 +392,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (convErr || !conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // --- Handle file upload ---
     let fileMetadata = null;
     if (file) {
       const fileExt = file.originalname.split('.').pop();
@@ -360,7 +424,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       });
     }
 
-    // --- Save user message ---
+    // Save user message
     const messageData = {
       conversation_id: conversationId,
       role: 'user',
@@ -376,7 +440,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (msgErr) throw msgErr;
 
-    // --- Fetch conversation history ---
+    // Fetch history
     const { data: history, error: histErr } = await supabase
       .from('messages')
       .select('*')
@@ -384,31 +448,21 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .order('created_at', { ascending: true });
     if (histErr) throw histErr;
 
-    // --- Optional: Web search ---
+    // Search
     let searchResults = null;
-    if (search && TAVILY_API_KEY) {
-      // Use the latest user message as query
+    if (search && search === 'true' && TAVILY_API_KEY) {
       const query = message || 'agriculture update';
       searchResults = await tavilySearch(query);
     }
 
-    // --- Build AI messages ---
+    // Build AI messages
     let aiMessages = history.map(m => ({ role: m.role, content: m.content }));
-    // If search results exist, inject them into the context (as a system message)
-    let augmentedPrompt = '';
+    let finalUserPrompt = aiMessages[aiMessages.length - 1].content;
     if (searchResults && searchResults.answer) {
-      // Add a prefix to the user message with search results
-      const answer = searchResults.answer;
-      const sources = searchResults.results?.map(r => r.url).filter(Boolean).slice(0, 3) || [];
-      const sourceText = sources.length ? '\n\nSources: ' + sources.join(', ') : '';
-      augmentedPrompt = `[Web Search Results]\n${answer}${sourceText}\n\nBased on the above current information, please answer the user's question.`;
-      // We'll prepend this to the last user message (the one we just saved)
-      // Actually, we can append to the user message content? But it's better to put it in the system prompt.
-      // We'll modify the system prompt for this turn.
+      finalUserPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer the following question using this information where relevant:\n${finalUserPrompt}`;
     }
 
-    // --- Prepare AI ---
-    // For vision
+    // Vision
     let visionModel = model;
     let imageParts = [];
     if (file && file.mimetype.startsWith('image/')) {
@@ -419,37 +473,22 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       }];
     }
 
-    // Build history for Gemini (excluding the last user message, as we'll send it as current prompt)
-    const historyForAI = aiMessages.slice(0, -1).map(m => ({
-      role: m.role === 'user' ? 'user' : 'model',
-      parts: [{ text: m.content }]
-    }));
-
-    // If we have search results, we can add a system message to the history
-    // Gemini doesn't support system role in history; we'll prepend to the user prompt.
-    let finalUserPrompt = aiMessages[aiMessages.length - 1].content;
-    if (searchResults && searchResults.answer) {
-      finalUserPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer the following question using this information where relevant:\n${finalUserPrompt}`;
-    }
-
-    // Start chat
     const chat = visionModel.startChat({
-      history: historyForAI,
+      history: aiMessages.slice(0, -1).map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: m.content }]
+      })),
       systemInstruction: SYSTEM_PROMPT,
       generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
     });
 
     let result;
     if (imageParts.length > 0) {
-      result = await chat.sendMessageStream([
-        { text: finalUserPrompt },
-        ...imageParts
-      ]);
+      result = await chat.sendMessageStream([{ text: finalUserPrompt }, ...imageParts]);
     } else {
       result = await chat.sendMessageStream(finalUserPrompt);
     }
 
-    // --- Stream response ---
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -461,7 +500,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       fullResponse += text;
       res.write(`data: ${JSON.stringify({ text })}\n\n`);
     }
-    // If we have sources, send them as a separate event or include in metadata
+
     let sourcesData = null;
     if (searchResults && searchResults.results) {
       sourcesData = searchResults.results.slice(0, 5).map(r => ({
@@ -470,7 +509,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         snippet: r.content
       }));
     }
-    // Send final event with sources
     res.write(`data: ${JSON.stringify({ done: true, sources: sourcesData })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
@@ -482,7 +520,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         conversation_id: conversationId,
         role: 'assistant',
         content: fullResponse,
-        files: sourcesData ? [{ sources: sourcesData }] : null // store sources as file metadata
+        files: sourcesData ? [{ sources: sourcesData }] : null
       });
     await supabase
       .from('conversations')
@@ -500,7 +538,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
   }
 });
 
-// --- Regenerate endpoint (same, but we don't support search on regenerate for simplicity) ---
+// --- Regenerate ---
 app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
   try {
     const { id: conversationId } = req.params;
@@ -590,7 +628,7 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
   }
 });
 
-// --- Edit message (unchanged) ---
+// --- Edit message ---
 app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   try {
     const { id: messageId } = req.params;
