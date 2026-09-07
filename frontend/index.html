@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgriDeepAI – Smart Agriculture Assistant</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Open Graph / SEO meta -->
+  <meta name="description" content="AgriDeepAI – AI assistance for agriculture, livestock, and agribusiness." />
+  <meta property="og:title" content="AgriDeepAI" />
+  <meta property="og:description" content="Your smart agricultural AI assistant." />
+  <meta property="og:type" content="website" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">
+        <span class="logo-icon">🌾</span>
+        <span class="logo-text">AgriDeepAI</span>
+      </div>
+      <div class="header-actions">
+        <button id="themeToggle" aria-label="Toggle dark mode">🌓</button>
+        <button id="authBtn">Sign In</button>
+      </div>
+    </header>
+
+    <main>
+      <div id="chatContainer">
+        <div id="welcomeScreen">
+          <div class="welcome-icon">🌱</div>
+          <h1>How can I help with agriculture today?</h1>
+          <div class="suggestion-chips">
+            <button class="chip" data-prompt="Diagnose crop symptoms">🌿 Diagnose crop symptoms</button>
+            <button class="chip" data-prompt="Ask about livestock">🐄 Ask about livestock</button>
+            <button class="chip" data-prompt="Improve crop yield">📈 Improve crop yield</button>
+            <button class="chip" data-prompt="Plan a farm">🧑‍🌾 Plan a farm</button>
+          </div>
+        </div>
+        <div id="messageList"></div>
+      </div>
+    </main>
+
+    <footer>
+      <div id="composer">
+        <button id="attachBtn" aria-label="Attach file">📎</button>
+        <textarea id="messageInput" rows="1" placeholder="Ask about agriculture or livestock..."></textarea>
+        <button id="sendBtn" aria-label="Send">➤</button>
+      </div>
+      <div class="footer-note">AgriDeepAI – AI for Agriculture &amp; Livestock</div>
+    </footer>
+  </div>
+
+  <script src="main.js" type="module"></script>
+</body>
+</html>
