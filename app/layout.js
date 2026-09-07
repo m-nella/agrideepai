@@ -2,10 +2,8 @@ import "./globals.css";
 
 export const metadata = {
   title: "AfriDeepAI — Agriculture & Livestock Intelligence",
-  description: "Professional AI assistance for agriculture, livestock, crop production, animal husbandry, plant health and agribusiness in Rwanda and globally.",
-  keywords: ["Agriculture AI","Livestock AI","Rwanda Agriculture","Crop Disease","Farming","AfriDeepAI"],
-  icons: { icon: "/logo.png" },
-  openGraph: { title: "AfriDeepAI", description: "Agriculture & Livestock Intelligence", type: "website" }
+  description: "Professional AI assistance for agriculture, livestock, crop production, animal farming and agribusiness in Rwanda and globally.",
+  icons: { icon: "/logo.png" }
 };
 
 export default function RootLayout({ children }) {
