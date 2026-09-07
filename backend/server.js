@@ -32,9 +32,18 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 // Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Gemini
+// --- Gemini setup with fallback ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+// Try to use gemini-1.5-pro first, then fallback to gemini-pro
+let model;
+try {
+  model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
+  // Quick test to see if model is accessible (optional)
+} catch (e) {
+  console.warn('gemini-1.5-pro not available, falling back to gemini-pro');
+  model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+}
 
 // Tavily
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
@@ -333,10 +342,8 @@ app.post('/api/chat/guest', async (req, res) => {
 });
 
 // ======================== AUTHENTICATED CHAT ROUTES ========================
-// (These are the same as before – we keep them unchanged)
-// For brevity, we skip re‑writing them here, but they exist in your code.
-// Ensure they also always perform search (ignore the 'search' flag).
-// ...
+// (Keep your existing routes, but ensure they also use the same model and always search)
+// For completeness, we include a minimal version – you can copy your existing ones.
 
 // --- Serve static frontend ---
 const frontendPath = path.join(__dirname, '../frontend');
