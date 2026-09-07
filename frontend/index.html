@@ -4,10 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AgriDeepAI – Smart Agriculture Assistant</title>
+  <!-- Favicon -->
+  <link rel="icon" href="/logo.png" type="image/png" />
   <link rel="stylesheet" href="style.css" />
   <meta name="description" content="AgriDeepAI – AI assistance for agriculture, livestock, and agribusiness." />
   <meta property="og:title" content="AgriDeepAI" />
   <meta property="og:description" content="Your smart agricultural AI assistant." />
+  <meta property="og:image" content="/logo.png" />
+  <meta property="og:type" content="website" />
 </head>
 <body>
   <div id="app">
@@ -15,7 +19,7 @@
     <aside id="sidebar" class="closed">
       <div class="sidebar-header">
         <div class="logo">
-          <span class="logo-icon">🌾</span>
+          <img src="/logo.png" alt="AgriDeepAI" class="logo-img" />
           <span class="logo-text">AgriDeepAI</span>
         </div>
         <button id="closeSidebarBtn" aria-label="Close sidebar">✕</button>
@@ -41,7 +45,7 @@
 
       <div id="chatContainer">
         <div id="welcomeScreen">
-          <div class="welcome-icon">🌱</div>
+          <img src="/logo.png" alt="AgriDeepAI" class="welcome-logo" />
           <h1>How can I help with agriculture today?</h1>
           <div class="suggestion-chips">
             <button class="chip" data-prompt="Diagnose crop symptoms">🌿 Diagnose crop symptoms</button>
@@ -69,7 +73,7 @@
     <div class="modal-content">
       <span class="modal-close">&times;</span>
       <div id="authModalBody">
-        <!-- dynamically filled by JS -->
+        <!-- dynamically filled -->
       </div>
     </div>
   </div>
