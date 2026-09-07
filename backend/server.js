@@ -10,18 +10,18 @@ const multer = require('multer');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// --- Middleware ---
+// Middleware
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// --- Supabase (server-side client with service key for admin ops) ---
+// Supabase (server-side client with service key)
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-// --- Resend email ---
+// Resend email
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// --- Gemini ---
+// Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
@@ -32,7 +32,7 @@ Guidelines:
 - Be warm, professional, and conversational.
 - For crop/livestock disease questions, ask for relevant details (symptoms, age, weather, etc.) before giving advice.
 - Always include disclaimers when giving advice that affects health, safety, or chemical use.
-- When the user asks about current events, market prices, or recent news, inform them that your knowledge may be outdated.
+- When the user asks about current events, market prices, or recent news, inform them that your knowledge may be outdated (encourage use of search – coming soon).
 - Politely redirect questions not related to agriculture or livestock.
 - Creator: Ornella Mutuyimana, a Rwandan technology enthusiast.
 `;
@@ -52,23 +52,17 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// --- Helper to generate verification code (6 digits) ---
+// --- Helper to generate verification code ---
 function generateCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
-// In-memory store for verification codes (replace with Redis in production)
 const verificationStore = {};
 
 // --- Auth Routes ---
-
-// Signup
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password required' });
-    }
-    // Sign up with Supabase Auth
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -77,14 +71,10 @@ app.post('/api/auth/signup', async (req, res) => {
     if (error) throw error;
     const user = data.user;
     if (!user) throw new Error('Signup failed');
-
-    // Create profile
     await supabase.from('profiles').insert({
       id: user.id,
       full_name: fullName || email.split('@')[0]
     });
-
-    // Generate and send verification code
     const code = generateCode();
     verificationStore[user.id] = { code, expires: Date.now() + 10 * 60 * 1000 };
     await resend.emails.send({
@@ -100,7 +90,6 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Verify email
 app.post('/api/auth/verify', async (req, res) => {
   try {
     const { userId, code } = req.body;
@@ -109,7 +98,6 @@ app.post('/api/auth/verify', async (req, res) => {
     if (!stored || stored.code !== code || Date.now() > stored.expires) {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
-    // Confirm user's email in Supabase
     const { error } = await supabase.auth.admin.updateUserById(userId, { email_confirm: true });
     if (error) throw error;
     delete verificationStore[userId];
@@ -120,7 +108,6 @@ app.post('/api/auth/verify', async (req, res) => {
   }
 });
 
-// Resend verification
 app.post('/api/auth/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
@@ -144,7 +131,6 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   }
 });
 
-// Login (uses Supabase's built-in signInWithPassword)
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -158,13 +144,6 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Logout (client-side only – just clear session)
-app.post('/api/auth/logout', authenticate, async (req, res) => {
-  // Supabase handles session on client, but we can also invalidate
-  res.json({ message: 'Logged out' });
-});
-
-// Get current user
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
     const { data: profile, error } = await supabase
@@ -180,9 +159,17 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
   }
 });
 
+// --- Config endpoint for frontend ---
+app.get('/api/config', (req, res) => {
+  res.json({
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+  });
+});
+
 // --- Chat Routes (protected) ---
 
-// Get all conversations for the user
+// Get all conversations
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -198,7 +185,7 @@ app.get('/api/chat/conversations', authenticate, async (req, res) => {
   }
 });
 
-// Create a new conversation
+// Create conversation
 app.post('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { title } = req.body;
@@ -215,26 +202,22 @@ app.post('/api/chat/conversations', authenticate, async (req, res) => {
   }
 });
 
-// Update conversation (rename, pin, archive)
+// Update conversation
 app.put('/api/chat/conversations/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const { title, pinned, archived } = req.body;
-    // Verify ownership
     const { data: existing, error: checkErr } = await supabase
       .from('conversations')
       .select('id')
       .eq('id', id)
       .eq('user_id', req.user.id)
       .single();
-    if (checkErr || !existing) {
-      return res.status(404).json({ error: 'Conversation not found' });
-    }
+    if (checkErr || !existing) return res.status(404).json({ error: 'Conversation not found' });
     const updates = { updated_at: new Date().toISOString() };
     if (title !== undefined) updates.title = title;
     if (pinned !== undefined) updates.pinned = pinned;
     if (archived !== undefined) updates.archived = archived;
-
     const { data, error } = await supabase
       .from('conversations')
       .update(updates)
@@ -266,11 +249,10 @@ app.delete('/api/chat/conversations/:id', authenticate, async (req, res) => {
   }
 });
 
-// Get messages for a conversation
+// Get messages
 app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
-    // Verify ownership (optional but good)
     const { data: conv, error: convErr } = await supabase
       .from('conversations')
       .select('id')
@@ -278,7 +260,6 @@ app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) =
       .eq('user_id', req.user.id)
       .single();
     if (convErr || !conv) return res.status(404).json({ error: 'Conversation not found' });
-
     const { data, error } = await supabase
       .from('messages')
       .select('*')
@@ -292,13 +273,11 @@ app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) =
   }
 });
 
-// Send message (streaming) – also saves to DB
+// Send message (streaming)
 app.post('/api/chat/conversations/:id/messages', authenticate, async (req, res) => {
   try {
     const { id: conversationId } = req.params;
     const { message } = req.body;
-    const file = req.file; // will be handled later
-
     // Verify ownership
     const { data: conv, error: convErr } = await supabase
       .from('conversations')
@@ -316,7 +295,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, async (req, res) 
       .single();
     if (msgErr) throw msgErr;
 
-    // Fetch conversation history (all messages)
+    // Fetch conversation history
     const { data: history, error: histErr } = await supabase
       .from('messages')
       .select('*')
@@ -324,7 +303,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, async (req, res) 
       .order('created_at', { ascending: true });
     if (histErr) throw histErr;
 
-    // Build AI messages
     const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
 
     // Start Gemini streaming
@@ -335,7 +313,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, async (req, res) 
     });
     const result = await chat.sendMessageStream(aiMessages[aiMessages.length - 1].content);
 
-    // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -350,12 +327,10 @@ app.post('/api/chat/conversations/:id/messages', authenticate, async (req, res) 
     res.write('data: [DONE]\n\n');
     res.end();
 
-    // Save assistant message after streaming
+    // Save assistant message
     await supabase
       .from('messages')
       .insert({ conversation_id: conversationId, role: 'assistant', content: fullResponse });
-
-    // Update conversation updated_at
     await supabase
       .from('conversations')
       .update({ updated_at: new Date().toISOString() })
@@ -363,14 +338,179 @@ app.post('/api/chat/conversations/:id/messages', authenticate, async (req, res) 
 
   } catch (err) {
     console.error(err);
-    // If headers not sent yet, send JSON error
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to send message' });
     } else {
-      // Already streaming, send error event
       res.write(`event: error\ndata: ${JSON.stringify({ error: 'Generation failed' })}\n\n`);
       res.end();
     }
+  }
+});
+
+// --- REGENERATE endpoint ---
+// Expects { messageIndex: number } – the index of the assistant message to regenerate.
+// Deletes all messages from that index onward, then re-generates a new assistant message using the history up to that point.
+app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
+  try {
+    const { id: conversationId } = req.params;
+    const { messageIndex } = req.body;
+    if (messageIndex === undefined || typeof messageIndex !== 'number') {
+      return res.status(400).json({ error: 'messageIndex required (number)' });
+    }
+
+    // Verify ownership
+    const { data: conv, error: convErr } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .eq('user_id', req.user.id)
+      .single();
+    if (convErr || !conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    // Fetch all messages
+    const { data: allMessages, error: fetchErr } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    if (fetchErr) throw fetchErr;
+
+    // The message at messageIndex should be an assistant message. We'll delete from that index onward.
+    // If the index is out of bounds or not assistant, return error.
+    if (messageIndex >= allMessages.length) {
+      return res.status(400).json({ error: 'Index out of bounds' });
+    }
+    if (allMessages[messageIndex].role !== 'assistant') {
+      return res.status(400).json({ error: 'Message at index is not an assistant message' });
+    }
+
+    // Delete all messages from messageIndex onward
+    const idsToDelete = allMessages.slice(messageIndex).map(m => m.id);
+    if (idsToDelete.length > 0) {
+      const { error: delErr } = await supabase
+        .from('messages')
+        .delete()
+        .in('id', idsToDelete);
+      if (delErr) throw delErr;
+    }
+
+    // Now fetch the remaining history (up to messageIndex-1)
+    const { data: remaining, error: remErr } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    if (remErr) throw remErr;
+
+    // Build AI messages
+    const aiMessages = remaining.map(m => ({ role: m.role, content: m.content }));
+
+    // The last message should be a user message (unless the conversation is empty, but we assume it's not)
+    if (aiMessages.length === 0 || aiMessages[aiMessages.length - 1].role !== 'user') {
+      return res.status(400).json({ error: 'No user message to regenerate from' });
+    }
+
+    // Start streaming
+    const chat = model.startChat({
+      history: aiMessages.slice(0, -1).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
+      systemInstruction: SYSTEM_PROMPT,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    });
+    const result = await chat.sendMessageStream(aiMessages[aiMessages.length - 1].content);
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    let fullResponse = '';
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      fullResponse += text;
+      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    }
+    res.write('data: [DONE]\n\n');
+    res.end();
+
+    // Save new assistant message
+    await supabase
+      .from('messages')
+      .insert({ conversation_id: conversationId, role: 'assistant', content: fullResponse });
+    await supabase
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+  } catch (err) {
+    console.error(err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Regeneration failed' });
+    } else {
+      res.write(`event: error\ndata: ${JSON.stringify({ error: 'Regeneration failed' })}\n\n`);
+      res.end();
+    }
+  }
+});
+
+// --- Edit user message ---
+// PUT /api/chat/messages/:id - update content of a user message, and optionally truncate following messages
+// We'll let the client decide: if they edit a user message, they should also delete subsequent messages.
+// We'll implement a simpler route: just update the message content, and we'll rely on the client to delete subsequent messages.
+// But we'll add a flag 'truncate' to delete all messages after this one.
+app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
+  try {
+    const { id: messageId } = req.params;
+    const { content, truncate } = req.body;
+    if (!content) return res.status(400).json({ error: 'Content required' });
+
+    // Get the message to verify ownership through conversation
+    const { data: msg, error: msgErr } = await supabase
+      .from('messages')
+      .select('*, conversation_id, conversations(user_id)')
+      .eq('id', messageId)
+      .single();
+    if (msgErr || !msg) return res.status(404).json({ error: 'Message not found' });
+    if (msg.conversations.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+    if (msg.role !== 'user') {
+      return res.status(400).json({ error: 'Only user messages can be edited' });
+    }
+
+    // Update the message content
+    const { data, error } = await supabase
+      .from('messages')
+      .update({ content })
+      .eq('id', messageId)
+      .select()
+      .single();
+    if (error) throw error;
+
+    // If truncate is true, delete all messages after this one in the conversation
+    if (truncate) {
+      // Fetch all messages after this one (by created_at)
+      const { data: laterMessages, error: laterErr } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', msg.conversation_id)
+        .gt('created_at', msg.created_at)
+        .order('created_at', { ascending: true });
+      if (laterErr) throw laterErr;
+      if (laterMessages.length > 0) {
+        const ids = laterMessages.map(m => m.id);
+        await supabase.from('messages').delete().in('id', ids);
+      }
+      // Update conversation updated_at
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', msg.conversation_id);
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to edit message' });
   }
 });
 
@@ -378,7 +518,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, async (req, res) 
 const frontendPath = path.join(__dirname, '../frontend');
 app.use(express.static(frontendPath));
 
-// Fallback to index.html for SPA
 app.get('*', (req, res) => {
   res.sendFile(path.join(frontendPath, 'index.html'));
 });
