@@ -2,796 +2,96 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const INITIAL_CONVERSATION = [
-  {
-    id: "welcome",
-    role: "assistant",
-    content:
-      "Hello! I'm AfriDeepAI, your agriculture and livestock intelligence assistant. I can help you explore crop production, livestock farming, plant diseases, animal management, soil health, agribusiness, and agriculture in Rwanda and around the world.",
-    pinned: false
-  }
-];
+const WELCOME = { id: "welcome", role: "assistant", content: "Hello! I’m AfriDeepAI, your agriculture and livestock intelligence assistant. Ask me about crops, livestock, soil, plant health, farming techniques, agribusiness, Rwanda, or global agriculture.", createdAt: new Date().toISOString() };
+const GUEST_KEY = "afrideepai_guest_chats_v2";
+const newId = (prefix = "id") => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const clip = (value, length = 58) => value.length > length ? `${value.slice(0, length).trim()}…` : value;
 
-const INITIAL_CHATS = [
-  {
-    id: "chat-1",
-    title: "Welcome to AfriDeepAI",
-    messages: INITIAL_CONVERSATION,
-    createdAt: new Date().toISOString()
-  }
-];
-
-function Icon({ name, size = 20, stroke = 1.8 }) {
-  const icons = {
-    menu: (
-      <>
-        <path d="M4 6h16M4 12h16M4 18h16" />
-      </>
-    ),
-    close: (
-      <>
-        <path d="M6 6l12 12M18 6L6 18" />
-      </>
-    ),
-    plus: (
-      <>
-        <path d="M12 5v14M5 12h14" />
-      </>
-    ),
-    send: (
-      <>
-        <path d="M22 2L11 13" />
-        <path d="M22 2l-7 20-4-9-9-4 20-7z" />
-      </>
-    ),
-    stop: (
-      <>
-        <rect x="6" y="6" width="12" height="12" rx="2" />
-      </>
-    ),
-    copy: (
-      <>
-        <rect x="9" y="9" width="11" height="11" rx="2" />
-        <path d="M5 15V5a2 2 0 0 1 2-2h10" />
-      </>
-    ),
-    edit: (
-      <>
-        <path d="M12 20h9" />
-        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5z" />
-      </>
-    ),
-    trash: (
-      <>
-        <path d="M3 6h18" />
-        <path d="M8 6V4h8v2" />
-        <path d="M19 6l-1 14H6L5 6" />
-        <path d="M10 11v5M14 11v5" />
-      </>
-    ),
-    pin: (
-      <>
-        <path d="M12 17v5" />
-        <path d="M8 3h8l-1 5 3 3v2H6v-2l3-3-1-5z" />
-      </>
-    ),
-    more: (
-      <>
-        <circle cx="5" cy="12" r="1" fill="currentColor" />
-        <circle cx="12" cy="12" r="1" fill="currentColor" />
-        <circle cx="19" cy="12" r="1" fill="currentColor" />
-      </>
-    ),
-    search: (
-      <>
-        <circle cx="11" cy="11" r="6" />
-        <path d="M20 20l-4-4" />
-      </>
-    ),
-    attach: (
-      <>
-        <path d="M21.4 11.6l-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 1 1-2.8-2.8l8.2-8.2" />
-      </>
-    ),
-    regenerate: (
-      <>
-        <path d="M20 11a8 8 0 1 0 2 5" />
-        <path d="M20 4v7h-7" />
-      </>
-    ),
-    share: (
-      <>
-        <circle cx="18" cy="5" r="3" />
-        <circle cx="6" cy="12" r="3" />
-        <circle cx="18" cy="19" r="3" />
-        <path d="M8.6 10.5l6.8-4M8.6 13.5l6.8 4" />
-      </>
-    ),
-    check: (
-      <>
-        <path d="M5 12l4 4L19 6" />
-      </>
-    ),
-    user: (
-      <>
-        <circle cx="12" cy="8" r="4" />
-        <path d="M4 21c.8-4 3.5-6 8-6s7.2 2 8 6" />
-      </>
-    ),
-    arrowDown: (
-      <>
-        <path d="M6 9l6 6 6-6" />
-      </>
-    )
+function Icon({ name, size = 20 }) {
+  const p = {
+    menu:<><path d="M4 6h16M4 12h16M4 18h16"/></>, close:<path d="M6 6l12 12M18 6L6 18"/>, plus:<path d="M12 5v14M5 12h14"/>,
+    send:<><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></>, stop:<rect x="7" y="7" width="10" height="10" rx="2"/>,
+    copy:<><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></>, edit:<><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z"/></>,
+    trash:<><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></>, pin:<><path d="M12 17v5M8 3h8l-1 5 3 3v2H6v-2l3-3-1-5Z"/></>,
+    more:<><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></>,
+    search:<><circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/></>, attach:<path d="m21 11-8.6 8.6a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 1 1-2.8-2.8l8.2-8.2"/>,
+    regenerate:<><path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 4v7h-7"/></>, share:<><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/></>,
+    check:<path d="m5 12 4 4L19 6"/>, user:<><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4 3.5-6 8-6s7.2 2 8 6"/></>, arrow:<path d="m6 9 6 6 6-6"/>, navigator:<><path d="M7 4h10M7 12h10M7 20h10"/><circle cx="4" cy="4" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="20" r="1" fill="currentColor"/></>, login:<path d="M10 17l5-5-5-5M15 12H3M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/>, logout:<path d="m10 17 5-5-5-5M15 12H3M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/>
   };
-
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={stroke}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {icons[name]}
-    </svg>
-  );
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{p[name]}</svg>;
 }
 
+function RichText({ text }) {
+  const blocks = text.replace(/\r/g, "").split(/\n\n+/);
+  return <div className="rich-text">{blocks.map((block, i) => {
+    if (block.startsWith("```")) { const lines = block.split("\n"); return <pre key={i}><code>{lines.slice(1, lines.at(-1)==="```"?-1:undefined).join("\n")}</code></pre>; }
+    if (/^###\s/.test(block)) return <h3 key={i}>{block.replace(/^###\s/, "")}</h3>;
+    if (/^##\s/.test(block)) return <h2 key={i}>{block.replace(/^##\s/, "")}</h2>;
+    if (/^#\s/.test(block)) return <h1 key={i}>{block.replace(/^#\s/, "")}</h1>;
+    if (block.split("\n").every(x => /^[-*]\s+/.test(x))) return <ul key={i}>{block.split("\n").map((x,j)=><li key={j}>{inline(x.replace(/^[-*]\s+/, ""))}</li>)}</ul>;
+    if (block.split("\n").every(x => /^\d+[.)]\s+/.test(x))) return <ol key={i}>{block.split("\n").map((x,j)=><li key={j}>{inline(x.replace(/^\d+[.)]\s+/, ""))}</li>)}</ol>;
+    return <p key={i}>{block.split("\n").map((x,j)=><span key={j}>{inline(x)}{j < block.split("\n").length-1 && <br/>}</span>)}</p>;
+  })}</div>;
+}
+function inline(value) { const parts=value.split(/(`[^`]+`|\*\*[^*]+\*\*)/g); return parts.map((p,i)=>p.startsWith("`")?<code key={i}>{p.slice(1,-1)}</code>:p.startsWith("**")?<strong key={i}>{p.slice(2,-2)}</strong>:p); }
+
 export default function Home() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [navigatorOpen, setNavigatorOpen] = useState(false);
-
-  const [chats, setChats] = useState(INITIAL_CHATS);
-  const [activeChatId, setActiveChatId] = useState("chat-1");
-
-  const [input, setInput] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [copiedId, setCopiedId] = useState(null);
-  const [editingId, setEditingId] = useState(null);
-  const [editingValue, setEditingValue] = useState("");
-
-  const textareaRef = useRef(null);
-  const messagesEndRef = useRef(null);
-
-  const activeChat = useMemo(
-    () => chats.find((chat) => chat.id === activeChatId),
-    [chats, activeChatId]
-  );
-
-  const messages = activeChat?.messages || [];
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(
-        textareaRef.current.scrollHeight,
-        180
-      )}px`;
-    }
-  }, [input]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: isGenerating ? "auto" : "smooth"
-    });
-  }, [messages.length, isGenerating]);
-
-  function updateActiveChat(updateFunction) {
-    setChats((currentChats) =>
-      currentChats.map((chat) => {
-        if (chat.id !== activeChatId) return chat;
-        return updateFunction(chat);
-      })
-    );
-  }
-
-  function createNewChat() {
-    const id = `chat-${Date.now()}`;
-
-    const newChat = {
-      id,
-      title: "New conversation",
-      messages: [],
-      createdAt: new Date().toISOString()
-    };
-
-    setChats((current) => [newChat, ...current]);
-    setActiveChatId(id);
-    setInput("");
-    setMobileSidebarOpen(false);
-  }
-
-  function generateChatTitle(text) {
-    const clean = text.replace(/\s+/g, " ").trim();
-
-    if (!clean) return "New conversation";
-
-    if (clean.length <= 48) return clean;
-
-    return `${clean.slice(0, 48).trim()}…`;
-  }
-
-  async function sendMessage() {
-    const message = input.trim();
-
-    if (!message || isGenerating) return;
-
-    const userMessage = {
-      id: `message-${Date.now()}`,
-      role: "user",
-      content: message,
-      pinned: false
-    };
-
-    updateActiveChat((chat) => ({
-      ...chat,
-      title:
-        chat.title === "New conversation"
-          ? generateChatTitle(message)
-          : chat.title,
-      messages: [...chat.messages, userMessage]
-    }));
-
-    setInput("");
-    setIsGenerating(true);
-
-    window.setTimeout(() => {
-      const assistantMessage = {
-        id: `message-${Date.now() + 1}`,
-        role: "assistant",
-        content: `AfriDeepAI is ready for its real AI intelligence connection. You asked: "${message}"\n\nThe next development phases will connect this interface to the specialized agriculture and livestock intelligence system, conversation memory, current web information, uploaded files, and persistent accounts.`,
-        pinned: false
-      };
-
-      updateActiveChat((chat) => ({
-        ...chat,
-        messages: [...chat.messages, assistantMessage]
-      }));
-
-      setIsGenerating(false);
-    }, 650);
-  }
-
-  function stopGenerating() {
-    setIsGenerating(false);
-  }
-
-  function handleComposerKeyDown(event) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-
-      if (isGenerating) {
-        stopGenerating();
-      } else {
-        sendMessage();
-      }
-    }
-  }
-
-  async function copyMessage(message) {
-    try {
-      await navigator.clipboard.writeText(message.content);
-      setCopiedId(message.id);
-
-      window.setTimeout(() => {
-        setCopiedId(null);
-      }, 1800);
-    } catch {
-      setCopiedId(null);
-    }
-  }
-
-  function toggleMessagePin(messageId) {
-    updateActiveChat((chat) => ({
-      ...chat,
-      messages: chat.messages.map((message) =>
-        message.id === messageId
-          ? { ...message, pinned: !message.pinned }
-          : message
-      )
-    }));
-  }
-
-  function deleteMessage(messageId) {
-    updateActiveChat((chat) => ({
-      ...chat,
-      messages: chat.messages.filter(
-        (message) => message.id !== messageId
-      )
-    }));
-  }
-
-  function startEditing(message) {
-    setEditingId(message.id);
-    setEditingValue(message.content);
-  }
-
-  function cancelEditing() {
-    setEditingId(null);
-    setEditingValue("");
-  }
-
-  function saveEdit() {
-    if (!editingId || !editingValue.trim()) return;
-
-    updateActiveChat((chat) => ({
-      ...chat,
-      messages: chat.messages.map((message) =>
-        message.id === editingId
-          ? {
-              ...message,
-              content: editingValue.trim(),
-              edited: true
-            }
-          : message
-      )
-    }));
-
-    cancelEditing();
-  }
-
-  function scrollToMessage(messageId) {
-    const element = document.getElementById(messageId);
-
-    if (element) {
-      element.scrollIntoView({
-        behavior: "smooth",
-        block: "center"
-      });
-    }
-
-    setNavigatorOpen(false);
-  }
-
-  return (
-    <main className="app-shell">
-      <div
-        className={`mobile-backdrop ${
-          mobileSidebarOpen ? "visible" : ""
-        }`}
-        onClick={() => setMobileSidebarOpen(false)}
-      />
-
-      <aside
-        className={`sidebar ${
-          sidebarOpen ? "" : "collapsed"
-        } ${mobileSidebarOpen ? "mobile-open" : ""}`}
-      >
-        <div className="sidebar-top">
-          <div className="brand">
-            <div className="brand-logo">
-              <img src="/logo.png" alt="AfriDeepAI logo" />
-            </div>
-
-            <span className="brand-name">AfriDeepAI</span>
-          </div>
-
-          <button
-            className="icon-button sidebar-collapse"
-            onClick={() => setSidebarOpen((value) => !value)}
-            aria-label="Toggle sidebar"
-            title="Toggle sidebar"
-          >
-            <Icon name={sidebarOpen ? "close" : "menu"} />
-          </button>
-        </div>
-
-        <div className="sidebar-new-chat">
-          <button className="new-chat-button" onClick={createNewChat}>
-            <Icon name="plus" size={19} />
-            <span>New chat</span>
-          </button>
-        </div>
-
-        <div className="chat-list">
-          <div className="chat-list-heading">Chats</div>
-
-          {chats.map((chat) => (
-            <button
-              key={chat.id}
-              className={`chat-item ${
-                chat.id === activeChatId ? "active" : ""
-              }`}
-              onClick={() => {
-                setActiveChatId(chat.id);
-                setMobileSidebarOpen(false);
-              }}
-              title={chat.title}
-            >
-              <span className="chat-item-title">{chat.title}</span>
-
-              <span className="chat-item-more">
-                <Icon name="more" size={17} />
-              </span>
-            </button>
-          ))}
-        </div>
-
-        <div className="sidebar-account">
-          <button className="account-button">
-            <div className="account-avatar">
-              <Icon name="user" size={19} />
-            </div>
-
-            <div className="account-text">
-              <strong>Guest</strong>
-              <span>Log in or create account</span>
-            </div>
-
-            <Icon name="more" size={18} />
-          </button>
-        </div>
-      </aside>
-
-      <section className="chat-shell">
-        <header className="chat-header">
-          <div className="chat-header-left">
-            <button
-              className="icon-button mobile-menu-button"
-              onClick={() => setMobileSidebarOpen(true)}
-              aria-label="Open sidebar"
-            >
-              <Icon name="menu" />
-            </button>
-
-            <div className="chat-title-area">
-              <h1>{activeChat?.title || "AfriDeepAI"}</h1>
-              <span>AfriDeepAI Agriculture Intelligence</span>
-            </div>
-          </div>
-
-          <div className="chat-header-actions">
-            <button
-              className="icon-button"
-              onClick={() => setNavigatorOpen((value) => !value)}
-              title="Message navigator"
-              aria-label="Open message navigator"
-            >
-              <Icon name="search" size={19} />
-            </button>
-
-            <button
-              className="icon-button"
-              onClick={createNewChat}
-              title="New chat"
-              aria-label="New chat"
-            >
-              <Icon name="plus" size={20} />
-            </button>
-          </div>
-        </header>
-
-        <div className="conversation-layout">
-          <div className="conversation-column">
-            <div className="messages-area">
-              {messages.length === 0 ? (
-                <section className="empty-chat">
-                  <div className="empty-logo">
-                    <img src="/logo.png" alt="" />
-                  </div>
-
-                  <h2>How can AfriDeepAI help you?</h2>
-
-                  <p>
-                    Ask about crops, livestock, farming, soil, agricultural
-                    diseases, agribusiness, Rwanda, or global agriculture.
-                  </p>
-
-                  <div className="suggestion-grid">
-                    <button
-                      onClick={() =>
-                        setInput(
-                          "What are the best practices for growing maize in Rwanda?"
-                        )
-                      }
-                    >
-                      <span>Crop production</span>
-                      <strong>Growing maize in Rwanda</strong>
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        setInput(
-                          "How can I improve dairy cow feeding and milk production?"
-                        )
-                      }
-                    >
-                      <span>Livestock</span>
-                      <strong>Improve dairy production</strong>
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        setInput(
-                          "How can I identify common tomato plant diseases?"
-                        )
-                      }
-                    >
-                      <span>Plant health</span>
-                      <strong>Identify tomato diseases</strong>
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        setInput(
-                          "Give me ideas for starting a small agricultural business."
-                        )
-                      }
-                    >
-                      <span>Agribusiness</span>
-                      <strong>Start an agricultural business</strong>
-                    </button>
-                  </div>
-                </section>
-              ) : (
-                <div className="messages-list">
-                  {messages.map((message) => (
-                    <article
-                      key={message.id}
-                      id={message.id}
-                      className={`message-row ${message.role}`}
-                    >
-                      {message.role === "assistant" && (
-                        <div className="assistant-avatar">
-                          <img src="/logo.png" alt="AfriDeepAI" />
-                        </div>
-                      )}
-
-                      <div className="message-content-wrap">
-                        {message.role === "assistant" && (
-                          <div className="message-author">
-                            AfriDeepAI
-                            {message.pinned && (
-                              <span className="pinned-indicator">
-                                <Icon name="pin" size={14} />
-                                Pinned
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {editingId === message.id ? (
-                          <div className="message-editor">
-                            <textarea
-                              value={editingValue}
-                              onChange={(event) =>
-                                setEditingValue(event.target.value)
-                              }
-                              autoFocus
-                            />
-
-                            <div className="message-editor-actions">
-                              <button
-                                className="secondary-action"
-                                onClick={cancelEditing}
-                              >
-                                Cancel
-                              </button>
-
-                              <button
-                                className="primary-action"
-                                onClick={saveEdit}
-                              >
-                                Save
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="message-content">
-                              {message.content
-                                .split("\n")
-                                .map((line, index) => (
-                                  <p key={index}>{line || "\u00A0"}</p>
-                                ))}
-                            </div>
-
-                            {message.edited && (
-                              <span className="edited-label">Edited</span>
-                            )}
-
-                            <div className="message-actions">
-                              <button
-                                onClick={() => copyMessage(message)}
-                                title="Copy message"
-                                aria-label="Copy message"
-                              >
-                                {copiedId === message.id ? (
-                                  <Icon name="check" size={17} />
-                                ) : (
-                                  <Icon name="copy" size={17} />
-                                )}
-                              </button>
-
-                              {message.role === "user" && (
-                                <button
-                                  onClick={() => startEditing(message)}
-                                  title="Edit message"
-                                  aria-label="Edit message"
-                                >
-                                  <Icon name="edit" size={17} />
-                                </button>
-                              )}
-
-                              <button
-                                onClick={() =>
-                                  toggleMessagePin(message.id)
-                                }
-                                title={
-                                  message.pinned
-                                    ? "Unpin message"
-                                    : "Pin message"
-                                }
-                                aria-label="Pin message"
-                                className={
-                                  message.pinned ? "active-action" : ""
-                                }
-                              >
-                                <Icon name="pin" size={17} />
-                              </button>
-
-                              {message.role === "assistant" && (
-                                <>
-                                  <button
-                                    title="Regenerate response"
-                                    aria-label="Regenerate response"
-                                  >
-                                    <Icon
-                                      name="regenerate"
-                                      size={17}
-                                    />
-                                  </button>
-
-                                  <button
-                                    title="Share response"
-                                    aria-label="Share response"
-                                  >
-                                    <Icon name="share" size={17} />
-                                  </button>
-                                </>
-                              )}
-
-                              <button
-                                onClick={() =>
-                                  deleteMessage(message.id)
-                                }
-                                title="Delete message"
-                                aria-label="Delete message"
-                                className="danger-action"
-                              >
-                                <Icon name="trash" size={17} />
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-
-                  {isGenerating && (
-                    <article className="message-row assistant generating">
-                      <div className="assistant-avatar">
-                        <img src="/logo.png" alt="AfriDeepAI" />
-                      </div>
-
-                      <div className="thinking-indicator">
-                        <span />
-                        <span />
-                        <span />
-                      </div>
-                    </article>
-                  )}
-
-                  <div ref={messagesEndRef} />
-                </div>
-              )}
-            </div>
-
-            <div className="composer-zone">
-              <div className="composer">
-                <button
-                  className="composer-icon"
-                  title="Attach a file"
-                  aria-label="Attach a file"
-                >
-                  <Icon name="attach" size={20} />
-                </button>
-
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
-                  placeholder="Ask AfriDeepAI about agriculture and livestock..."
-                  rows={1}
-                />
-
-                <button
-                  className={`send-button ${
-                    isGenerating ? "stop" : ""
-                  }`}
-                  onClick={
-                    isGenerating ? stopGenerating : sendMessage
-                  }
-                  disabled={!isGenerating && !input.trim()}
-                  aria-label={
-                    isGenerating ? "Stop generating" : "Send message"
-                  }
-                  title={
-                    isGenerating ? "Stop generating" : "Send message"
-                  }
-                >
-                  <Icon
-                    name={isGenerating ? "stop" : "send"}
-                    size={20}
-                  />
-                </button>
-              </div>
-
-              <p className="composer-note">
-                AfriDeepAI specializes in agriculture and livestock.
-                Important decisions should be verified with qualified local
-                professionals where necessary.
-              </p>
-            </div>
-          </div>
-
-          <aside
-            className={`message-navigator ${
-              navigatorOpen ? "open" : ""
-            }`}
-          >
-            <div className="navigator-header">
-              <div>
-                <strong>Message navigator</strong>
-                <span>{messages.length} messages</span>
-              </div>
-
-              <button
-                className="icon-button"
-                onClick={() => setNavigatorOpen(false)}
-                aria-label="Close message navigator"
-              >
-                <Icon name="close" size={18} />
-              </button>
-            </div>
-
-            <div className="navigator-list">
-              {messages.length === 0 ? (
-                <div className="navigator-empty">
-                  Messages in this conversation will appear here.
-                </div>
-              ) : (
-                messages.map((message, index) => (
-                  <button
-                    key={message.id}
-                    className={`navigator-message ${message.role}`}
-                    onClick={() =>
-                      scrollToMessage(message.id)
-                    }
-                  >
-                    <span className="navigator-number">
-                      {index + 1}
-                    </span>
-
-                    <span className="navigator-preview">
-                      {message.content}
-                    </span>
-
-                    <span className="navigator-marker" />
-                  </button>
-                ))
-              )}
-            </div>
-          </aside>
-        </div>
-      </section>
-    </main>
-  );
+  const [sidebarOpen,setSidebarOpen]=useState(true),[mobileSidebar,setMobileSidebar]=useState(false),[navigatorOpen,setNavigatorOpen]=useState(false);
+  const [chats,setChats]=useState([{id:"guest-welcome",title:"Welcome to AfriDeepAI",pinned:false,messages:[WELCOME],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}]);
+  const [activeChatId,setActiveChatId]=useState("guest-welcome"),[input,setInput]=useState(""),[isGenerating,setIsGenerating]=useState(false),[error,setError]=useState("");
+  const [copiedId,setCopiedId]=useState(null),[editing,setEditing]=useState(null),[editingValue,setEditingValue]=useState(""),[chatMenu,setChatMenu]=useState(null),[activeMessageId,setActiveMessageId]=useState(null);
+  const [user,setUser]=useState(null),[settingsOpen,setSettingsOpen]=useState(false),[settingsMode,setSettingsMode]=useState("password"),[settingsStep,setSettingsStep]=useState("form"),[settingsForm,setSettingsForm]=useState({currentPassword:"",newPassword:"",newEmail:"",code:"",deletePassword:""}),[settingsError,setSettingsError]=useState(""),[settingsBusy,setSettingsBusy]=useState(false),[authOpen,setAuthOpen]=useState(false),[authMode,setAuthMode]=useState("signin"),[authStep,setAuthStep]=useState("form"),[authForm,setAuthForm]=useState({name:"",email:"",password:"",code:""}),[authError,setAuthError]=useState(""),[authBusy,setAuthBusy]=useState(false);
+  const textareaRef=useRef(null), abortRef=useRef(null), endRef=useRef(null), fileRef=useRef(null);
+  const activeChat=useMemo(()=>chats.find(c=>c.id===activeChatId)||chats[0],[chats,activeChatId]); const messages=activeChat?.messages||[];
+
+  useEffect(()=>{try{const saved=JSON.parse(localStorage.getItem(GUEST_KEY)||"null");if(Array.isArray(saved)&&saved.length){setChats(saved);setActiveChatId(saved[0].id);}}catch{} fetch("/api/auth/me").then(r=>r.json()).then(async d=>{if(d.user){setUser(d.user);await loadCloudChats();}}).catch(()=>{});},[]);
+  useEffect(()=>{if(!user)localStorage.setItem(GUEST_KEY,JSON.stringify(chats));},[chats,user]);
+  useEffect(()=>{if(textareaRef.current){textareaRef.current.style.height="auto";textareaRef.current.style.height=`${Math.min(textareaRef.current.scrollHeight,180)}px`; }},[input]);
+  useEffect(()=>{endRef.current?.scrollIntoView({behavior:isGenerating?"auto":"smooth"});},[messages.length,isGenerating]);
+  useEffect(()=>{const observer=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio)[0];if(visible)setActiveMessageId(visible.target.id);},{root:null,threshold:[0.25,0.5,0.75]});document.querySelectorAll("[data-message-id]").forEach(el=>observer.observe(el));return()=>observer.disconnect();},[messages.length,activeChatId]);
+
+  async function loadCloudChats(){const r=await fetch("/api/chats");if(!r.ok)return;const d=await r.json();const normalized=(d.chats||[]).map(c=>({...c,createdAt:c.created_at,updatedAt:c.updated_at,messages:(c.messages||[]).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).map(m=>({...m,createdAt:m.created_at,updatedAt:m.updated_at}))}));if(normalized.length){setChats(normalized);setActiveChatId(normalized[0].id);}else createNewChat(true);}
+  function updateChat(id,fn){setChats(all=>all.map(c=>c.id===id?fn(c):c));}
+  async function createNewChat(cloud=false){const shouldCloud=cloud||Boolean(user);if(shouldCloud){const r=await fetch("/api/chats",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:"New conversation"})});if(r.ok){const d=await r.json();const c={...d.chat,messages:[],createdAt:d.chat.created_at,updatedAt:d.chat.updated_at};setChats(x=>[c,...x]);setActiveChatId(c.id);setMobileSidebar(false);return;}}const c={id:newId("chat"),title:"New conversation",pinned:false,messages:[],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};setChats(x=>[c,...x]);setActiveChatId(c.id);setMobileSidebar(false);}
+  async function persistMessage(chatId,message){if(!user)return;const r=await fetch(`/api/chats/${chatId}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role:message.role,content:message.content})});if(r.ok){const d=await r.json();updateChat(chatId,c=>({...c,messages:c.messages.map(m=>m.id===message.id?{...m,id:d.message.id,createdAt:d.message.created_at}:m)}));}}
+  async function persistChatPatch(chatId,patch){if(!user)return;await fetch(`/api/chats/${chatId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});}
+  async function sendMessage(override){const content=(override??input).trim();if(!content||isGenerating||!activeChat)return;setError("");const chatId=activeChat.id;const msg={id:newId("message"),role:"user",content,createdAt:new Date().toISOString()};updateChat(chatId,c=>({...c,title:c.title==="New conversation"?clip(content):c.title,messages:[...c.messages,msg],updatedAt:new Date().toISOString()}));if(user&&activeChat.title==="New conversation")persistChatPatch(chatId,{title:clip(content)});setInput("");setIsGenerating(true);await persistMessage(chatId,msg);try{abortRef.current=new AbortController();const context=[...messages,msg].map(m=>({role:m.role,content:m.content}));const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},signal:abortRef.current.signal,body:JSON.stringify({messages:context})});const d=await r.json();if(!r.ok)throw new Error(d.error||"The AI could not answer right now.");const answer={id:newId("message"),role:"assistant",content:d.message,createdAt:new Date().toISOString()};updateChat(chatId,c=>({...c,messages:[...c.messages,answer],updatedAt:new Date().toISOString()}));await persistMessage(chatId,answer);}catch(e){if(e.name!=="AbortError")setError(e.message||"Generation failed. Please try again.");}finally{setIsGenerating(false);abortRef.current=null;}}
+  function stopGenerating(){abortRef.current?.abort();setIsGenerating(false);}
+  async function copy(text,id){try{await navigator.clipboard.writeText(text);setCopiedId(id);setTimeout(()=>setCopiedId(null),1600);}catch{}}
+  async function toggleMessagePin(id){const target=messages.find(m=>m.id===id);if(!target)return;const pinned=!target.pinned;if(user) await fetch(`/api/chats/${activeChat.id}/messages/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({pinned})});updateChat(activeChat.id,c=>({...c,messages:c.messages.map(m=>m.id===id?{...m,pinned}:m)}));}
+  async function deleteMessage(id){if(user) await fetch(`/api/chats/${activeChat.id}/messages/${id}`,{method:"DELETE"});updateChat(activeChat.id,c=>({...c,messages:c.messages.filter(m=>m.id!==id)}));}
+  async function saveEdit(){if(!editing||!editingValue.trim())return;const content=editingValue.trim();if(user) await fetch(`/api/chats/${activeChat.id}/messages/${editing}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({content})});updateChat(activeChat.id,c=>({...c,messages:c.messages.map(m=>m.id===editing?{...m,content,edited:true}:m)}));setEditing(null);setEditingValue("");}
+  async function renameChat(chat){const title=window.prompt("Rename conversation",chat.title);if(!title?.trim())return;updateChat(chat.id,c=>({...c,title:title.trim()}));await persistChatPatch(chat.id,{title:title.trim()});}
+  async function pinChat(chat){updateChat(chat.id,c=>({...c,pinned:!c.pinned}));await persistChatPatch(chat.id,{pinned:!chat.pinned});}
+  async function removeChat(chat){if(!window.confirm("Delete this conversation?"))return;if(user)await fetch(`/api/chats/${chat.id}`,{method:"DELETE"});setChats(all=>{const next=all.filter(c=>c.id!==chat.id);if(next.length){setActiveChatId(next[0].id);return next;}const fallback={id:newId("chat"),title:"New conversation",pinned:false,messages:[],createdAt:new Date().toISOString()};setActiveChatId(fallback.id);return[fallback];});}
+  async function shareChat(){const text=messages.map(m=>`${m.role==="user"?"You":"AfriDeepAI"}:\n${m.content}`).join("\n\n");if(navigator.share){try{await navigator.share({title:activeChat.title,text});return;}catch{}}copy(text,"share");}
+  function openAuth(mode="signin"){setAuthMode(mode);setAuthStep("form");setAuthError("");setAuthOpen(true);}
+  async function authSubmit(e){e.preventDefault();setAuthBusy(true);setAuthError("");try{let endpoint,body;if(authMode==="signup"){endpoint="/api/auth/signup";body={name:authForm.name,email:authForm.email,password:authForm.password};}else if(authMode==="signin"){endpoint="/api/auth/signin";body={email:authForm.email,password:authForm.password};}else {endpoint="/api/auth/request-password-reset";body={email:authForm.email};}const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);setAuthStep("code");}catch(e){setAuthError(e.message||"Could not continue.");}finally{setAuthBusy(false);}}
+  async function verifyAuth(e){e.preventDefault();setAuthBusy(true);setAuthError("");try{let endpoint,body;if(authMode==="signup"){endpoint="/api/auth/verify-signup";body={name:authForm.name,email:authForm.email,password:authForm.password,code:authForm.code};}else if(authMode==="signin"){endpoint="/api/auth/verify-login";body={email:authForm.email,code:authForm.code};}else {endpoint="/api/auth/reset-password";body={email:authForm.email,password:authForm.password,code:authForm.code};}const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);if(authMode==="forgot"){setAuthMode("signin");setAuthStep("form");setAuthError("Password updated. You can sign in now.");return;}setUser(d.user);setAuthOpen(false);localStorage.removeItem(GUEST_KEY);await loadCloudChats();}catch(e){setAuthError(e.message||"Verification failed.");}finally{setAuthBusy(false);}}
+  async function signOut(){await fetch("/api/auth/signout",{method:"POST"});setUser(null);setSettingsOpen(false);setChats([{id:"guest-welcome",title:"Welcome to AfriDeepAI",pinned:false,messages:[WELCOME],createdAt:new Date().toISOString()}]);setActiveChatId("guest-welcome");}
+  async function submitSettings(e){e.preventDefault();setSettingsBusy(true);setSettingsError("");try{let endpoint,body;if(settingsMode==="password"){endpoint="/api/auth/change-password";body={currentPassword:settingsForm.currentPassword,newPassword:settingsForm.newPassword};}else if(settingsMode==="email"&&settingsStep==="form"){endpoint="/api/auth/request-change-email";body={newEmail:settingsForm.newEmail};}else if(settingsMode==="email"){endpoint="/api/auth/verify-change-email";body={newEmail:settingsForm.newEmail,code:settingsForm.code};}else{endpoint="/api/auth/delete-account";body={password:settingsForm.deletePassword};}const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);if(settingsMode==="email"&&settingsStep==="form"){setSettingsStep("code");return;}if(settingsMode==="email"&&d.user){setUser(d.user);setSettingsOpen(false);return;}if(settingsMode==="delete"){await signOut();return;}setSettingsOpen(false);}catch(e){setSettingsError(e.message||"Could not update account.");}finally{setSettingsBusy(false);}}
+
+  return <main className="app-shell">
+    <div className={`backdrop ${mobileSidebar?"show":""}`} onClick={()=>setMobileSidebar(false)}/>
+    <aside className={`sidebar ${sidebarOpen?"":"collapsed"} ${mobileSidebar?"mobile-open":""}`}>
+      <div className="sidebar-top"><div className="brand"><div className="brand-logo"><img src="/logo.png" alt="AfriDeepAI"/></div><strong>AfriDeepAI</strong></div><button className="icon-button" onClick={()=>setSidebarOpen(v=>!v)} title="Toggle sidebar"><Icon name={sidebarOpen?"close":"menu"}/></button></div>
+      <div className="sidebar-new"><button className="new-chat" onClick={()=>createNewChat()}><Icon name="plus"/><span>New chat</span></button></div>
+      <div className="chat-list"><div className="list-label">Chats</div>{[...chats].sort((a,b)=>Number(b.pinned)-Number(a.pinned)||new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)).map(chat=><div className="chat-item-wrap" key={chat.id}><button className={`chat-item ${chat.id===activeChatId?"active":""}`} onClick={()=>{setActiveChatId(chat.id);setMobileSidebar(false)}}><span>{chat.pinned&&<span className="tiny-pin">●</span>}{chat.title}</span><i onClick={e=>{e.stopPropagation();setChatMenu(chatMenu===chat.id?null:chat.id)}}><Icon name="more" size={17}/></i></button>{chatMenu===chat.id&&<div className="chat-popover"><button onClick={()=>renameChat(chat)}>Rename</button><button onClick={()=>pinChat(chat)}>{chat.pinned?"Unpin":"Pin"}</button><button onClick={()=>shareChat()}>Share</button><button className="danger" onClick={()=>removeChat(chat)}>Delete</button></div>}</div>)}</div>
+      <div className="sidebar-account">{user?<button className="account-button" onClick={()=>{setSettingsOpen(true);setSettingsMode("password");setSettingsStep("form");setSettingsError("")}}><span className="avatar">{user.name?.slice(0,1).toUpperCase()}</span><span className="account-copy"><strong>{user.name}</strong><small>{user.email}</small></span><Icon name="more"/></button>:<button className="account-button" onClick={()=>openAuth("signin")}><span className="avatar"><Icon name="user" size={18}/></span><span className="account-copy"><strong>Guest</strong><small>Log in or create account</small></span><Icon name="more"/></button>}</div>
+    </aside>
+
+    <section className="chat-shell">
+      <header className="chat-header"><div className="header-left"><button className="icon-button mobile-only" onClick={()=>setMobileSidebar(true)}><Icon name="menu"/></button><div><h1>{activeChat?.title||"AfriDeepAI"}</h1><span>AfriDeepAI Agriculture Intelligence</span></div></div><div className="header-actions"><button className={`icon-button ${navigatorOpen?"selected":""}`} onClick={()=>setNavigatorOpen(v=>!v)} title="Message navigator"><Icon name="navigator"/></button><button className="icon-button" onClick={shareChat} title="Share conversation"><Icon name="share"/></button></div></header>
+      <div className="conversation-layout"><div className="conversation-column"><div className="messages-area">
+        {!messages.length?<section className="empty-chat"><div className="empty-logo"><img src="/logo.png" alt=""/></div><h2>How can AfriDeepAI help you?</h2><p>Professional intelligence for agriculture and livestock in Rwanda and around the world.</p><div className="suggestions">{[["Crop production","Best practices for growing maize in Rwanda"],["Livestock","How can I improve dairy cow feeding and milk production?"],["Plant health","How can I identify common tomato diseases?"],["Agribusiness","Give me ideas for starting a small agricultural business."]].map(([a,b])=><button key={a} onClick={()=>setInput(b)}><small>{a}</small><strong>{b}</strong></button>)}</div></section>:<div className="messages-list">{messages.map(message=><article id={`msg-${message.id}`} data-message-id className={`message-row ${message.role}`} key={message.id}>{message.role==="assistant"&&<div className="assistant-avatar"><img src="/logo.png" alt="AfriDeepAI"/></div>}<div className="message-wrap">{message.role==="assistant"&&<div className="message-author">AfriDeepAI</div>}{editing===message.id?<div className="message-editor"><textarea value={editingValue} onChange={e=>setEditingValue(e.target.value)} autoFocus/><div><button onClick={()=>setEditing(null)}>Cancel</button><button className="save" onClick={saveEdit}>Save</button></div></div>:<><div className={`message-bubble ${message.role}`}><RichText text={message.content}/></div>{message.edited&&<small className="edited">Edited</small>}<div className="message-actions"><button onClick={()=>copy(message.content,message.id)} title="Copy">{copiedId===message.id?<Icon name="check" size={16}/>:<Icon name="copy" size={16}/>}</button><button onClick={()=>toggleMessagePin(message.id)} title={message.pinned?"Unpin":"Pin"} className={message.pinned?"pinned-action":""}><Icon name="pin" size={16}/></button>{message.role==="user"&&<button onClick={()=>{setEditing(message.id);setEditingValue(message.content)}} title="Edit"><Icon name="edit" size={16}/></button>}{message.role==="assistant"&&<button onClick={()=>sendMessage(messages.filter(m=>m.id!==message.id).at(-1)?.content)} title="Regenerate"><Icon name="regenerate" size={16}/></button>}<button onClick={()=>deleteMessage(message.id)} className="danger-action" title="Delete"><Icon name="trash" size={16}/></button><button onClick={()=>shareChat()} title="Share"><Icon name="share" size={16}/></button></div></>}</div></article>)}{isGenerating&&<div className="thinking"><div className="assistant-avatar"><img src="/logo.png" alt=""/></div><div><span/><span/><span/></div></div>}<div ref={endRef}/></div>}
+      </div>{error&&<div className="error-banner">{error}<button onClick={()=>setError("")}>×</button></div>}
+      <div className="composer-zone"><div className="composer"><input ref={fileRef} type="file" hidden accept="image/*,.pdf,.txt,.doc,.docx" onChange={e=>{if(e.target.files?.[0])setError(`File selected: ${e.target.files[0].name}. File analysis will be added when the selected AI model supports this file type.`)}}/><button className="composer-icon" onClick={()=>fileRef.current?.click()} title="Attach file"><Icon name="attach"/></button><textarea ref={textareaRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();isGenerating?stopGenerating():sendMessage();}}} placeholder="Ask about agriculture and livestock…" rows="1"/>{isGenerating?<button className="send-button stop" onClick={stopGenerating} title="Stop"><Icon name="stop"/></button>:<button className="send-button" disabled={!input.trim()} onClick={()=>sendMessage()} title="Send"><Icon name="send"/></button>}</div><p>AfriDeepAI can make mistakes. Verify important agricultural decisions with qualified local professionals.</p></div></div>
+      {navigatorOpen&&<aside className="message-navigator"><div className="navigator-head"><div><strong>Message navigator</strong><span>{messages.length} messages</span></div><button className="icon-button" onClick={()=>setNavigatorOpen(false)}><Icon name="close" size={18}/></button></div><div className="navigator-list">{messages.map((m,i)=><button key={m.id} className={`${activeMessageId===`msg-${m.id}`?"current":""} ${m.role}`} onClick={()=>document.getElementById(`msg-${m.id}`)?.scrollIntoView({behavior:"smooth",block:"center"})}><span className="nav-number">{i+1}</span><span className="nav-preview">{m.content.replace(/\s+/g," ")}</span><i/></button>)}</div></aside>}
+      </div>
+    </section>
+
+    {authOpen&&<div className="modal-backdrop" onMouseDown={()=>!authBusy&&setAuthOpen(false)}><section className="auth-modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-close" onClick={()=>setAuthOpen(false)}><Icon name="close"/></button><div className="auth-brand"><img src="/logo.png" alt=""/><div><strong>{authMode==="signup"?"Create account":authMode==="forgot"?"Reset password":"Welcome back"}</strong><span>{authStep==="code"?"Enter the verification code sent to your email.":"Securely access your AfriDeepAI chats."}</span></div></div>{authError&&<div className="auth-error">{authError}</div>}{authStep==="form"?<form onSubmit={authSubmit}>{authMode==="signup"&&<label>Name<input required value={authForm.name} onChange={e=>setAuthForm({...authForm,name:e.target.value})}/></label>}<label>Email<input required type="email" value={authForm.email} onChange={e=>setAuthForm({...authForm,email:e.target.value})}/></label>{authMode!=="forgot"&&<label>Password<input required minLength="8" type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm,password:e.target.value})}/></label>}{authMode==="forgot"&&<label>New password<input required minLength="8" type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm,password:e.target.value})}/></label>}<button className="auth-submit" disabled={authBusy}>{authBusy?"Please wait…":authMode==="signup"?"Create account":authMode==="forgot"?"Send reset code":"Continue"}</button></form>:<form onSubmit={verifyAuth}><label>Verification code<input required inputMode="numeric" maxLength="6" value={authForm.code} onChange={e=>setAuthForm({...authForm,code:e.target.value.replace(/\D/g,"")})}/></label><button className="auth-submit" disabled={authBusy}>{authBusy?"Verifying…":authMode==="forgot"?"Reset password":"Verify and continue"}</button></form>}<div className="auth-links">{authMode!=="forgot"&&<button onClick={()=>{setAuthMode(authMode==="signin"?"signup":"signin");setAuthStep("form");setAuthError("")}}>{authMode==="signin"?"Create an account":"Already have an account? Sign in"}</button>}{authMode==="signin"&&<button onClick={()=>{setAuthMode("forgot");setAuthStep("form");setAuthError("")}}>Forgot password?</button>}</div></section></div>}
+
+    {settingsOpen&&<div className="modal-backdrop" onMouseDown={()=>!settingsBusy&&setSettingsOpen(false)}><section className="auth-modal settings-modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-close" onClick={()=>setSettingsOpen(false)}><Icon name="close"/></button><div className="auth-brand"><img src="/logo.png" alt=""/><div><strong>Account settings</strong><span>Manage your AfriDeepAI account securely.</span></div></div><div className="settings-tabs"><button className={settingsMode==="password"?"active":""} onClick={()=>{setSettingsMode("password");setSettingsStep("form");setSettingsError("")}}>Password</button><button className={settingsMode==="email"?"active":""} onClick={()=>{setSettingsMode("email");setSettingsStep("form");setSettingsError("")}}>Email</button><button className={settingsMode==="delete"?"active danger":""} onClick={()=>{setSettingsMode("delete");setSettingsStep("form");setSettingsError("")}}>Delete</button></div>{settingsError&&<div className="auth-error">{settingsError}</div>}<form onSubmit={submitSettings}>{settingsMode==="password"&&<><label>Current password<input required type="password" value={settingsForm.currentPassword} onChange={e=>setSettingsForm({...settingsForm,currentPassword:e.target.value})}/></label><label>New password<input required minLength="8" type="password" value={settingsForm.newPassword} onChange={e=>setSettingsForm({...settingsForm,newPassword:e.target.value})}/></label></>}{settingsMode==="email"&&settingsStep==="form"&&<label>New email<input required type="email" value={settingsForm.newEmail} onChange={e=>setSettingsForm({...settingsForm,newEmail:e.target.value})}/></label>}{settingsMode==="email"&&settingsStep==="code"&&<label>Verification code<input required inputMode="numeric" maxLength="6" value={settingsForm.code} onChange={e=>setSettingsForm({...settingsForm,code:e.target.value.replace(/\D/g,"")})}/></label>}{settingsMode==="delete"&&<><div className="delete-warning">Deleting your account permanently removes your cloud conversations and messages.</div><label>Confirm your password<input required type="password" value={settingsForm.deletePassword} onChange={e=>setSettingsForm({...settingsForm,deletePassword:e.target.value})}/></label></>}<button className={`auth-submit ${settingsMode==="delete"?"delete-submit":""}`} disabled={settingsBusy}>{settingsBusy?"Please wait…":settingsMode==="password"?"Change password":settingsMode==="email"?(settingsStep==="form"?"Send verification code":"Verify new email"):"Permanently delete account"}</button></form><button className="signout-link" onClick={signOut}><Icon name="logout" size={16}/> Sign out</button></section></div>}
+  </main>;
 }
