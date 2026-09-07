@@ -12,20 +12,6 @@
   <meta property="og:image" content="/logo.png" />
   <meta property="og:type" content="website" />
   <link rel="stylesheet" href="style.css" />
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "WebApplication",
-    "name": "AgriDeepAI",
-    "url": "https://agrideepai.agentdomains.co/",
-    "description": "AgriDeepAI – free AI assistant for agriculture and livestock.",
-    "applicationCategory": "AI Assistant",
-    "operatingSystem": "All",
-    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-    "author": { "@type": "Person", "name": "Ornella Mutuyimana" },
-    "creator": { "@type": "Person", "name": "Ornella Mutuyimana" }
-  }
-  </script>
 </head>
 <body>
   <div id="app">
@@ -36,9 +22,14 @@
           <img src="/logo.png" alt="AgriDeepAI" class="logo-img" />
           <span class="logo-text">AgriDeepAI</span>
         </div>
-        <button id="closeSidebarBtn" aria-label="Close sidebar">✕</button>
+        <button id="closeSidebarBtn" aria-label="Close sidebar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
-      <button id="newChatBtn" class="new-chat-btn">➕ New Chat</button>
+      <button id="newChatBtn" class="new-chat-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Chat
+      </button>
       <div id="chatList"></div>
       <div class="sidebar-footer">
         <button id="authSidebarBtn">Sign In</button>
@@ -48,7 +39,9 @@
     <!-- Main Chat Area -->
     <main id="mainContent">
       <header id="topBar">
-        <button id="openSidebarBtn" aria-label="Open sidebar">☰</button>
+        <button id="openSidebarBtn" aria-label="Open sidebar">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
         <span id="chatTitle">AgriDeepAI</span>
       </header>
 
@@ -56,6 +49,7 @@
         <div id="welcomeScreen">
           <img src="/logo.png" alt="AgriDeepAI" class="welcome-logo" />
           <h1>How can I help with agriculture today?</h1>
+          <p style="color:#888;margin-top:-0.5rem;">Ask about crops, livestock, soil, and more.</p>
           <div class="suggestion-chips">
             <button class="chip" data-prompt="Diagnose crop symptoms">🌿 Diagnose crop symptoms</button>
             <button class="chip" data-prompt="Ask about livestock">🐄 Ask about livestock</button>
@@ -85,7 +79,7 @@
   <!-- Auth Modal -->
   <div id="authModal" class="modal hidden">
     <div class="modal-content">
-      <span class="modal-close">&times;</span>
+      <button class="modal-close">&times;</button>
       <div id="authModalBody"></div>
     </div>
   </div>
