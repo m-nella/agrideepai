@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AgriDeepAI – Smart Agriculture Assistant</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- Open Graph / SEO meta -->
   <meta name="description" content="AgriDeepAI – AI assistance for agriculture, livestock, and agribusiness." />
   <meta property="og:title" content="AgriDeepAI" />
   <meta property="og:description" content="Your smart agricultural AI assistant." />
@@ -13,18 +12,34 @@
 </head>
 <body>
   <div id="app">
-    <header>
-      <div class="logo">
-        <span class="logo-icon">🌾</span>
-        <span class="logo-text">AgriDeepAI</span>
+    <!-- Sidebar -->
+    <aside id="sidebar" class="closed">
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="logo-icon">🌾</span>
+          <span class="logo-text">AgriDeepAI</span>
+        </div>
+        <button id="closeSidebarBtn" aria-label="Close sidebar">✕</button>
       </div>
-      <div class="header-actions">
-        <button id="themeToggle" aria-label="Toggle dark mode">🌓</button>
-        <button id="authBtn">Sign In</button>
+      <button id="newChatBtn" class="new-chat-btn">➕ New Chat</button>
+      <div id="chatList"></div>
+      <div class="sidebar-footer">
+        <button id="authSidebarBtn">Sign In</button>
+        <button id="themeSidebarBtn">🌓</button>
       </div>
-    </header>
+    </aside>
 
-    <main>
+    <!-- Main -->
+    <main id="mainContent">
+      <header id="topBar">
+        <button id="openSidebarBtn" aria-label="Open sidebar">☰</button>
+        <span id="chatTitle">AgriDeepAI</span>
+        <div class="top-actions">
+          <button id="themeTopBtn">🌓</button>
+          <button id="authTopBtn">Sign In</button>
+        </div>
+      </header>
+
       <div id="chatContainer">
         <div id="welcomeScreen">
           <div class="welcome-icon">🌱</div>
@@ -38,18 +53,17 @@
         </div>
         <div id="messageList"></div>
       </div>
+
+      <footer id="composerArea">
+        <div id="composer">
+          <button id="attachBtn" aria-label="Attach file">📎</button>
+          <textarea id="messageInput" rows="1" placeholder="Ask about agriculture or livestock..."></textarea>
+          <button id="sendBtn" aria-label="Send">➤</button>
+        </div>
+        <div class="footer-note">AgriDeepAI – AI for Agriculture &amp; Livestock</div>
+      </footer>
     </main>
-
-    <footer>
-      <div id="composer">
-        <button id="attachBtn" aria-label="Attach file">📎</button>
-        <textarea id="messageInput" rows="1" placeholder="Ask about agriculture or livestock..."></textarea>
-        <button id="sendBtn" aria-label="Send">➤</button>
-      </div>
-      <div class="footer-note">AgriDeepAI – AI for Agriculture &amp; Livestock</div>
-    </footer>
   </div>
-
   <script src="main.js" type="module"></script>
 </body>
 </html>
