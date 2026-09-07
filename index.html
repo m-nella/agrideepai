@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>AgriDeepAI — Professional AI Assistant</title>
+  <title>AgriDeepAI — AI Assistant for Agriculture</title>
   <link rel="icon" href="logo.png" type="image/png" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
@@ -11,7 +11,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <style>
     /* ==========================================================
-       MODERN DESIGN TOKENS
+       MODERN DESIGN TOKENS (dark theme only)
        ========================================================== */
     :root {
       --bg-app: #0c0c0d;
@@ -20,8 +20,6 @@
       --bg-hover: #262628;
       --bg-active: #2c2c2e;
       --bg-input: #1a1a1c;
-      --bg-modal: #161618;
-      --bg-toast: #222224;
       --text-primary: #ececf0;
       --text-secondary: #9a9aa2;
       --text-muted: #5c5c62;
@@ -29,9 +27,7 @@
       --border-strong: #3a3a3e;
       --accent: #2b7d4b;
       --accent-hover: #3a9a5e;
-      --accent-ghost: rgba(43,125,75,0.12);
       --accent-glow: rgba(43,125,75,0.18);
-      --accent-dim: rgba(43,125,75,0.25);
       --success: #34c759;
       --warning: #f5a623;
       --error: #ff3b30;
@@ -40,121 +36,66 @@
       --radius-lg: 18px;
       --radius-full: 9999px;
       --sidebar-width: 260px;
-      --sidebar-collapsed: 56px;
       --header-height: 52px;
       --composer-max-height: 180px;
       --chat-max-width: 820px;
       --max-content-width: 880px;
       --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
       --font-mono: 'SF Mono', 'Fira Code', monospace;
-      --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
       --shadow-sm: 0 2px 8px rgba(0,0,0,0.4);
       --shadow-md: 0 8px 28px rgba(0,0,0,0.6);
       --shadow-lg: 0 24px 64px rgba(0,0,0,0.8);
       --transition-fast: 0.12s cubic-bezier(0.25,0.46,0.45,0.94);
       --transition-med: 0.24s cubic-bezier(0.22,1,0.36,1);
-      --ease-spring: cubic-bezier(0.34,1.56,0.64,1);
       --msg-user-bg: rgba(43,125,75,0.20);
       --msg-bot-bg: #1e1e20;
-    }
-    [data-theme="light"] {
-      --bg-app: #f2f2f4;
-      --bg-surface: #ffffff;
-      --bg-elevated: #f0f0f2;
-      --bg-hover: #e8e8ea;
-      --bg-active: #e0e0e2;
-      --bg-input: #eeeeef;
-      --bg-modal: #f8f8fa;
-      --bg-toast: #e8e8ea;
-      --text-primary: #18181a;
-      --text-secondary: #4a4a52;
-      --text-muted: #7a7a82;
-      --border-subtle: #d8d8dc;
-      --border-strong: #c8c8cc;
-      --accent: #2b7d4b;
-      --accent-hover: #3a9a5e;
-      --accent-ghost: rgba(43,125,75,0.10);
-      --accent-glow: rgba(43,125,75,0.14);
-      --accent-dim: rgba(43,125,75,0.20);
-      --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);
-      --shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
-      --shadow-md: 0 8px 28px rgba(0,0,0,0.08);
-      --shadow-lg: 0 24px 64px rgba(0,0,0,0.10);
-      --msg-user-bg: rgba(43,125,75,0.15);
-      --msg-bot-bg: #f0f0f2;
     }
     *{margin:0;padding:0;box-sizing:border-box}
     html,body{height:100%;font-family:var(--font-sans);background:var(--bg-app);color:var(--text-primary);overflow:hidden}
     .app{display:flex;height:100vh;width:100%;background:var(--bg-app);position:relative;overflow:hidden}
 
     /* ===== SIDEBAR ===== */
-    .sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-surface);border-right:1px solid var(--border-subtle);display:flex;flex-direction:column;flex-shrink:0;transition:width var(--transition-med),transform var(--transition-med);overflow:hidden;position:relative;z-index:200}
-    .sidebar.is-collapsed{width:var(--sidebar-collapsed)}
-    .sidebar.is-collapsed .brand-text,.sidebar.is-collapsed .new-chat-label,.sidebar.is-collapsed .chat-item .title,.sidebar.is-collapsed .chat-item .chat-actions,.sidebar.is-collapsed .chat-history .empty-history,.sidebar.is-collapsed .account-info,.sidebar.is-collapsed .sidebar-header .brand .brand-text{display:none}
-    .sidebar.is-collapsed .sidebar-header{padding:8px 4px;border-bottom:none;justify-content:center;align-items:center;gap:4px;min-height:auto;flex-direction:column}
-    .sidebar.is-collapsed .sidebar-header .brand{padding:0;margin:0;flex-shrink:0;flex-direction:column;align-items:center;gap:0}
-    .sidebar.is-collapsed .sidebar-header .brand img{width:30px;height:30px;border-radius:8px;display:block}
-    .sidebar.is-collapsed .sidebar-header .sidebar-toggle{background:var(--accent-dim);border:1px solid var(--accent);border-radius:50%;box-shadow:0 0 12px var(--accent-glow);width:32px;height:32px;padding:4px;margin:2px 0 0;display:flex;align-items:center;justify-content:center;transition:var(--transition-fast)}
-    .sidebar.is-collapsed .sidebar-header .sidebar-toggle:hover{background:var(--accent);border-color:var(--accent-hover)}
-    .sidebar.is-collapsed .sidebar-header .sidebar-toggle svg{width:16px;height:16px;stroke:var(--text-primary)}
-    .sidebar.is-collapsed .new-chat-btn{justify-content:center;padding:4px;width:34px;min-height:34px;margin:4px auto 0;border-radius:50%;border:none;background:transparent}
+    .sidebar{width:var(--sidebar-width);height:100vh;background:var(--bg-surface);border-right:1px solid var(--border-subtle);display:flex;flex-direction:column;flex-shrink:0;transition:width var(--transition-med);overflow:hidden;position:relative;z-index:200}
+    .sidebar.is-collapsed{width:56px}
+    .sidebar.is-collapsed .brand-text,.sidebar.is-collapsed .new-chat-label,.sidebar.is-collapsed .chat-item .title,.sidebar.is-collapsed .chat-item .chat-actions,.sidebar.is-collapsed .chat-history .empty-history{display:none}
+    .sidebar.is-collapsed .sidebar-header{padding:8px 4px;border-bottom:none;justify-content:center}
+    .sidebar.is-collapsed .sidebar-header .brand img{width:30px;height:30px}
+    .sidebar.is-collapsed .sidebar-header .sidebar-toggle{background:var(--accent-dim);border:1px solid var(--accent);border-radius:50%;width:32px;height:32px;padding:4px;margin:2px 0 0}
+    .sidebar.is-collapsed .new-chat-btn{justify-content:center;padding:4px;width:34px;min-height:34px;border-radius:50%;border:none;background:transparent;margin:4px auto 0}
     .sidebar.is-collapsed .new-chat-btn:hover{background:var(--bg-hover)}
-    .sidebar.is-collapsed .new-chat-btn svg{width:18px;height:18px}
     .sidebar.is-collapsed .chat-history{flex:0;overflow:hidden;padding:0;height:0}
-    .sidebar.is-collapsed .sidebar-footer{padding:6px 4px 10px;border-top:none;margin-top:auto}
-    .sidebar.is-collapsed .auth-btn{justify-content:center;padding:4px;min-height:30px;border-radius:50%;width:34px;margin:0 auto}
-    .sidebar.is-collapsed .auth-btn .avatar{width:28px;height:28px;font-size:11px;margin:0}
-    .sidebar.is-collapsed .account-info,.sidebar.is-collapsed .account-settings-icon{display:none}
-    .sidebar-header{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);flex-shrink:0;min-height:56px}
+    .sidebar-header{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);min-height:56px}
     .brand{display:flex;align-items:center;gap:10px;overflow:hidden;white-space:nowrap}
     .brand img{width:28px;height:28px;border-radius:8px;flex-shrink:0;object-fit:cover}
     .brand-text{font-size:17px;font-weight:700;color:var(--text-primary)}
     .brand-text .accent{color:var(--accent)}
-    .sidebar-toggle{background:var(--accent-dim);border:1px solid var(--accent);border-radius:50%;box-shadow:0 0 16px var(--accent-glow);width:34px;height:34px;padding:6px;cursor:pointer;transition:var(--transition-fast);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-primary)}
-    .sidebar-toggle:hover{background:var(--accent);border-color:var(--accent-hover);box-shadow:0 0 24px var(--accent-glow)}
+    .sidebar-toggle{background:var(--accent-dim);border:1px solid var(--accent);border-radius:50%;box-shadow:0 0 12px var(--accent-glow);width:34px;height:34px;padding:6px;cursor:pointer;transition:var(--transition-fast);display:flex;align-items:center;justify-content:center;color:var(--text-primary)}
+    .sidebar-toggle:hover{background:var(--accent);border-color:var(--accent-hover)}
     .sidebar-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-    .new-chat-btn{margin:10px 16px;padding:10px 16px;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);font-size:13px;font-weight:600;cursor:pointer;transition:var(--transition-fast);display:flex;align-items:center;gap:8px;justify-content:center;flex-shrink:0;min-height:40px}
+    .new-chat-btn{margin:10px 16px;padding:10px 16px;background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:var(--radius-md);font-size:13px;font-weight:600;cursor:pointer;transition:var(--transition-fast);display:flex;align-items:center;gap:8px;justify-content:center;min-height:40px}
     .new-chat-btn:hover{background:var(--bg-hover);border-color:var(--border-strong)}
-    .new-chat-btn:active{transform:scale(0.97)}
-    .new-chat-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
-    .new-chat-label{white-space:nowrap}
+    .new-chat-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
     .chat-history{flex:1;overflow-y:auto;padding:6px 12px}
     .chat-history::-webkit-scrollbar{width:3px}
     .chat-history::-webkit-scrollbar-track{background:transparent}
     .chat-history::-webkit-scrollbar-thumb{background:var(--bg-hover);border-radius:4px}
-    .chat-item{padding:8px 12px;border-radius:var(--radius-md);cursor:pointer;transition:var(--transition-fast);display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;min-height:36px;gap:6px;background:var(--bg-surface)}
+    .chat-item{padding:8px 12px;border-radius:var(--radius-md);cursor:pointer;transition:var(--transition-fast);display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;min-height:36px;background:var(--bg-surface)}
     .chat-item:hover{background:var(--bg-hover)}
     .chat-item.is-active{background:var(--bg-active)}
     .chat-item .title{font-size:13px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
     .chat-item.is-active .title{color:var(--text-primary)}
     .chat-item .chat-actions{display:flex;gap:2px;flex-shrink:0}
-    .chat-item .chat-actions button{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 5px;border-radius:var(--radius-sm);transition:var(--transition-fast);line-height:1;display:flex;align-items:center;justify-content:center}
+    .chat-item .chat-actions button{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 5px;border-radius:var(--radius-sm);transition:var(--transition-fast)}
     .chat-item .chat-actions button:hover{background:var(--bg-hover);color:var(--text-primary)}
     .chat-item .chat-actions button.is-pinned{color:var(--warning)}
     .chat-item .chat-actions button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
     .empty-history{color:var(--text-muted);font-size:13px;text-align:center;padding:32px 12px;line-height:1.6}
-    .sidebar-footer{padding:10px 12px 12px;border-top:1px solid var(--border-subtle);flex-shrink:0;position:relative;overflow:hidden}
-    .auth-btn{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius-md);cursor:pointer;transition:var(--transition-fast);width:100%;background:none;border:none;color:var(--text-primary);font-size:13px;font-family:inherit;text-align:left;min-height:40px}
-    .auth-btn:hover{background:var(--bg-hover)}
-    .auth-btn .avatar{width:28px;height:28px;border-radius:50%;background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--text-secondary);flex-shrink:0;overflow:hidden}
-    .auth-btn .account-info{flex:1;min-width:0}
-    .auth-btn .account-info .name{font-size:13px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .auth-btn .account-info .sub{font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .auth-btn .account-settings-icon{color:var(--text-muted);font-size:16px;transition:var(--transition-fast);flex-shrink:0;background:none;border:none;cursor:pointer;padding:6px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center}
-    .auth-btn .account-settings-icon:hover{background:var(--bg-hover);color:var(--text-primary)}
-    .auth-btn .account-settings-icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-    .account-dropdown{position:absolute;bottom:60px;left:10px;background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);padding:6px 0;min-width:200px;z-index:500;display:none;flex-direction:column}
-    .account-dropdown.is-open{display:flex}
-    .account-dropdown .dropdown-item{padding:10px 16px;font-size:13px;color:var(--text-secondary);cursor:pointer;transition:var(--transition-fast);display:flex;align-items:center;gap:10px;border:none;background:none;width:100%;text-align:left;font-family:inherit;border-radius:0}
-    .account-dropdown .dropdown-item:hover{background:var(--bg-hover);color:var(--text-primary)}
-    .account-dropdown .dropdown-item .icon{font-size:16px;width:20px;text-align:center}
-    .account-dropdown .dropdown-divider{height:1px;background:var(--border-subtle);margin:4px 12px}
 
     /* ===== MAIN CHAT ===== */
     .main-chat{flex:1;display:flex;flex-direction:column;background:var(--bg-app);height:100vh;min-width:0;position:relative}
-    .chat-header{height:var(--header-height);padding:0 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border-subtle);flex-shrink:0;background:var(--bg-app);min-height:var(--header-height)}
-    .chat-header .sidebar-open-btn{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:50%;box-shadow:var(--shadow-sm);color:var(--text-secondary);cursor:pointer;padding:4px 6px;width:34px;height:34px;display:none;align-items:center;justify-content:center;transition:var(--transition-fast);flex-shrink:0}
-    .chat-header .sidebar-open-btn:hover{background:var(--bg-hover);color:var(--text-primary);box-shadow:var(--shadow-md)}
+    .chat-header{height:var(--header-height);padding:0 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border-subtle);background:var(--bg-app);min-height:var(--header-height)}
+    .chat-header .sidebar-open-btn{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:50%;box-shadow:var(--shadow-sm);color:var(--text-secondary);cursor:pointer;padding:4px 6px;width:34px;height:34px;display:none;align-items:center;justify-content:center;transition:var(--transition-fast)}
+    .chat-header .sidebar-open-btn:hover{background:var(--bg-hover);color:var(--text-primary)}
     .chat-header .sidebar-open-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
     .chat-header .chat-title{font-size:14px;font-weight:500;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .messages-container{flex:1;overflow-y:auto;padding:20px 24px 80px;display:flex;flex-direction:column;scroll-behavior:smooth;position:relative}
@@ -178,14 +119,14 @@
     .message-wrapper.is-bot .message-bubble{background:var(--msg-bot-bg);color:var(--text-primary);border-bottom-left-radius:4px}
     .message-bubble p{margin:0 0 0.8em}
     .message-bubble p:last-child{margin-bottom:0}
-    .message-bubble h1{font-size:22px;font-weight:700;margin:1em 0 0.5em;color:var(--text-primary)}
-    .message-bubble h2{font-size:19px;font-weight:650;margin:1em 0 0.5em;color:var(--text-primary)}
-    .message-bubble h3{font-size:16px;font-weight:600;margin:0.8em 0 0.4em;color:var(--text-primary)}
-    .message-bubble strong{font-weight:650;color:var(--text-primary)}
+    .message-bubble h1{font-size:22px;font-weight:700;margin:1em 0 0.5em}
+    .message-bubble h2{font-size:19px;font-weight:650;margin:1em 0 0.5em}
+    .message-bubble h3{font-size:16px;font-weight:600;margin:0.8em 0 0.4em}
+    .message-bubble strong{font-weight:650}
     .message-bubble ul,.message-bubble ol{padding-left:1.5em;margin:0.5em 0 0.8em}
     .message-bubble li{margin-bottom:0.25em}
     .message-bubble blockquote{border-left:3px solid var(--accent);padding-left:16px;margin:0 0 0.8em;color:var(--text-secondary);font-style:italic}
-    .message-bubble a{color:var(--accent-hover);text-decoration:underline;text-underline-offset:2px}
+    .message-bubble a{color:var(--accent-hover);text-decoration:underline}
     .message-bubble a:hover{color:var(--accent)}
     .message-bubble table{border-collapse:collapse;width:100%;margin:0 0 0.8em;display:block;overflow-x:auto}
     .message-bubble table th,.message-bubble table td{border:1px solid var(--border-subtle);padding:6px 10px;text-align:left}
@@ -194,11 +135,11 @@
     .message-bubble code:not(.hljs){background:var(--bg-elevated);padding:2px 6px;border-radius:4px;font-size:0.9em;font-family:var(--font-mono)}
     .message-bubble .hljs{background:var(--bg-elevated)!important;border-radius:var(--radius-md);padding:14px;font-size:13px;line-height:1.6;overflow-x:auto;white-space:pre;margin:0.5em 0}
     .response-code-block{background:var(--bg-elevated);border-radius:var(--radius-md);margin:0.5em 0 0.8em;overflow:hidden;border:1px solid var(--border-subtle)}
-    .response-code-header{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--bg-surface);border-bottom:1px solid var(--border-subtle);font-size:12px;color:var(--text-muted)}
+    .response-code-header{display:flex;justify-content:space-between;padding:6px 12px;background:var(--bg-surface);border-bottom:1px solid var(--border-subtle);font-size:12px;color:var(--text-muted)}
     .response-code-header .language-label{text-transform:uppercase;letter-spacing:0.5px;font-weight:500}
-    .response-code-copy{background:none;border:none;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:4px;font-size:12px;font-family:inherit;padding:2px 8px;border-radius:var(--radius-sm);transition:var(--transition-fast)}
+    .response-code-copy{background:none;border:none;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:4px;font-size:12px;font-family:inherit;padding:2px 8px;border-radius:var(--radius-sm)}
     .response-code-copy:hover{background:var(--bg-hover);color:var(--text-primary)}
-    .response-code-copy svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .response-code-copy svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2}
     .response-code-copy.copied{color:var(--success)}
     .response-code-block pre{margin:0;padding:10px 14px;overflow-x:auto}
     .response-code-block pre code{font-family:var(--font-mono);font-size:13px;line-height:1.6;white-space:pre}
@@ -209,13 +150,13 @@
     .message-actions{display:flex;gap:2px;margin-top:4px;flex-wrap:wrap}
     .message-wrapper.is-user .message-actions{justify-content:flex-end}
     .message-wrapper.is-bot .message-actions{justify-content:flex-start}
-    .message-actions button{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px 7px;border-radius:var(--radius-sm);transition:var(--transition-fast);font-family:inherit;line-height:1;display:flex;align-items:center;justify-content:center}
+    .message-actions button{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px 7px;border-radius:var(--radius-sm);transition:var(--transition-fast);font-family:inherit}
     .message-actions button:hover{background:var(--bg-hover);color:var(--text-primary)}
     .message-actions button.is-liked{color:var(--accent)}
     .message-actions button.is-disliked{color:var(--error)}
     .message-actions button svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
     .edit-container{width:100%;margin-top:6px}
-    .edit-input{width:100%;padding:10px 14px;background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:var(--radius-md);color:var(--text-primary);font-size:14px;font-family:inherit;outline:none;resize:vertical;min-height:44px;transition:var(--transition-fast);line-height:1.5}
+    .edit-input{width:100%;padding:10px 14px;background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:var(--radius-md);color:var(--text-primary);font-size:14px;font-family:inherit;outline:none;resize:vertical;min-height:44px;transition:var(--transition-fast)}
     .edit-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
     .edit-actions{display:flex;gap:8px;margin-top:8px}
     .edit-actions button{padding:6px 16px;border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:13px;font-weight:500;font-family:inherit;transition:var(--transition-fast)}
@@ -227,13 +168,13 @@
     .scroll-bottom-btn:hover{background:var(--bg-hover);color:var(--text-primary)}
     .scroll-bottom-btn.is-visible{display:flex}
     .scroll-bottom-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
-    .composer-wrapper{position:sticky;bottom:0;left:0;right:0;padding:10px 24px 6px;background:linear-gradient(to top,var(--bg-app) 50%,transparent);flex-shrink:0}
+    .composer-wrapper{position:sticky;bottom:0;padding:10px 24px 6px;background:linear-gradient(to top,var(--bg-app) 50%,transparent);flex-shrink:0}
     .composer{display:flex;flex-direction:column;background:var(--bg-surface);border:2px solid var(--accent);border-radius:var(--radius-lg);padding:6px 8px 6px 12px;transition:var(--transition-fast);max-width:var(--chat-max-width);margin:0 auto;position:relative;box-shadow:0 0 0 0 var(--accent-glow)}
     .composer:focus-within{border-color:var(--accent-hover);box-shadow:0 0 0 4px var(--accent-glow)}
     .composer .input-row{display:flex;align-items:flex-end;gap:6px;width:100%}
-    .composer textarea{flex:1;background:transparent;border:none;outline:none;color:var(--text-primary);font-size:14.5px;font-family:inherit;padding:8px 0;resize:none;min-height:24px;max-height:var(--composer-max-height);line-height:1.5;order:2}
+    .composer textarea{flex:1;background:transparent;border:none;outline:none;color:var(--text-primary);font-size:14.5px;font-family:inherit;padding:8px 0;resize:none;min-height:24px;max-height:var(--composer-max-height);line-height:1.5}
     .composer textarea::placeholder{color:var(--text-muted)}
-    .composer .composer-actions{display:flex;align-items:center;gap:2px;flex-shrink:0;order:3}
+    .composer .composer-actions{display:flex;align-items:center;gap:2px;flex-shrink:0}
     .composer .composer-actions .send-stop-btn{background:var(--accent);color:#fff;border-radius:50%;width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;transition:all var(--transition-fast);border:none;cursor:pointer;opacity:0.35;position:relative}
     .composer .composer-actions .send-stop-btn.is-active{opacity:1}
     .composer .composer-actions .send-stop-btn:hover:not(:disabled){background:var(--accent-hover)}
@@ -245,54 +186,43 @@
     .composer .composer-actions .send-stop-btn.is-generating .stop-icon{display:block}
     .composer .composer-actions .send-stop-btn.is-generating{opacity:1;background:var(--accent)}
     .composer .composer-actions .send-stop-btn.is-generating:hover{background:var(--accent-hover)}
-    .composer .attach-btn{order:1;flex-shrink:0;background:none;border:none;color:var(--text-muted);cursor:pointer;padding:5px;border-radius:50%;transition:var(--transition-fast);display:flex;align-items:center;justify-content:center;width:34px;height:34px}
+    .composer .attach-btn{flex-shrink:0;background:none;border:none;color:var(--text-muted);cursor:pointer;padding:5px;border-radius:50%;transition:var(--transition-fast);display:flex;align-items:center;justify-content:center;width:34px;height:34px}
     .composer .attach-btn:hover{background:var(--bg-hover);color:var(--text-primary)}
     .composer .attach-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
     .file-input{display:none}
-    .attachment-previews{display:flex;flex-wrap:wrap;gap:6px;padding:4px 0 8px;order:0;width:100%}
-    .attachment-preview{display:flex;align-items:center;gap:6px;background:var(--bg-elevated);padding:4px 8px 4px 6px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);font-size:12px;color:var(--text-secondary);animation:fadeIn 0.2s ease}
+    .attachment-previews{display:flex;flex-wrap:wrap;gap:6px;padding:4px 0 8px;width:100%}
+    .attachment-preview{display:flex;align-items:center;gap:6px;background:var(--bg-elevated);padding:4px 8px 4px 6px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);font-size:12px;color:var(--text-secondary)}
     .attachment-preview img{width:28px;height:28px;border-radius:4px;object-fit:cover}
     .attachment-preview .file-icon{font-size:18px}
     .attachment-preview .file-name{max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .attachment-preview .remove-attach{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 5px;border-radius:var(--radius-sm);font-size:14px;line-height:1;transition:var(--transition-fast)}
+    .attachment-preview .remove-attach{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 5px;border-radius:var(--radius-sm);font-size:14px;line-height:1}
     .attachment-preview .remove-attach:hover{background:var(--bg-hover);color:var(--text-primary)}
-    .chat-footer{padding:6px 24px 16px;text-align:center;font-size:12px;color:var(--text-muted);flex-shrink:0;max-width:var(--chat-max-width);margin:0 auto;width:100%;line-height:1.4}
+    .chat-footer{padding:6px 24px 16px;text-align:center;font-size:12px;color:var(--text-muted);max-width:var(--chat-max-width);margin:0 auto;width:100%;line-height:1.4}
 
-    /* ===== MODALS ===== */
+    /* ===== MODALS (Share & Confirm only) ===== */
     .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:999;align-items:center;justify-content:center;padding:20px;animation:fadeIn 0.2s ease}
     .modal-overlay.is-active{display:flex}
-    .modal-box{background:var(--bg-surface);border-radius:var(--radius-lg);padding:28px 30px 30px;max-width:440px;width:100%;border:1px solid var(--border-subtle);box-shadow:var(--shadow-lg);max-height:90vh;overflow-y:auto;animation:slideUp 0.25s var(--ease-spring)}
+    .modal-box{background:var(--bg-surface);border-radius:var(--radius-lg);padding:28px 30px;max-width:440px;width:100%;border:1px solid var(--border-subtle);box-shadow:var(--shadow-lg);max-height:90vh;overflow-y:auto;animation:slideUp 0.25s ease}
     @keyframes slideUp{from{opacity:0;transform:translateY(24px) scale(0.97)}to{opacity:1;transform:translateY(0) scale(1)}}
     @keyframes fadeIn{from{opacity:0}to{opacity:1}}
     .modal-box .modal-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px}
     .modal-box .modal-header h2{font-size:20px;font-weight:700;color:var(--text-primary)}
-    .modal-box .modal-header .modal-close{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;line-height:1;border-radius:var(--radius-sm);transition:var(--transition-fast);display:flex;align-items:center;justify-content:center}
+    .modal-box .modal-header .modal-close{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;border-radius:var(--radius-sm);transition:var(--transition-fast)}
     .modal-box .modal-header .modal-close:hover{background:var(--bg-hover);color:var(--text-primary)}
-    .modal-box .modal-header .modal-close svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .modal-box .modal-header .modal-close svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2}
     .modal-box .modal-desc{color:var(--text-muted);font-size:14px;margin-bottom:18px;line-height:1.5}
-    .modal-box .field{margin-bottom:14px}
-    .modal-box .field label{display:block;font-size:12px;font-weight:500;color:var(--text-secondary);margin-bottom:4px}
-    .modal-box .field input,.modal-box .field select{width:100%;padding:10px 14px;background:var(--bg-input);border:1px solid var(--border-subtle);border-radius:var(--radius-md);color:var(--text-primary);font-size:14px;outline:none;transition:var(--transition-fast);font-family:inherit}
-    .modal-box .field input:focus,.modal-box .field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
-    .modal-box .field input[type="range"]{accent-color:var(--accent);padding:0;background:transparent;border:none}
-    .modal-box .field .range-value{display:inline-block;min-width:30px;text-align:center;font-weight:600;color:var(--text-primary)}
-    .modal-box .error-msg{color:var(--error);font-size:13px;margin-top:4px;display:none}
-    .modal-box .error-msg.is-visible{display:block}
     .modal-box .modal-actions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
     .modal-box .modal-actions button{flex:1;padding:10px 16px;border:none;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast);font-family:inherit;min-width:70px}
-    .modal-box .modal-actions .btn-primary{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast)}
-    .modal-box .modal-actions .btn-primary:hover{background:var(--accent-hover);transform:scale(0.98)}
-    .modal-box .modal-actions .btn-secondary{background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border-subtle);padding:10px 16px;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast)}
+    .modal-box .modal-actions .btn-primary{background:var(--accent);color:#fff}
+    .modal-box .modal-actions .btn-primary:hover{background:var(--accent-hover)}
+    .modal-box .modal-actions .btn-secondary{background:var(--bg-elevated);color:var(--text-primary)}
     .modal-box .modal-actions .btn-secondary:hover{background:var(--bg-hover)}
-    .modal-box .modal-actions .btn-ghost{background:transparent;color:var(--text-muted);border:none;padding:10px 16px;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast)}
-    .modal-box .modal-actions .btn-ghost:hover{color:var(--text-primary);background:var(--bg-hover)}
-    .modal-box .modal-actions .btn-danger{background:var(--error);color:#fff;border:none;padding:10px 16px;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast)}
-    .modal-box .modal-actions .btn-danger:hover{opacity:0.85;transform:scale(0.98)}
+    .modal-box .modal-actions .btn-danger{background:var(--error);color:#fff}
+    .modal-box .modal-actions .btn-danger:hover{opacity:0.85}
     .share-modal .modal-box{max-width:480px}
     .share-link-container{display:flex;gap:8px;margin:16px 0;background:var(--bg-input);border-radius:var(--radius-md);padding:8px 12px;border:1px solid var(--border-subtle);align-items:center}
-    .share-link-container input{flex:1;background:transparent;border:none;outline:none;color:var(--text-primary);font-size:13px;font-family:inherit;padding:4px 0;min-width:0}
-    .share-link-container input::selection{background:var(--accent);color:#fff}
-    .share-link-container .copy-link-btn{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:6px 14px;font-size:13px;font-weight:500;cursor:pointer;transition:var(--transition-fast);font-family:inherit;flex-shrink:0}
+    .share-link-container input{flex:1;background:transparent;border:none;outline:none;color:var(--text-primary);font-size:13px;font-family:inherit;padding:4px 0}
+    .share-link-container .copy-link-btn{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:6px 14px;font-size:13px;font-weight:500;cursor:pointer;transition:var(--transition-fast);font-family:inherit}
     .share-link-container .copy-link-btn:hover{background:var(--accent-hover)}
     .share-link-container .copy-link-btn:active{transform:scale(0.96)}
     .confirm-modal .modal-box{max-width:400px}
@@ -304,9 +234,9 @@
     @keyframes toastIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
     .toast .toast-icon{font-size:18px;flex-shrink:0}
     .toast .toast-msg{flex:1;font-size:13.5px;color:var(--text-primary);line-height:1.4}
-    .toast .toast-dismiss{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;line-height:1;transition:var(--transition-fast);display:flex;align-items:center;justify-content:center}
+    .toast .toast-dismiss{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;display:flex;align-items:center;justify-content:center}
     .toast .toast-dismiss:hover{color:var(--text-primary)}
-    .toast .toast-dismiss svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .toast .toast-dismiss svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
     .toast.is-success .toast-icon{color:var(--success)}
     .toast.is-error .toast-icon{color:var(--error)}
     .toast.is-warning .toast-icon{color:var(--warning)}
@@ -356,24 +286,10 @@
       .empty-state h1{font-size:18px}
       .empty-state .suggestions button{font-size:11px;padding:4px 10px}
     }
-    @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important}}
     :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     ::-webkit-scrollbar{width:4px;height:4px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:var(--bg-hover);border-radius:4px}
-    .message-bubble .response-code-block code{background:transparent!important;padding:0!important}
-    .message-bubble .response-code-block .hljs{background:transparent!important;padding:0!important}
-    .password-wrapper{position:relative;width:100%}
-    .password-wrapper input{width:100%;padding-right:40px}
-    .password-toggle{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:18px;line-height:1;transition:var(--transition-fast)}
-    .password-toggle:hover{color:var(--text-primary)}
-    .password-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-    .auth-error{color:var(--error);font-size:13px;margin-top:4px;padding:6px 10px;background:rgba(255,59,48,0.1);border-radius:var(--radius-sm);border-left:3px solid var(--error);display:none}
-    .auth-error.is-visible{display:block}
-    .resend-btn{padding:6px 14px;font-size:13px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-secondary);cursor:pointer;transition:var(--transition-fast);font-family:inherit;white-space:nowrap}
-    .resend-btn:hover:not(:disabled){background:var(--bg-hover);color:var(--text-primary)}
-    .resend-btn:disabled{opacity:0.5;cursor:not-allowed}
-    .resend-timer{font-size:12px;color:var(--text-muted);margin-top:4px}
   </style>
 </head>
 <body>
@@ -402,36 +318,6 @@
 
       <div class="chat-history" id="chatHistory">
         <div class="empty-history" id="emptyHistory">No chats yet.<br />Start a new conversation.</div>
-      </div>
-
-      <div class="sidebar-footer">
-        <button class="auth-btn" id="authBtn" aria-label="Account">
-          <div class="avatar" id="avatarDisplay">👤</div>
-          <div class="account-info">
-            <div class="name" id="userNameDisplay">Sign In</div>
-            <div class="sub" id="userSubDisplay">Click to sign in</div>
-          </div>
-          <button class="account-settings-icon" id="settingsIcon" title="Account settings" style="display:none;">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>
-        </button>
-
-        <div class="account-dropdown" id="accountDropdown">
-          <button class="dropdown-item" data-action="profile">
-            <span class="icon">👤</span> Profile
-          </button>
-          <button class="dropdown-item" data-action="account">
-            <span class="icon">🔐</span> Account &amp; Security
-          </button>
-          <div class="dropdown-divider"></div>
-          <button class="dropdown-item" data-action="settings">
-            <span class="icon">⚙️</span> App Settings
-          </button>
-          <div class="dropdown-divider"></div>
-          <button class="dropdown-item" data-action="logout" style="color:var(--error);">
-            <span class="icon">🚪</span> Log Out
-          </button>
-        </div>
       </div>
     </aside>
 
@@ -492,158 +378,6 @@
 
   <!-- ===== MODALS ===== -->
 
-  <!-- Auth Modal -->
-  <div class="modal-overlay" id="authModal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h2 id="authModalTitle">Sign In</h2>
-        <button class="modal-close" id="authModalClose" aria-label="Close">
-          <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <p class="modal-desc" id="authModalDesc">Sign in to save your chats across devices.</p>
-      <div id="authFields">
-        <div class="field" id="authNameField" style="display:none;">
-          <label for="authName">Full Name</label>
-          <input type="text" id="authName" placeholder="Your name" />
-        </div>
-        <div class="field">
-          <label for="authEmail">Email</label>
-          <input type="email" id="authEmail" placeholder="you@example.com" />
-        </div>
-        <div class="field">
-          <label for="authPassword">Password</label>
-          <div class="password-wrapper">
-            <input type="password" id="authPassword" placeholder="••••••••" />
-            <button class="password-toggle" type="button" data-target="authPassword" aria-label="Toggle password visibility">👁</button>
-          </div>
-        </div>
-        <div class="field" id="authConfirmField" style="display:none;">
-          <label for="authConfirmPassword">Confirm Password</label>
-          <div class="password-wrapper">
-            <input type="password" id="authConfirmPassword" placeholder="••••••••" />
-            <button class="password-toggle" type="button" data-target="authConfirmPassword" aria-label="Toggle password visibility">👁</button>
-          </div>
-        </div>
-        <div class="field" id="authCodeField" style="display:none;">
-          <label for="authCode">Verification Code</label>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="text" id="authCode" placeholder="Enter 6-digit code" style="flex:1;" />
-            <button class="resend-btn" id="resendCodeBtn">Resend</button>
-          </div>
-          <div class="resend-timer" id="resendTimer"></div>
-        </div>
-        <div class="auth-error" id="authError">Invalid credentials.</div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn-primary" id="authSubmitBtn">Sign In</button>
-        <button class="btn-secondary" id="authSwitchBtn">Create Account</button>
-        <button class="btn-ghost" id="authGuestBtn">Continue as Guest</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Account & Security Modal -->
-  <div class="modal-overlay" id="accountSecurityModal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h2>Account &amp; Security</h2>
-        <button class="modal-close" id="accountSecurityCloseBtn" aria-label="Close">
-          <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <p class="modal-desc">Manage your account and security settings.</p>
-      <div class="field">
-        <label>Current Email</label>
-        <input type="email" id="securityEmail" readonly style="background:var(--bg-input);" />
-      </div>
-      <div class="field">
-        <label>Change Email</label>
-        <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
-          <input type="email" id="secNewEmail" placeholder="New email" style="flex:1;" />
-          <button class="resend-btn" id="secSendEmailCodeBtn">Send Code</button>
-        </div>
-        <input type="text" id="secEmailCode" placeholder="Enter verification code" style="width:100%; padding:8px 12px; border-radius:var(--radius-md); border:1px solid var(--border-subtle); background:var(--bg-input); color:var(--text-primary);" />
-      </div>
-      <div class="field">
-        <label>Change Password</label>
-        <div class="password-wrapper">
-          <input type="password" id="secCurrentPass" placeholder="Current password" style="margin-bottom:6px;" />
-          <button class="password-toggle" type="button" data-target="secCurrentPass">👁</button>
-        </div>
-        <div class="password-wrapper">
-          <input type="password" id="secNewPass" placeholder="New password" style="margin-bottom:6px;" />
-          <button class="password-toggle" type="button" data-target="secNewPass">👁</button>
-        </div>
-        <div class="password-wrapper">
-          <input type="password" id="secConfirmPass" placeholder="Confirm new password" />
-          <button class="password-toggle" type="button" data-target="secConfirmPass">👁</button>
-        </div>
-      </div>
-      <button class="btn-primary" id="secChangeEmailBtn" style="width:100%; margin-bottom:8px;">Update Email</button>
-      <button class="btn-primary" id="secChangePassBtn" style="width:100%; margin-bottom:12px;">Update Password</button>
-      <hr style="border-color:var(--border-subtle); margin:12px 0;" />
-      <button class="btn-danger" id="secDeleteAccountBtn" style="width:100%;">Delete Account</button>
-      <div class="modal-actions" style="margin-top:12px;">
-        <button class="btn-secondary" id="accountSecurityCloseActionBtn">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Profile Modal -->
-  <div class="modal-overlay" id="profileModal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h2>Profile</h2>
-        <button class="modal-close" id="profileCloseBtn" aria-label="Close">
-          <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <p class="modal-desc">Your account details.</p>
-      <div class="field">
-        <label>Name</label>
-        <input type="text" id="profileName" readonly style="background:var(--bg-input);" />
-      </div>
-      <div class="field">
-        <label>Email</label>
-        <input type="email" id="profileEmail" readonly style="background:var(--bg-input);" />
-      </div>
-      <div class="modal-actions">
-        <button class="btn-secondary" id="profileCloseActionBtn">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Settings Modal (Simplified) -->
-  <div class="modal-overlay" id="settingsModal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h2>Settings</h2>
-        <button class="modal-close" id="settingsCloseBtn" aria-label="Close">
-          <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-      <p class="modal-desc">Customize your AI experience.</p>
-      <div class="field">
-        <label for="themeSelect">Appearance</label>
-        <select id="themeSelect">
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="system">System</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>
-          <input type="checkbox" id="webSearchToggle" checked /> Enable Web Search
-        </label>
-      </div>
-      <div class="modal-actions">
-        <button class="btn-primary" id="settingsSaveBtn">Save</button>
-        <button class="btn-secondary" id="settingsCloseActionBtn">Close</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Share Modal -->
   <div class="modal-overlay share-modal" id="shareModal">
     <div class="modal-box">
@@ -686,26 +420,11 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- ==========================================================
-  JAVASCRIPT — COMPLETE APPLICATION
+  JAVASCRIPT — FULL CHAT (No Auth)
   ========================================================== -->
   <script>
-    // ─── Global error handler ────────────────────────────────────
-    window.onerror = function(message, source, lineno, colno, error) {
-      console.error('❌ Global error:', message, error);
-      return false;
-    };
-
     document.addEventListener('DOMContentLoaded', function() {
-      console.log('🚀 AgriDeepAI script started.');
-
-      // ─── CONFIG ─────────────────────────────────────────────────
-      const APP_CONFIG = {
-        name: 'AgriDeepAI',
-        version: '4.0.0',
-        maxAttachments: 5,
-        maxFileSize: 10 * 1024 * 1024,
-        allowedFileTypes: ['image/*', '.pdf', '.doc', '.docx', '.txt'],
-      };
+      console.log('🚀 AgriDeepAI started (no auth).');
 
       // ─── STATE ─────────────────────────────────────────────────
       const state = {
@@ -713,16 +432,7 @@
         activeId: null,
         isGenerating: false,
         abortController: null,
-        theme: 'dark',
-        webSearchEnabled: true,
-        user: null,
-        sessionToken: null,
-        isAuthenticated: false,
-        dropdownOpen: false,
         attachments: [],
-        pendingSignup: null,
-        pendingLogin: null,
-        resendCooldown: false,
       };
 
       // ─── DOM REFS ──────────────────────────────────────────────
@@ -742,58 +452,6 @@
       const attachmentPreviews = $('attachmentPreviews');
       const scrollBottomBtn = $('scrollBottomBtn');
       const chatTitle = $('chatTitle');
-      const authBtn = $('authBtn');
-      const settingsIcon = $('settingsIcon');
-      const avatarDisplay = $('avatarDisplay');
-      const userNameDisplay = $('userNameDisplay');
-      const userSubDisplay = $('userSubDisplay');
-      const accountDropdown = $('accountDropdown');
-
-      const authModal = $('authModal');
-      const authModalClose = $('authModalClose');
-      const authModalTitle = $('authModalTitle');
-      const authModalDesc = $('authModalDesc');
-      const authName = $('authName');
-      const authEmail = $('authEmail');
-      const authPassword = $('authPassword');
-      const authConfirmPassword = $('authConfirmPassword');
-      const authCode = $('authCode');
-      const authError = $('authError');
-      const authSubmitBtn = $('authSubmitBtn');
-      const authSwitchBtn = $('authSwitchBtn');
-      const authGuestBtn = $('authGuestBtn');
-      const authNameField = $('authNameField');
-      const authConfirmField = $('authConfirmField');
-      const authCodeField = $('authCodeField');
-      const resendCodeBtn = $('resendCodeBtn');
-      const resendTimer = $('resendTimer');
-
-      const accountSecurityModal = $('accountSecurityModal');
-      const accountSecurityCloseBtn = $('accountSecurityCloseBtn');
-      const accountSecurityCloseActionBtn = $('accountSecurityCloseActionBtn');
-      const securityEmail = $('securityEmail');
-      const secNewEmail = $('secNewEmail');
-      const secEmailCode = $('secEmailCode');
-      const secSendEmailCodeBtn = $('secSendEmailCodeBtn');
-      const secCurrentPass = $('secCurrentPass');
-      const secNewPass = $('secNewPass');
-      const secConfirmPass = $('secConfirmPass');
-      const secChangePassBtn = $('secChangePassBtn');
-      const secChangeEmailBtn = $('secChangeEmailBtn');
-      const secDeleteAccountBtn = $('secDeleteAccountBtn');
-
-      const profileModal = $('profileModal');
-      const profileCloseBtn = $('profileCloseBtn');
-      const profileCloseActionBtn = $('profileCloseActionBtn');
-      const profileName = $('profileName');
-      const profileEmail = $('profileEmail');
-
-      const settingsModal = $('settingsModal');
-      const settingsCloseBtn = $('settingsCloseBtn');
-      const settingsCloseActionBtn = $('settingsCloseActionBtn');
-      const themeSelect = $('themeSelect');
-      const settingsSaveBtn = $('settingsSaveBtn');
-      const webSearchToggle = $('webSearchToggle');
 
       const shareModal = $('shareModal');
       const shareModalClose = $('shareModalClose');
@@ -811,33 +469,6 @@
       const confirmCancelBtn = $('confirmCancelBtn');
       const confirmCloseBtn = $('confirmCloseBtn');
       const toastContainer = $('toastContainer');
-
-      // ─── HELPERS ──────────────────────────────────────────────
-      function isValidEmail(email) {
-        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-      }
-
-      // ─── STORAGE ──────────────────────────────────────────────
-      const Storage = {
-        get(key) {
-          try { return JSON.parse(localStorage.getItem('agrideepai_' + key)); } catch { return null; }
-        },
-        set(key, value) {
-          localStorage.setItem('agrideepai_' + key, JSON.stringify(value));
-        },
-        remove(key) {
-          localStorage.removeItem('agrideepai_' + key);
-        }
-      };
-
-      function getSessionToken() { return localStorage.getItem('agrideepai_sessionToken'); }
-      function setSessionToken(token) { localStorage.setItem('agrideepai_sessionToken', token); }
-      function getCurrentUser() { return Storage.get('user'); }
-      function setCurrentUser(user) { Storage.set('user', user); }
-      function clearSession() {
-        localStorage.removeItem('agrideepai_sessionToken');
-        Storage.remove('user');
-      }
 
       // ─── TOAST ──────────────────────────────────────────────────
       function showToast(message, type = 'info', duration = 3000) {
@@ -878,666 +509,6 @@
         confirmMessage.textContent = message;
         confirmModal._onConfirm = onConfirm || null;
         openModal(confirmModal);
-      }
-
-      // ─── API CALL ──────────────────────────────────────────────
-      async function callAPI(endpoint, method, body, token) {
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        const resp = await fetch(endpoint, {
-          method,
-          headers,
-          body: body ? JSON.stringify(body) : undefined,
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || 'Request failed');
-        return data;
-      }
-
-      // ─── AUTH FUNCTIONS ────────────────────────────────────────
-      // Resend Code
-      async function resendVerificationCode(email) {
-        if (state.resendCooldown) return;
-        if (!email) return;
-        try {
-          await callAPI('/api/send-verification', 'POST', { email });
-          showToast('New code sent!', 'success');
-          startResendCooldown(30);
-        } catch (err) {
-          showToast('Error: ' + err.message, 'error');
-        }
-      }
-
-      function startResendCooldown(seconds) {
-        state.resendCooldown = true;
-        resendCodeBtn.disabled = true;
-        let remaining = seconds;
-        resendTimer.textContent = `Resend in ${remaining}s`;
-        const interval = setInterval(() => {
-          remaining--;
-          if (remaining <= 0) {
-            clearInterval(interval);
-            resendCodeBtn.disabled = false;
-            resendTimer.textContent = '';
-            state.resendCooldown = false;
-          } else {
-            resendTimer.textContent = `Resend in ${remaining}s`;
-          }
-        }, 1000);
-      }
-
-      resendCodeBtn.addEventListener('click', async () => {
-        const email = authEmail.value.trim();
-        if (!isValidEmail(email)) {
-          showToast('Enter a valid email first.', 'error');
-          return;
-        }
-        await resendVerificationCode(email);
-      });
-
-      // Sign Up
-      async function handleSignUp(email, password, name) {
-        await callAPI('/api/send-verification', 'POST', { email });
-        showToast('Verification code sent to your email.', 'success');
-        state.pendingSignup = { email, password, name };
-        authMode = 'verify';
-        authModalTitle.textContent = 'Verify Your Email';
-        authModalDesc.textContent = `We sent a 6‑digit code to ${email}. Enter it below.`;
-        authSubmitBtn.textContent = 'Verify';
-        authSwitchBtn.style.display = 'none';
-        authGuestBtn.style.display = 'none';
-        authNameField.style.display = 'none';
-        authConfirmField.style.display = 'none';
-        authCodeField.style.display = 'block';
-        authCode.value = '';
-        authCode.focus();
-        authError.textContent = '';
-        authError.classList.remove('is-visible');
-        resendCodeBtn.dataset.email = email;
-        startResendCooldown(30);
-      }
-
-      async function verifySignUp() {
-        const code = authCode.value.trim();
-        if (!code) {
-          authError.textContent = 'Please enter the verification code.';
-          authError.classList.add('is-visible');
-          return;
-        }
-        const { email, password, name } = state.pendingSignup;
-        try {
-          const result = await callAPI('/api/auth/signup', 'POST', {
-            email,
-            password,
-            name,
-            verificationCode: code,
-          });
-          setSessionToken(result.token);
-          setCurrentUser(result.user);
-          state.user = result.user;
-          state.sessionToken = result.token;
-          state.isAuthenticated = true;
-          updateUIForUser(result.user);
-          await loadConversations();
-          closeModal(authModal);
-          showToast('Account created!', 'success');
-          state.pendingSignup = null;
-        } catch (err) {
-          authError.textContent = err.message;
-          authError.classList.add('is-visible');
-        }
-      }
-
-      // Sign In
-      async function handleSignIn(email, password) {
-        try {
-          await callAPI('/api/auth/login', 'POST', { email, password });
-          showToast('Verification code sent to your email.', 'success');
-          state.pendingLogin = { email };
-          authMode = 'verify';
-          authModalTitle.textContent = 'Verify Your Email';
-          authModalDesc.textContent = `We sent a 6‑digit code to ${email}. Enter it to complete sign‑in.`;
-          authSubmitBtn.textContent = 'Verify';
-          authSwitchBtn.style.display = 'none';
-          authGuestBtn.style.display = 'none';
-          authNameField.style.display = 'none';
-          authConfirmField.style.display = 'none';
-          authCodeField.style.display = 'block';
-          authCode.value = '';
-          authCode.focus();
-          authError.textContent = '';
-          authError.classList.remove('is-visible');
-          resendCodeBtn.dataset.email = email;
-          startResendCooldown(30);
-        } catch (err) {
-          if (err.message.includes('Account not found')) {
-            authError.textContent = 'Account not found. Please create an account.';
-            authError.classList.add('is-visible');
-          } else {
-            authError.textContent = err.message;
-            authError.classList.add('is-visible');
-          }
-        }
-      }
-
-      async function verifyLogin() {
-        const code = authCode.value.trim();
-        if (!code) {
-          authError.textContent = 'Please enter the verification code.';
-          authError.classList.add('is-visible');
-          return;
-        }
-        const email = state.pendingLogin.email;
-        try {
-          const result = await callAPI('/api/auth/verify-login', 'POST', { email, code });
-          setSessionToken(result.token);
-          setCurrentUser(result.user);
-          state.user = result.user;
-          state.sessionToken = result.token;
-          state.isAuthenticated = true;
-          updateUIForUser(result.user);
-          await loadConversations();
-          closeModal(authModal);
-          showToast('Signed in!', 'success');
-          state.pendingLogin = null;
-        } catch (err) {
-          authError.textContent = err.message;
-          authError.classList.add('is-visible');
-        }
-      }
-
-      async function handleSignOut() {
-        const token = getSessionToken();
-        if (token) {
-          try { await callAPI('/api/auth/logout', 'POST', {}, token); } catch(e) {}
-        }
-        clearSession();
-        state.user = null;
-        state.sessionToken = null;
-        state.isAuthenticated = false;
-        state.conversations = {};
-        state.activeId = null;
-        updateUIForUser(null);
-        clearMessages();
-        renderHistory();
-        showToast('Logged out.', 'info');
-      }
-
-      async function deleteAccount() {
-        const token = getSessionToken();
-        if (!token) return;
-        try {
-          await callAPI('/api/auth/account', 'DELETE', null, token);
-          clearSession();
-          state.user = null;
-          state.sessionToken = null;
-          state.isAuthenticated = false;
-          state.conversations = {};
-          state.activeId = null;
-          updateUIForUser(null);
-          clearMessages();
-          renderHistory();
-          showToast('Account permanently deleted.', 'info');
-          closeModal(accountSecurityModal);
-        } catch (err) {
-          showToast('Error deleting account: ' + err.message, 'error');
-        }
-      }
-
-      // ─── UI UPDATE ──────────────────────────────────────────────
-      function updateUIForUser(user) {
-        if (user) {
-          const name = user.name || user.email?.split('@')[0] || 'User';
-          avatarDisplay.textContent = name.charAt(0).toUpperCase();
-          userNameDisplay.textContent = name;
-          userSubDisplay.textContent = user.email || 'signed in';
-          settingsIcon.style.display = 'flex';
-        } else {
-          avatarDisplay.textContent = '👤';
-          userNameDisplay.textContent = 'Sign In';
-          userSubDisplay.textContent = 'Click to sign in';
-          settingsIcon.style.display = 'none';
-        }
-      }
-
-      function clearMessages() {
-        document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
-        emptyState.classList.remove('is-hidden');
-      }
-
-      // ─── CONVERSATIONS ──────────────────────────────────────────
-      async function loadConversations() {
-        const token = getSessionToken();
-        if (!token) {
-          console.log('⚠️ No session token, skipping conversation load.');
-          return;
-        }
-        try {
-          console.log('📥 Loading conversations with token:', token.substring(0, 20) + '...');
-          const data = await callAPI('/api/conversations', 'GET', null, token);
-          const convs = {};
-          for (const conv of data.conversations) {
-            convs[conv.id] = {
-              id: conv.id,
-              title: conv.title || 'New Chat',
-              messages: conv.messages || [],
-              pinned: conv.pinned || false,
-              created_at: conv.createdAt,
-              updated_at: conv.updatedAt,
-            };
-          }
-          state.conversations = convs;
-          renderHistory();
-          const ids = Object.keys(convs);
-          if (ids.length === 0) {
-            state.activeId = null;
-            clearMessages();
-            renderHistory();
-          } else {
-            const latest = ids.sort((a,b) => new Date(convs[b].updated_at) - new Date(convs[a].updated_at))[0];
-            switchConversation(latest);
-          }
-        } catch (err) {
-          console.error('❌ Load conversations error:', err);
-          // If token is invalid, clear session
-          if (err.message.includes('Unauthorized') || err.message.includes('Invalid token')) {
-            console.log('🔑 Token invalid, clearing session.');
-            clearSession();
-            state.isAuthenticated = false;
-            state.user = null;
-            updateUIForUser(null);
-          }
-          showToast('Failed to load conversations: ' + err.message, 'error');
-        }
-      }
-
-      async function saveConversation(convId) {
-        const conv = state.conversations[convId];
-        if (!conv) return;
-        const token = getSessionToken();
-        if (!token) return;
-        try {
-          await callAPI('/api/conversations', 'POST', {
-            conversations: [{
-              id: convId,
-              title: conv.title,
-              messages: conv.messages,
-              pinned: conv.pinned,
-              updatedAt: conv.updated_at,
-            }]
-          }, token);
-        } catch (err) {
-          console.error('Save error:', err);
-        }
-      }
-
-      async function deleteConversation(convId) {
-        const token = getSessionToken();
-        if (token) {
-          try {
-            await callAPI(`/api/conversations/${convId}`, 'DELETE', null, token);
-          } catch(e) {
-            showToast('Error deleting: ' + e.message, 'error');
-            return;
-          }
-        }
-        delete state.conversations[convId];
-        if (state.activeId === convId) {
-          state.activeId = null;
-          clearMessages();
-        }
-        renderHistory();
-        if (Object.keys(state.conversations).length === 0) {
-          emptyState.classList.remove('is-hidden');
-        } else {
-          const firstId = Object.keys(state.conversations)[0];
-          switchConversation(firstId);
-        }
-        showToast('Conversation deleted.', 'info');
-      }
-
-      // ─── AUTH MODAL EVENTS ──────────────────────────────────────
-      let authMode = 'signin';
-
-      function openAuthModal(mode = 'signin') {
-        authMode = mode;
-        authError.textContent = '';
-        authError.classList.remove('is-visible');
-        authName.value = '';
-        authEmail.value = '';
-        authPassword.value = '';
-        authConfirmPassword.value = '';
-        authCode.value = '';
-        authNameField.style.display = mode === 'signup' ? 'block' : 'none';
-        authConfirmField.style.display = mode === 'signup' ? 'block' : 'none';
-        authCodeField.style.display = 'none';
-        authSwitchBtn.style.display = 'block';
-        authGuestBtn.style.display = 'block';
-        resendCodeBtn.dataset.email = '';
-        resendTimer.textContent = '';
-        state.resendCooldown = false;
-        resendCodeBtn.disabled = false;
-        if (mode === 'signin') {
-          authModalTitle.textContent = 'Sign In';
-          authModalDesc.textContent = 'Sign in to save your chats across devices.';
-          authSubmitBtn.textContent = 'Sign In';
-          authSwitchBtn.textContent = 'Create Account';
-        } else if (mode === 'signup') {
-          authModalTitle.textContent = 'Create Account';
-          authModalDesc.textContent = 'Join AgriDeepAI to save your chats.';
-          authSubmitBtn.textContent = 'Sign Up';
-          authSwitchBtn.textContent = 'Already have an account? Sign In';
-        }
-        openModal(authModal);
-      }
-
-      authSubmitBtn.addEventListener('click', async () => {
-        if (authMode === 'verify') {
-          if (state.pendingSignup) {
-            await verifySignUp();
-          } else if (state.pendingLogin) {
-            await verifyLogin();
-          } else {
-            showToast('No pending verification.', 'error');
-          }
-          return;
-        }
-
-        const email = authEmail.value.trim();
-        const password = authPassword.value.trim();
-        if (!email || !password) {
-          showToast('Email and password required.', 'error');
-          return;
-        }
-        if (authMode === 'signup') {
-          const name = authName.value.trim() || 'User';
-          const confirm = authConfirmPassword.value.trim();
-          if (password !== confirm) {
-            showToast('Passwords do not match.', 'error');
-            return;
-          }
-          if (password.length < 8) {
-            showToast('Password must be at least 8 characters.', 'error');
-            return;
-          }
-          try {
-            await handleSignUp(email, password, name);
-          } catch (err) {
-            showToast('Sign-up error: ' + err.message, 'error');
-          }
-        } else {
-          try {
-            await handleSignIn(email, password);
-          } catch (err) {
-            showToast('Sign-in error: ' + err.message, 'error');
-          }
-        }
-      });
-
-      authSwitchBtn.addEventListener('click', () => {
-        if (authMode === 'verify') {
-          openAuthModal('signin');
-          return;
-        }
-        openAuthModal(authMode === 'signin' ? 'signup' : 'signin');
-      });
-
-      authGuestBtn.addEventListener('click', () => {
-        closeModal(authModal);
-        showToast('Continuing as guest. Chats will not be synced.', 'info');
-        clearSession();
-        state.user = null;
-        state.sessionToken = null;
-        state.isAuthenticated = false;
-        state.conversations = {};
-        state.activeId = null;
-        updateUIForUser(null);
-        renderHistory();
-        newChat();
-      });
-
-      authModalClose.addEventListener('click', () => closeModal(authModal));
-      authModal.addEventListener('click', (e) => { if (e.target === authModal) closeModal(authModal); });
-
-      // ─── AUTH BUTTON & DROPDOWN ────────────────────────────────
-      authBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (state.isAuthenticated) {
-          if (state.dropdownOpen) closeDropdown();
-          else openDropdown();
-        } else {
-          openAuthModal('signin');
-        }
-      });
-
-      settingsIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (state.isAuthenticated) {
-          if (state.dropdownOpen) closeDropdown();
-          else openDropdown();
-        } else {
-          openAuthModal('signin');
-        }
-      });
-
-      function openDropdown() {
-        state.dropdownOpen = true;
-        accountDropdown.classList.add('is-open');
-      }
-      function closeDropdown() {
-        state.dropdownOpen = false;
-        accountDropdown.classList.remove('is-open');
-      }
-      document.addEventListener('click', (e) => {
-        if (state.dropdownOpen && !accountDropdown.contains(e.target) && e.target !== authBtn && e.target !== settingsIcon) {
-          closeDropdown();
-        }
-      });
-
-      accountDropdown.querySelectorAll('.dropdown-item').forEach(item => {
-        item.addEventListener('click', () => {
-          const action = item.dataset.action;
-          closeDropdown();
-          if (!state.isAuthenticated) {
-            showToast('Please sign in first.', 'warning');
-            openAuthModal('signin');
-            return;
-          }
-          switch (action) {
-            case 'profile':
-              profileName.value = state.user?.name || '';
-              profileEmail.value = state.user?.email || '';
-              openModal(profileModal);
-              break;
-            case 'account':
-              securityEmail.value = state.user?.email || '';
-              secNewEmail.value = '';
-              secEmailCode.value = '';
-              secCurrentPass.value = '';
-              secNewPass.value = '';
-              secConfirmPass.value = '';
-              openModal(accountSecurityModal);
-              break;
-            case 'settings':
-              openModal(settingsModal);
-              break;
-            case 'logout':
-              openConfirmModal('Logout', 'Logout from your account?', handleSignOut);
-              break;
-          }
-        });
-      });
-
-      // ─── ACCOUNT & SECURITY ─────────────────────────────────────
-      accountSecurityCloseBtn.addEventListener('click', () => closeModal(accountSecurityModal));
-      accountSecurityCloseActionBtn.addEventListener('click', () => closeModal(accountSecurityModal));
-      accountSecurityModal.addEventListener('click', (e) => { if (e.target === accountSecurityModal) closeModal(accountSecurityModal); });
-
-      // Change Email
-      secSendEmailCodeBtn.addEventListener('click', async () => {
-        const email = secNewEmail.value.trim();
-        if (!isValidEmail(email)) {
-          showToast('Enter a valid new email.', 'error');
-          return;
-        }
-        try {
-          await callAPI('/api/send-verification', 'POST', { email });
-          showToast('Verification code sent to new email.', 'success');
-          secSendEmailCodeBtn.textContent = 'Sent!';
-          setTimeout(() => secSendEmailCodeBtn.textContent = 'Send Code', 3000);
-        } catch (err) {
-          showToast('Error: ' + err.message, 'error');
-        }
-      });
-
-      secChangeEmailBtn.addEventListener('click', async () => {
-        const newEmail = secNewEmail.value.trim();
-        const code = secEmailCode.value.trim();
-        if (!newEmail || !code) {
-          showToast('New email and code required.', 'error');
-          return;
-        }
-        const token = getSessionToken();
-        if (!token) return;
-        try {
-          await callAPI('/api/auth/change-email', 'PUT', { newEmail, verificationCode: code }, token);
-          const user = getCurrentUser();
-          if (user) {
-            user.email = newEmail;
-            setCurrentUser(user);
-            state.user.email = newEmail;
-            updateUIForUser(user);
-          }
-          showToast('Email updated!', 'success');
-          secNewEmail.value = '';
-          secEmailCode.value = '';
-          closeModal(accountSecurityModal);
-        } catch (err) {
-          showToast('Error: ' + err.message, 'error');
-        }
-      });
-
-      // Change Password
-      secChangePassBtn.addEventListener('click', async () => {
-        const curr = secCurrentPass.value;
-        const np = secNewPass.value;
-        const conf = secConfirmPass.value;
-        if (!curr || !np || !conf) { showToast('All password fields required.', 'error'); return; }
-        if (np !== conf) { showToast('New passwords do not match.', 'error'); return; }
-        const token = getSessionToken();
-        if (!token) return;
-        try {
-          await callAPI('/api/auth/change-password', 'PUT', { currentPassword: curr, newPassword: np }, token);
-          showToast('Password updated!', 'success');
-          secCurrentPass.value = '';
-          secNewPass.value = '';
-          secConfirmPass.value = '';
-          closeModal(accountSecurityModal);
-        } catch (err) {
-          showToast('Error: ' + err.message, 'error');
-        }
-      });
-
-      secDeleteAccountBtn.addEventListener('click', () => {
-        openConfirmModal('Delete Account', 'Are you sure? This will permanently delete your account, all chats, and settings.', async () => {
-          await deleteAccount();
-        });
-      });
-
-      // ─── PROFILE ─────────────────────────────────────────────────
-      profileCloseBtn.addEventListener('click', () => closeModal(profileModal));
-      profileCloseActionBtn.addEventListener('click', () => closeModal(profileModal));
-      profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeModal(profileModal); });
-
-      // ─── SETTINGS ───────────────────────────────────────────────
-      function loadSettings() {
-        const saved = Storage.get('settings');
-        if (saved) {
-          state.theme = saved.theme || 'dark';
-          state.webSearchEnabled = saved.webSearchEnabled !== undefined ? saved.webSearchEnabled : true;
-        }
-        applyTheme(state.theme);
-        themeSelect.value = state.theme;
-        webSearchToggle.checked = state.webSearchEnabled;
-      }
-
-      function saveSettings() {
-        state.theme = themeSelect.value;
-        state.webSearchEnabled = webSearchToggle.checked;
-        applyTheme(state.theme);
-        Storage.set('settings', {
-          theme: state.theme,
-          webSearchEnabled: state.webSearchEnabled,
-        });
-        closeModal(settingsModal);
-        showToast('Settings saved!', 'success');
-      }
-
-      function applyTheme(theme) {
-        const resolved = theme === 'system' ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : theme;
-        document.documentElement.setAttribute('data-theme', resolved);
-        if (theme !== 'system') Storage.set('theme', theme);
-      }
-
-      settingsCloseBtn.addEventListener('click', () => closeModal(settingsModal));
-      settingsCloseActionBtn.addEventListener('click', () => closeModal(settingsModal));
-      settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeModal(settingsModal); });
-      settingsSaveBtn.addEventListener('click', saveSettings);
-
-      // ─── SIDEBAR ─────────────────────────────────────────────────
-      function toggleSidebar() {
-        if (window.innerWidth <= 992) {
-          sidebar.classList.toggle('is-open');
-          sidebarOverlay.classList.toggle('is-visible');
-        } else {
-          sidebar.classList.toggle('is-collapsed');
-        }
-        const svg = sidebarToggle.querySelector('svg');
-        if (svg) {
-          svg.innerHTML = sidebar.classList.contains('is-collapsed') ?
-            '<path d="M9 18l6-6-6-6"/>' :
-            '<path d="M15 18l-6-6 6-6"/>';
-        }
-      }
-
-      sidebarToggle.addEventListener('click', toggleSidebar);
-      sidebarOpenBtn.addEventListener('click', () => {
-        if (window.innerWidth <= 992) {
-          sidebar.classList.add('is-open');
-          sidebarOverlay.classList.add('is-visible');
-        } else {
-          sidebar.classList.remove('is-collapsed');
-        }
-        const svg = sidebarToggle.querySelector('svg');
-        if (svg) svg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
-      });
-      sidebarOverlay.addEventListener('click', () => {
-        if (window.innerWidth <= 992) {
-          sidebar.classList.remove('is-open');
-          sidebarOverlay.classList.remove('is-visible');
-        } else {
-          sidebar.classList.add('is-collapsed');
-        }
-        const svg = sidebarToggle.querySelector('svg');
-        if (svg) svg.innerHTML = '<path d="M9 18l6-6-6-6"/>';
-      });
-
-      let resizeTimer;
-      window.addEventListener('resize', () => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-          if (window.innerWidth > 992) {
-            sidebar.classList.remove('is-open');
-            sidebarOverlay.classList.remove('is-visible');
-          }
-        }, 200);
-      });
-
-      function closeSidebar() {
-        if (window.innerWidth <= 992) {
-          sidebar.classList.remove('is-open');
-          sidebarOverlay.classList.remove('is-visible');
-        }
       }
 
       // ─── CHAT FUNCTIONS ─────────────────────────────────────────
@@ -1628,7 +599,7 @@
           const ta = editDiv.querySelector('textarea');
           ta.focus();
           ta.setSelectionRange(ta.value.length, ta.value.length);
-          editDiv.querySelector('.save-edit').addEventListener('click', async () => {
+          editDiv.querySelector('.save-edit').addEventListener('click', () => {
             const newText = ta.value.trim();
             if (newText) {
               const conv = getActive();
@@ -1639,7 +610,6 @@
                   const idx = conv.messages.indexOf(msg);
                   conv.messages = conv.messages.slice(0, idx + 1);
                   renderConversation(state.activeId);
-                  await saveConversation(state.activeId);
                   sendMessage(newText);
                 }
               }
@@ -1787,7 +757,6 @@
 
         addMessage(conv.id, 'user', fullText);
         appendUserMessage(fullText);
-        await saveConversation(conv.id);
 
         userInput.value = '';
         userInput.style.height = 'auto';
@@ -1819,17 +788,12 @@
           const payload = {
             message,
             history,
-            webSearchEnabled: state.webSearchEnabled,
             files: fileDataArray,
           };
 
-          const token = getSessionToken();
           const response = await fetch('/api/chat', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': token ? `Bearer ${token}` : '',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
             signal: state.abortController.signal,
           });
@@ -1848,7 +812,6 @@
           loadingWrapper.remove();
           const botMsg = addMessage(conv.id, 'assistant', aiResponse);
           appendAssistantMessage(botMsg.id, aiResponse, false);
-          await saveConversation(conv.id);
 
         } catch (error) {
           if (error.name === 'AbortError') {
@@ -1937,15 +900,15 @@
         if (this.files) {
           const files = Array.from(this.files);
           files.forEach(file => {
-            if (attachments.length >= APP_CONFIG.maxAttachments) {
-              showToast('Maximum ' + APP_CONFIG.maxAttachments + ' files.', 'warning');
+            if (attachments.length >= 5) {
+              showToast('Maximum 5 files.', 'warning');
               return;
             }
-            if (file.size > APP_CONFIG.maxFileSize) {
+            if (file.size > 10 * 1024 * 1024) {
               showToast('File too large.', 'error');
               return;
             }
-            const isValid = APP_CONFIG.allowedFileTypes.some(t => {
+            const isValid = ['image/*', '.pdf', '.doc', '.docx', '.txt'].some(t => {
               if (t.endsWith('/*')) return file.type.startsWith(t.replace('/*', ''));
               return file.name.endsWith(t.replace('.', ''));
             });
@@ -1988,7 +951,7 @@
         });
       }
 
-      // ─── HISTORY RENDERING ──────────────────────────────────────
+      // ─── HISTORY ─────────────────────────────────────────────────
       function renderHistory() {
         chatHistory.querySelectorAll('.chat-item').forEach(el => el.remove());
         const emptyEl = chatHistory.querySelector('.empty-history');
@@ -2020,14 +983,25 @@
               e.stopPropagation();
               const action = btn.dataset.action;
               if (action === 'delete') {
-                openConfirmModal('Delete Conversation', 'Delete this conversation?', async () => {
-                  await deleteConversation(conv.id);
+                openConfirmModal('Delete Conversation', 'Delete this conversation?', () => {
+                  delete state.conversations[conv.id];
+                  if (state.activeId === conv.id) {
+                    state.activeId = null;
+                    clearMessages();
+                  }
+                  renderHistory();
+                  if (Object.keys(state.conversations).length === 0) {
+                    emptyState.classList.remove('is-hidden');
+                  } else {
+                    const firstId = Object.keys(state.conversations)[0];
+                    switchConversation(firstId);
+                  }
+                  showToast('Conversation deleted.', 'info');
                 });
               } else if (action === 'pin') {
                 conv.pinned = !conv.pinned;
                 renderHistory();
                 showToast(conv.pinned ? 'Pinned.' : 'Unpinned.', 'info');
-                if (state.isAuthenticated) saveConversation(conv.id);
               } else if (action === 'share') {
                 const url = new URL(window.location.href);
                 url.searchParams.set('conversation', conv.id);
@@ -2037,6 +1011,11 @@
           });
           chatHistory.appendChild(div);
         });
+      }
+
+      function clearMessages() {
+        document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
+        emptyState.classList.remove('is-hidden');
       }
 
       function newChat() {
@@ -2066,6 +1045,62 @@
         });
       });
 
+      // ─── SIDEBAR ─────────────────────────────────────────────────
+      function toggleSidebar() {
+        if (window.innerWidth <= 992) {
+          sidebar.classList.toggle('is-open');
+          sidebarOverlay.classList.toggle('is-visible');
+        } else {
+          sidebar.classList.toggle('is-collapsed');
+        }
+        const svg = sidebarToggle.querySelector('svg');
+        if (svg) {
+          svg.innerHTML = sidebar.classList.contains('is-collapsed') ?
+            '<path d="M9 18l6-6-6-6"/>' :
+            '<path d="M15 18l-6-6 6-6"/>';
+        }
+      }
+
+      sidebarToggle.addEventListener('click', toggleSidebar);
+      sidebarOpenBtn.addEventListener('click', () => {
+        if (window.innerWidth <= 992) {
+          sidebar.classList.add('is-open');
+          sidebarOverlay.classList.add('is-visible');
+        } else {
+          sidebar.classList.remove('is-collapsed');
+        }
+        const svg = sidebarToggle.querySelector('svg');
+        if (svg) svg.innerHTML = '<path d="M15 18l-6-6 6-6"/>';
+      });
+      sidebarOverlay.addEventListener('click', () => {
+        if (window.innerWidth <= 992) {
+          sidebar.classList.remove('is-open');
+          sidebarOverlay.classList.remove('is-visible');
+        } else {
+          sidebar.classList.add('is-collapsed');
+        }
+        const svg = sidebarToggle.querySelector('svg');
+        if (svg) svg.innerHTML = '<path d="M9 18l6-6-6-6"/>';
+      });
+
+      let resizeTimer;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (window.innerWidth > 992) {
+            sidebar.classList.remove('is-open');
+            sidebarOverlay.classList.remove('is-visible');
+          }
+        }, 200);
+      });
+
+      function closeSidebar() {
+        if (window.innerWidth <= 992) {
+          sidebar.classList.remove('is-open');
+          sidebarOverlay.classList.remove('is-visible');
+        }
+      }
+
       // ─── SHARE & CONFIRM MODALS ────────────────────────────────
       shareModalClose.addEventListener('click', () => closeModal(shareModal));
       shareModalCloseBtn.addEventListener('click', () => closeModal(shareModal));
@@ -2090,7 +1125,7 @@
       // ─── KEYBOARD SHORTCUTS ────────────────────────────────────
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-          [authModal, accountSecurityModal, profileModal, settingsModal, shareModal, confirmModal].forEach(m => {
+          [shareModal, confirmModal].forEach(m => {
             if (m && m.classList.contains('is-active')) closeModal(m);
           });
           if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
@@ -2098,96 +1133,42 @@
             sidebarOverlay.classList.remove('is-visible');
           }
         }
-      });
-
-      // ─── PASSWORD TOGGLE (global) ─────────────────────────────
-      document.querySelectorAll('.password-toggle').forEach(btn => {
-        btn.addEventListener('click', function() {
-          const target = document.getElementById(this.dataset.target);
-          if (target) {
-            const isPassword = target.type === 'password';
-            target.type = isPassword ? 'text' : 'password';
-            this.textContent = isPassword ? '🙈' : '👁';
-          }
-        });
-      });
-
-      // ─── SESSION RESTORE ──────────────────────────────────────
-      async function restoreSession() {
-        const token = getSessionToken();
-        const user = getCurrentUser();
-        if (token && user) {
-          console.log('🔄 Restoring session for:', user.email);
-          state.user = user;
-          state.sessionToken = token;
-          state.isAuthenticated = true;
-          updateUIForUser(user);
-          await loadConversations();
-          return true;
+        if (e.key === 'Enter' && confirmModal.classList.contains('is-active')) {
+          confirmOkBtn.click();
         }
-        console.log('👤 No session found.');
-        return false;
-      }
+      });
 
       // ─── INIT ────────────────────────────────────────────────────
-      async function init() {
-        loadSettings();
-
-        // Check for shared conversation in URL
-        const params = new URLSearchParams(window.location.search);
-        const sharedConvId = params.get('conversation');
-        if (sharedConvId) {
+      function init() {
+        // Load conversations from localStorage (optional) or start fresh
+        const saved = localStorage.getItem('agrideepai_conversations');
+        if (saved) {
           try {
-            const resp = await fetch(`/api/conversations/${sharedConvId}`);
-            if (resp.ok) {
-              const data = await resp.json();
-              const id = 'shared_' + sharedConvId;
-              state.conversations[id] = {
-                id: id,
-                title: data.title || 'Shared Chat',
-                messages: data.messages || [],
-                pinned: false,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              };
-              state.activeId = id;
-              renderConversation(id);
-              renderHistory();
-              emptyState.classList.add('is-hidden');
-              chatTitle.textContent = 'Shared Chat';
-              const newUrl = window.location.pathname;
-              window.history.replaceState({}, '', newUrl);
+            state.conversations = JSON.parse(saved);
+            renderHistory();
+            const ids = Object.keys(state.conversations);
+            if (ids.length > 0) {
+              const latest = ids.sort((a,b) => new Date(state.conversations[b].updated_at) - new Date(state.conversations[a].updated_at))[0];
+              switchConversation(latest);
+            } else {
+              newChat();
             }
-          } catch (e) {
-            showToast('Could not load shared conversation.', 'error');
-          }
+          } catch(e) { newChat(); }
+        } else {
+          newChat();
         }
 
-        // Restore session
-        const sessionRestored = await restoreSession();
-        if (!sessionRestored) {
-          clearSession();
-          state.user = null;
-          state.sessionToken = null;
-          state.isAuthenticated = false;
-          updateUIForUser(null);
-          state.conversations = {};
-          state.activeId = null;
-          renderHistory();
-          emptyState.classList.remove('is-hidden');
-        }
-
-        // Auto‑save every 10 seconds
+        // Auto‑save conversations to localStorage every 10s
         setInterval(() => {
-          if (state.isAuthenticated && state.activeId) {
-            saveConversation(state.activeId);
+          if (Object.keys(state.conversations).length > 0) {
+            localStorage.setItem('agrideepai_conversations', JSON.stringify(state.conversations));
           }
         }, 10000);
 
-        console.log('🌾 AgriDeepAI v' + APP_CONFIG.version + ' initialized.');
+        console.log('🌾 AgriDeepAI ready.');
       }
 
-      document.addEventListener('DOMContentLoaded', init);
+      init();
     });
   </script>
 </body>
