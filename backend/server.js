@@ -7,6 +7,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { Resend } = require('resend');
 const multer = require('multer');
 const fs = require('fs');
+const axios = require('axios'); // for Tavily
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -16,17 +17,21 @@ app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Supabase (server-side client with service key)
+// Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// Resend email
+// Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
+// Tavily
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
+
+// System prompt (base)
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. You provide accurate, practical, actionable advice for farmers, students, researchers, and professionals worldwide, with a strong focus on Rwanda and African agriculture.
 
@@ -34,18 +39,16 @@ Guidelines:
 - Be warm, professional, and conversational.
 - For crop/livestock disease questions, ask for relevant details (symptoms, age, weather, etc.) before giving advice.
 - Always include disclaimers when giving advice that affects health, safety, or chemical use.
-- When the user asks about current events, market prices, or recent news, inform them that your knowledge may be outdated (encourage use of search – coming soon).
-- Politely redirect questions not related to agriculture or livestock.
+- When you have used web search, clearly indicate the sources and incorporate the found information.
 - Creator: Ornella Mutuyimana, a Rwandan technology enthusiast.
 `;
 
-// --- Multer configuration (memory storage) ---
+// --- Multer config ---
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // Allow images, PDF, text, and common document types
     const allowedMimes = [
       'image/jpeg', 'image/png', 'image/gif', 'image/webp',
       'application/pdf', 'text/plain', 'application/msword',
@@ -59,7 +62,7 @@ const upload = multer({
   }
 });
 
-// --- Middleware: authenticate user ---
+// --- Auth middleware ---
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -74,13 +77,32 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// --- Helper to generate verification code ---
+// --- Helper: Tavily search ---
+async function tavilySearch(query) {
+  try {
+    const response = await axios.post('https://api.tavily.com/search', {
+      api_key: TAVILY_API_KEY,
+      query,
+      search_depth: 'basic',
+      include_answer: true,
+      include_raw_content: false,
+      include_images: false,
+      max_results: 5
+    });
+    return response.data;
+  } catch (err) {
+    console.error('Tavily error:', err);
+    return null;
+  }
+}
+
+// --- Helper: generate verification code ---
 function generateCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 const verificationStore = {};
 
-// --- Auth Routes (unchanged from Phase 4) ---
+// --- Auth Routes (unchanged) ---
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -189,9 +211,7 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// --- Chat Routes (protected) ---
-
-// Get conversations, create, update, delete – same as Phase 4
+// --- Chat Routes ---
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -291,11 +311,11 @@ app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) =
   }
 });
 
-// --- SEND MESSAGE with FILE UPLOAD ---
+// --- SEND MESSAGE with optional search ---
 app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('file'), async (req, res) => {
   try {
     const { id: conversationId } = req.params;
-    const { message } = req.body;
+    const { message, search } = req.body; // search flag (true/false)
     const file = req.file;
 
     // Verify ownership
@@ -307,14 +327,12 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (convErr || !conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Handle file upload to Supabase Storage
+    // --- Handle file upload ---
     let fileMetadata = null;
-    let filePublicUrl = null;
     if (file) {
       const fileExt = file.originalname.split('.').pop();
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
       const filePath = `${req.user.id}/${fileName}`;
-      // Upload to Supabase Storage
       const { data: uploadData, error: uploadErr } = await supabase.storage
         .from(storageBucket)
         .upload(filePath, file.buffer, {
@@ -322,12 +340,10 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
           upsert: false,
         });
       if (uploadErr) throw new Error('File upload failed: ' + uploadErr.message);
-      // Get public URL
       const { publicURL, error: urlErr } = supabase.storage
         .from(storageBucket)
         .getPublicUrl(filePath);
       if (urlErr) throw new Error('Failed to get file URL');
-      filePublicUrl = publicURL;
       fileMetadata = {
         filename: file.originalname,
         storage_path: filePath,
@@ -335,7 +351,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         size: file.size,
         public_url: publicURL,
       };
-      // Save file metadata to database (optional)
       await supabase.from('files').insert({
         user_id: req.user.id,
         filename: file.originalname,
@@ -345,14 +360,14 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       });
     }
 
-    // Save user message with file info
+    // --- Save user message ---
     const messageData = {
       conversation_id: conversationId,
       role: 'user',
       content: message || '',
     };
     if (fileMetadata) {
-      messageData.files = [fileMetadata]; // store as JSON array
+      messageData.files = [fileMetadata];
     }
     const { data: userMsg, error: msgErr } = await supabase
       .from('messages')
@@ -361,7 +376,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (msgErr) throw msgErr;
 
-    // Fetch conversation history
+    // --- Fetch conversation history ---
     const { data: history, error: histErr } = await supabase
       .from('messages')
       .select('*')
@@ -369,47 +384,72 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .order('created_at', { ascending: true });
     if (histErr) throw histErr;
 
-    // Build AI messages
-    const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
+    // --- Optional: Web search ---
+    let searchResults = null;
+    if (search && TAVILY_API_KEY) {
+      // Use the latest user message as query
+      const query = message || 'agriculture update';
+      searchResults = await tavilySearch(query);
+    }
 
-    // Prepare for Gemini: if we have an image, we need to use vision model.
+    // --- Build AI messages ---
+    let aiMessages = history.map(m => ({ role: m.role, content: m.content }));
+    // If search results exist, inject them into the context (as a system message)
+    let augmentedPrompt = '';
+    if (searchResults && searchResults.answer) {
+      // Add a prefix to the user message with search results
+      const answer = searchResults.answer;
+      const sources = searchResults.results?.map(r => r.url).filter(Boolean).slice(0, 3) || [];
+      const sourceText = sources.length ? '\n\nSources: ' + sources.join(', ') : '';
+      augmentedPrompt = `[Web Search Results]\n${answer}${sourceText}\n\nBased on the above current information, please answer the user's question.`;
+      // We'll prepend this to the last user message (the one we just saved)
+      // Actually, we can append to the user message content? But it's better to put it in the system prompt.
+      // We'll modify the system prompt for this turn.
+    }
+
+    // --- Prepare AI ---
+    // For vision
     let visionModel = model;
     let imageParts = [];
     if (file && file.mimetype.startsWith('image/')) {
-      // Use Gemini vision model
-      visionModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }); // supports vision
-      // Convert image to base64
+      visionModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
       const base64Image = file.buffer.toString('base64');
       imageParts = [{
         inlineData: { data: base64Image, mimeType: file.mimetype }
       }];
     }
 
-    // Start chat with history
+    // Build history for Gemini (excluding the last user message, as we'll send it as current prompt)
+    const historyForAI = aiMessages.slice(0, -1).map(m => ({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.content }]
+    }));
+
+    // If we have search results, we can add a system message to the history
+    // Gemini doesn't support system role in history; we'll prepend to the user prompt.
+    let finalUserPrompt = aiMessages[aiMessages.length - 1].content;
+    if (searchResults && searchResults.answer) {
+      finalUserPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer the following question using this information where relevant:\n${finalUserPrompt}`;
+    }
+
+    // Start chat
     const chat = visionModel.startChat({
-      history: aiMessages.slice(0, -1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      })),
+      history: historyForAI,
       systemInstruction: SYSTEM_PROMPT,
       generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
     });
 
-    // Send message – if we have image, we need to send both text and image.
     let result;
     if (imageParts.length > 0) {
-      // Combine user text and image
-      const userMessage = aiMessages[aiMessages.length - 1].content;
-      // For vision, we send an array of parts: text and image
       result = await chat.sendMessageStream([
-        { text: userMessage },
+        { text: finalUserPrompt },
         ...imageParts
       ]);
     } else {
-      result = await chat.sendMessageStream(aiMessages[aiMessages.length - 1].content);
+      result = await chat.sendMessageStream(finalUserPrompt);
     }
 
-    // Stream response
+    // --- Stream response ---
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -421,13 +461,29 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       fullResponse += text;
       res.write(`data: ${JSON.stringify({ text })}\n\n`);
     }
+    // If we have sources, send them as a separate event or include in metadata
+    let sourcesData = null;
+    if (searchResults && searchResults.results) {
+      sourcesData = searchResults.results.slice(0, 5).map(r => ({
+        title: r.title,
+        url: r.url,
+        snippet: r.content
+      }));
+    }
+    // Send final event with sources
+    res.write(`data: ${JSON.stringify({ done: true, sources: sourcesData })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
 
     // Save assistant message
     await supabase
       .from('messages')
-      .insert({ conversation_id: conversationId, role: 'assistant', content: fullResponse });
+      .insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: fullResponse,
+        files: sourcesData ? [{ sources: sourcesData }] : null // store sources as file metadata
+      });
     await supabase
       .from('conversations')
       .update({ updated_at: new Date().toISOString() })
@@ -444,7 +500,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
   }
 });
 
-// --- Regenerate endpoint (same as Phase 4, but without file handling; can be extended later) ---
+// --- Regenerate endpoint (same, but we don't support search on regenerate for simplicity) ---
 app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
   try {
     const { id: conversationId } = req.params;
@@ -534,7 +590,7 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
   }
 });
 
-// --- Edit message (same as Phase 4) ---
+// --- Edit message (unchanged) ---
 app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   try {
     const { id: messageId } = req.params;
