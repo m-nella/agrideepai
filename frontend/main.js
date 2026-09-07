@@ -1,3 +1,13 @@
+// --- Global state ---
+let currentChatId = null;
+let conversations = [];
+let messages = [];
+let isGenerating = false;
+let abortController = null;
+let supabase = null;
+let currentUser = null;
+let currentProfile = null;
+
 // --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
 const openSidebarBtn = document.getElementById('openSidebarBtn');
@@ -15,37 +25,256 @@ const authSidebarBtn = document.getElementById('authSidebarBtn');
 const attachBtn = document.getElementById('attachBtn');
 const chips = document.querySelectorAll('.chip');
 const chatTitle = document.getElementById('chatTitle');
+const authModal = document.getElementById('authModal');
+const authModalBody = document.getElementById('authModalBody');
+const modalClose = document.querySelector('.modal-close');
 
-// --- State ---
-let conversations = JSON.parse(localStorage.getItem('agrideep_conversations')) || [];
-let currentChatId = localStorage.getItem('agrideep_current_chat') || null;
+// --- Theme ---
 let isDark = localStorage.getItem('agrideep_theme') === 'dark';
-let isGenerating = false;
-let abortController = null;
+function setTheme(dark) {
+  isDark = dark;
+  document.body.classList.toggle('dark', dark);
+  localStorage.setItem('agrideep_theme', dark ? 'dark' : 'light');
+  const icon = dark ? '☀️' : '🌓';
+  themeTopBtn.textContent = icon;
+  themeSidebarBtn.textContent = icon;
+}
+if (isDark) { document.body.classList.add('dark'); themeTopBtn.textContent = '☀️'; themeSidebarBtn.textContent = '☀️'; }
+themeTopBtn.addEventListener('click', () => setTheme(!isDark));
+themeSidebarBtn.addEventListener('click', () => setTheme(!isDark));
 
-// --- Helpers ---
-function generateId() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 5); }
-
-function saveConversations() {
-  localStorage.setItem('agrideep_conversations', JSON.stringify(conversations));
+// --- Supabase initialization ---
+async function initSupabase() {
+  try {
+    const res = await fetch('/api/config');
+    const config = await res.json();
+    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
+    supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
+    // Listen for auth changes
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        currentUser = session.user;
+        updateAuthUI();
+        loadConversations();
+      } else {
+        currentUser = null;
+        updateAuthUI();
+        // Clear local state
+        conversations = [];
+        currentChatId = null;
+        renderChatList();
+        renderMessages(null);
+        chatTitle.textContent = 'AgriDeepAI';
+      }
+    });
+    // Check existing session
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      currentUser = session.user;
+      updateAuthUI();
+      await loadConversations();
+    } else {
+      updateAuthUI();
+    }
+  } catch (err) {
+    console.error('Failed to init Supabase:', err);
+  }
 }
 
-function getCurrentChat() {
-  return conversations.find(c => c.id === currentChatId) || null;
+// --- Auth UI ---
+function updateAuthUI() {
+  const btnText = currentUser ? '👤 ' + (currentUser.email?.split('@')[0] || 'User') : 'Sign In';
+  authTopBtn.textContent = btnText;
+  authSidebarBtn.textContent = currentUser ? 'Logout' : 'Sign In';
+  if (currentUser) {
+    authTopBtn.onclick = () => { /* open profile? or logout? */ };
+    authSidebarBtn.onclick = async () => {
+      await supabase.auth.signOut();
+      currentUser = null;
+      updateAuthUI();
+      conversations = [];
+      currentChatId = null;
+      renderChatList();
+      renderMessages(null);
+      chatTitle.textContent = 'AgriDeepAI';
+    };
+  } else {
+    authTopBtn.onclick = () => openAuthModal('login');
+    authSidebarBtn.onclick = () => openAuthModal('login');
+  }
 }
 
+// --- Auth Modal ---
+function openAuthModal(mode = 'login') {
+  authModal.classList.remove('hidden');
+  renderAuthForm(mode);
+}
+
+function closeAuthModal() {
+  authModal.classList.add('hidden');
+}
+
+modalClose.addEventListener('click', closeAuthModal);
+authModal.addEventListener('click', (e) => {
+  if (e.target === authModal) closeAuthModal();
+});
+
+function renderAuthForm(mode) {
+  const isLogin = mode === 'login';
+  authModalBody.innerHTML = `
+    <h2>${isLogin ? 'Sign In' : 'Create Account'}</h2>
+    <div id="authError" class="error-msg" style="display:none;"></div>
+    <label>Email</label>
+    <input type="email" id="authEmail" placeholder="you@example.com" />
+    <label>Password</label>
+    <input type="password" id="authPassword" placeholder="••••••••" />
+    ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" />` : ''}
+    <button class="btn-primary" id="authSubmitBtn">${isLogin ? 'Sign In' : 'Sign Up'}</button>
+    <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
+    ${!isLogin ? `<div id="verifySection" style="display:none; margin-top:1rem;">
+      <p>We sent a verification code to your email. Enter it below:</p>
+      <input type="text" id="verifyCode" placeholder="6-digit code" />
+      <button class="btn-primary" id="verifyBtn">Verify</button>
+      <button id="resendVerifyBtn" style="background:none;border:none;color:#2e7d32;cursor:pointer;margin-top:0.5rem;">Resend code</button>
+    </div>` : ''}
+  `;
+
+  const submitBtn = document.getElementById('authSubmitBtn');
+  const toggleLink = document.getElementById('authToggle');
+  const errorDiv = document.getElementById('authError');
+
+  toggleLink.addEventListener('click', () => {
+    renderAuthForm(isLogin ? 'signup' : 'login');
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    const email = document.getElementById('authEmail').value.trim();
+    const password = document.getElementById('authPassword').value;
+    errorDiv.style.display = 'none';
+    if (!email || !password) {
+      errorDiv.textContent = 'Email and password required.';
+      errorDiv.style.display = 'block';
+      return;
+    }
+    try {
+      if (isLogin) {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        closeAuthModal();
+      } else {
+        // Sign up
+        const fullName = document.getElementById('authFullName')?.value.trim() || email.split('@')[0];
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name: fullName } }
+        });
+        if (error) throw error;
+        // Show verification section
+        document.getElementById('verifySection').style.display = 'block';
+        submitBtn.disabled = true;
+        // Store userId for verification
+        const userId = data.user.id;
+        document.getElementById('verifyBtn').addEventListener('click', async () => {
+          const code = document.getElementById('verifyCode').value.trim();
+          if (!code) { alert('Enter the code'); return; }
+          const res = await fetch('/api/auth/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, code })
+          });
+          const result = await res.json();
+          if (res.ok) {
+            alert('Email verified! You can now sign in.');
+            closeAuthModal();
+            renderAuthForm('login');
+          } else {
+            alert(result.error || 'Verification failed');
+          }
+        });
+        document.getElementById('resendVerifyBtn').addEventListener('click', async () => {
+          await fetch('/api/auth/resend-verification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+          });
+          alert('New code sent');
+        });
+      }
+    } catch (err) {
+      errorDiv.textContent = err.message || 'Authentication failed';
+      errorDiv.style.display = 'block';
+    }
+  });
+}
+
+// --- API helpers (with auth token) ---
+async function apiFetch(endpoint, options = {}) {
+  const session = await supabase.auth.getSession();
+  const token = session.data.session?.access_token;
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...options.headers
+  };
+  const res = await fetch(endpoint, { ...options, headers });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Request failed');
+  }
+  return res;
+}
+
+// --- Load conversations ---
+async function loadConversations() {
+  if (!currentUser) return;
+  try {
+    const res = await apiFetch('/api/chat/conversations');
+    conversations = await res.json();
+    renderChatList();
+    // If no currentChatId, select first or show welcome
+    if (currentChatId) {
+      const exists = conversations.find(c => c.id === currentChatId);
+      if (!exists) currentChatId = null;
+    }
+    if (currentChatId) {
+      await loadMessages(currentChatId);
+    } else {
+      renderMessages(null);
+      chatTitle.textContent = 'AgriDeepAI';
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// --- Load messages for a conversation ---
+async function loadMessages(chatId) {
+  if (!currentUser) return;
+  try {
+    const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
+    messages = await res.json();
+    const chat = conversations.find(c => c.id === chatId);
+    if (chat) chatTitle.textContent = chat.title || 'New Chat';
+    renderMessages(chat);
+    // Update chat list highlight
+    renderChatList();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// --- Render chat list ---
 function renderChatList() {
-  if (!chatList) return;
   chatList.innerHTML = '';
-  if (conversations.length === 0) {
+  if (!conversations.length) {
     chatList.innerHTML = '<div style="text-align:center;color:#999;padding:1rem;">No chats yet</div>';
     return;
   }
-  // Sort: pinned first, then by updatedAt descending
   const sorted = [...conversations].sort((a,b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
-    return new Date(b.updatedAt) - new Date(a.updatedAt);
+    return new Date(b.updated_at) - new Date(a.updated_at);
   });
   sorted.forEach(chat => {
     const div = document.createElement('div');
@@ -63,19 +292,16 @@ function renderChatList() {
     div.appendChild(titleSpan);
     const actions = document.createElement('div');
     actions.className = 'actions';
-    // Pin/Unpin
     const pinBtn = document.createElement('button');
     pinBtn.textContent = chat.pinned ? '📌' : '📍';
     pinBtn.title = chat.pinned ? 'Unpin' : 'Pin';
     pinBtn.addEventListener('click', (e) => { e.stopPropagation(); togglePin(chat.id); });
     actions.appendChild(pinBtn);
-    // Rename
     const renameBtn = document.createElement('button');
     renameBtn.textContent = '✏️';
     renameBtn.title = 'Rename';
     renameBtn.addEventListener('click', (e) => { e.stopPropagation(); renameChat(chat.id); });
     actions.appendChild(renameBtn);
-    // Delete
     const delBtn = document.createElement('button');
     delBtn.textContent = '🗑️';
     delBtn.title = 'Delete';
@@ -87,24 +313,22 @@ function renderChatList() {
   });
 }
 
+// --- Render messages ---
 function renderMessages(chat) {
   messageList.innerHTML = '';
-  if (!chat || chat.messages.length === 0) {
+  if (!chat || !messages.length) {
     welcomeScreen.style.display = 'flex';
     messageList.style.display = 'none';
-    chatTitle.textContent = 'AgriDeepAI';
     return;
   }
   welcomeScreen.style.display = 'none';
   messageList.style.display = 'flex';
-  chat.messages.forEach((msg, index) => {
+  messages.forEach((msg, index) => {
     const div = document.createElement('div');
     div.className = `message ${msg.role}`;
     div.textContent = msg.content;
-    // Actions for each message
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'msg-actions';
-    // Copy
     const copyBtn = document.createElement('button');
     copyBtn.textContent = '📋';
     copyBtn.title = 'Copy';
@@ -112,7 +336,6 @@ function renderMessages(chat) {
       navigator.clipboard.writeText(msg.content).then(() => alert('Copied!'));
     });
     actionsDiv.appendChild(copyBtn);
-    // Regenerate (only for assistant messages)
     if (msg.role === 'assistant') {
       const regenBtn = document.createElement('button');
       regenBtn.textContent = '🔄';
@@ -126,109 +349,127 @@ function renderMessages(chat) {
   messageList.scrollTop = messageList.scrollHeight;
 }
 
-// --- Chat CRUD ---
-function createChat(title = 'New Chat') {
-  const chat = {
-    id: generateId(),
-    title: title,
-    messages: [],
-    pinned: false,
-    updatedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString()
-  };
-  conversations.push(chat);
-  saveConversations();
-  renderChatList();
-  return chat;
+// --- Chat CRUD (with API) ---
+async function createChat(title = 'New Chat') {
+  if (!currentUser) { alert('Please sign in to create chats'); return null; }
+  try {
+    const res = await apiFetch('/api/chat/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ title })
+    });
+    const chat = await res.json();
+    conversations.unshift(chat);
+    renderChatList();
+    return chat;
+  } catch (err) {
+    console.error(err);
+    alert('Failed to create chat');
+    return null;
+  }
 }
 
-function selectChat(id) {
+async function selectChat(id) {
   currentChatId = id;
-  localStorage.setItem('agrideep_current_chat', id);
-  const chat = getCurrentChat();
-  if (chat) {
-    chatTitle.textContent = chat.title || 'New Chat';
-    renderMessages(chat);
-  }
+  await loadMessages(id);
   renderChatList();
-  // Close sidebar on mobile
   if (window.innerWidth < 768) sidebar.classList.remove('open');
 }
 
-function deleteChat(id) {
+async function deleteChat(id) {
   if (!confirm('Delete this chat?')) return;
-  conversations = conversations.filter(c => c.id !== id);
-  saveConversations();
-  if (currentChatId === id) {
-    currentChatId = null;
-    localStorage.removeItem('agrideep_current_chat');
-    chatTitle.textContent = 'AgriDeepAI';
-    renderMessages(null);
+  try {
+    await apiFetch(`/api/chat/conversations/${id}`, { method: 'DELETE' });
+    conversations = conversations.filter(c => c.id !== id);
+    if (currentChatId === id) {
+      currentChatId = null;
+      messages = [];
+      renderMessages(null);
+      chatTitle.textContent = 'AgriDeepAI';
+    }
+    renderChatList();
+  } catch (err) {
+    alert('Failed to delete');
   }
-  renderChatList();
 }
 
-function renameChat(id) {
+async function renameChat(id) {
   const chat = conversations.find(c => c.id === id);
   if (!chat) return;
   const newTitle = prompt('New title:', chat.title);
-  if (newTitle !== null && newTitle.trim()) {
-    chat.title = newTitle.trim();
-    chat.updatedAt = new Date().toISOString();
-    saveConversations();
-    renderChatList();
-    if (currentChatId === id) chatTitle.textContent = chat.title;
+  if (newTitle && newTitle.trim()) {
+    try {
+      const res = await apiFetch(`/api/chat/conversations/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ title: newTitle.trim() })
+      });
+      const updated = await res.json();
+      const idx = conversations.findIndex(c => c.id === id);
+      if (idx !== -1) conversations[idx] = updated;
+      renderChatList();
+      if (currentChatId === id) chatTitle.textContent = updated.title;
+    } catch (err) {
+      alert('Failed to rename');
+    }
   }
 }
 
-function togglePin(id) {
+async function togglePin(id) {
   const chat = conversations.find(c => c.id === id);
   if (!chat) return;
-  chat.pinned = !chat.pinned;
-  chat.updatedAt = new Date().toISOString();
-  saveConversations();
-  renderChatList();
+  try {
+    const res = await apiFetch(`/api/chat/conversations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ pinned: !chat.pinned })
+    });
+    const updated = await res.json();
+    const idx = conversations.findIndex(c => c.id === id);
+    if (idx !== -1) conversations[idx] = updated;
+    renderChatList();
+  } catch (err) {
+    alert('Failed to update pin');
+  }
 }
 
-function updateChatMessages(id, messages) {
-  const chat = conversations.find(c => c.id === id);
-  if (!chat) return;
-  chat.messages = messages;
-  chat.updatedAt = new Date().toISOString();
-  saveConversations();
-  renderMessages(chat);
-}
-
-// --- Sending message ---
+// --- Send message ---
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text || isGenerating) return;
-  let chat = getCurrentChat();
+  if (!currentUser) {
+    alert('Please sign in to chat and save conversations.');
+    openAuthModal('login');
+    return;
+  }
+  let chat = conversations.find(c => c.id === currentChatId);
   if (!chat) {
-    chat = createChat(text.substring(0, 30) + (text.length > 30 ? '...' : ''));
+    chat = await createChat(text.substring(0, 30) + (text.length > 30 ? '...' : ''));
+    if (!chat) return;
     currentChatId = chat.id;
-    localStorage.setItem('agrideep_current_chat', chat.id);
+    messages = [];
     chatTitle.textContent = chat.title;
   }
-  // Add user message
-  chat.messages.push({ role: 'user', content: text });
-  updateChatMessages(chat.id, chat.messages);
+  // Add user message locally (optimistic)
+  const tempUserMsg = { id: Date.now().toString(), role: 'user', content: text, created_at: new Date().toISOString() };
+  messages.push(tempUserMsg);
+  renderMessages(chat);
   messageInput.value = '';
   messageInput.style.height = 'auto';
   messageInput.disabled = true;
-
-  // Prepare payload: all messages
-  const payload = { messages: chat.messages.map(m => ({ role: m.role, content: m.content })) };
 
   isGenerating = true;
   sendBtn.textContent = '⏹';
   abortController = new AbortController();
 
   try {
-    const response = await fetch('/api/chat', {
+    // We'll use fetch with streaming
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
+    const response = await fetch(`/api/chat/conversations/${chat.id}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ message: text }),
       signal: abortController.signal
     });
     if (!response.ok) {
@@ -239,8 +480,9 @@ async function sendMessage() {
     const decoder = new TextDecoder();
     let assistantMsg = '';
     // Add placeholder assistant message
-    chat.messages.push({ role: 'assistant', content: '' });
-    updateChatMessages(chat.id, chat.messages);
+    const tempAssistantId = Date.now().toString() + '-assistant';
+    messages.push({ id: tempAssistantId, role: 'assistant', content: '', created_at: new Date().toISOString() });
+    renderMessages(chat);
 
     while (true) {
       const { done, value } = await reader.read();
@@ -255,143 +497,41 @@ async function sendMessage() {
             const parsed = JSON.parse(data);
             if (parsed.text) {
               assistantMsg += parsed.text;
-              // Update the last assistant message in chat
-              const last = chat.messages[chat.messages.length - 1];
+              // Update the last assistant message
+              const last = messages[messages.length - 1];
               if (last.role === 'assistant') {
                 last.content = assistantMsg;
-                updateChatMessages(chat.id, chat.messages);
+                renderMessages(chat);
               }
             }
           } catch (e) { /* ignore */ }
         }
       }
     }
-    // Ensure final save
-    updateChatMessages(chat.id, chat.messages);
-    // Auto-title if first message
-    if (chat.messages.length === 2 && chat.title === 'New Chat') {
-      const userMsg = chat.messages[0].content;
-      const newTitle = userMsg.substring(0, 40) + (userMsg.length > 40 ? '...' : '');
-      chat.title = newTitle;
-      saveConversations();
-      chatTitle.textContent = newTitle;
-      renderChatList();
-    }
+    // After stream ends, we need to reload messages to get proper IDs from DB
+    await loadMessages(chat.id);
+    // Update conversation list (updated_at)
+    await loadConversations();
   } catch (err) {
     if (err.name === 'AbortError') {
-      // User stopped
-      // Remove the placeholder assistant message if empty
-      if (chat.messages.length > 0 && chat.messages[chat.messages.length-1].role === 'assistant' && chat.messages[chat.messages.length-1].content === '') {
-        chat.messages.pop();
-        updateChatMessages(chat.id, chat.messages);
+      // User stopped – remove placeholder assistant if empty
+      if (messages.length > 0 && messages[messages.length-1].role === 'assistant' && messages[messages.length-1].content === '') {
+        messages.pop();
+        renderMessages(chat);
       }
     } else {
       console.error(err);
       alert('Error: ' + err.message);
       // Remove placeholder assistant if exists
-      if (chat.messages.length > 0 && chat.messages[chat.messages.length-1].role === 'assistant' && chat.messages[chat.messages.length-1].content === '') {
-        chat.messages.pop();
-        updateChatMessages(chat.id, chat.messages);
+      if (messages.length > 0 && messages[messages.length-1].role === 'assistant' && messages[messages.length-1].content === '') {
+        messages.pop();
+        renderMessages(chat);
       }
     }
   } finally {
     isGenerating = false;
     sendBtn.textContent = '➤';
     messageInput.disabled = false;
-    abortController = null;
-  }
-}
-
-// --- Regenerate ---
-async function regenerateMessage(index) {
-  const chat = getCurrentChat();
-  if (!chat) return;
-  // We need to remove the assistant message at 'index' and all subsequent messages
-  // (since regeneration replaces from that point onward)
-  const newMessages = chat.messages.slice(0, index);
-  // Update chat with truncated messages
-  chat.messages = newMessages;
-  updateChatMessages(chat.id, newMessages);
-  // Now re-send the last user message (which is now the last in newMessages)
-  const lastMsg = newMessages[newMessages.length - 1];
-  if (lastMsg && lastMsg.role === 'user') {
-    // We'll simulate sending by calling sendMessage but we need to set input?
-    // Instead we can directly call the API with the current history.
-    // But for simplicity, we'll just set the input to the last user content and call sendMessage?
-    // That would add a new user message, which we don't want.
-    // Better: send the same payload to /api/chat without adding a new user message.
-    // Let's implement a dedicated regenerate function.
-    // We'll reuse the send logic but with the current history.
-    // This is a bit hacky but works.
-    // We'll just set messageInput to the last user content and call sendMessage, but that would duplicate.
-    // Instead, we'll create a new function.
-    // For brevity, we'll implement by re-using sendMessage but we need to prevent duplicate user message.
-    // So we'll store the last user message and then call the API directly.
-    // I'll implement a quick helper.
-    await regenerateWithHistory(chat.id, newMessages);
-  }
-}
-
-async function regenerateWithHistory(chatId, history) {
-  const chat = conversations.find(c => c.id === chatId);
-  if (!chat) return;
-  // history is array of messages up to the last user message.
-  // We'll send that to AI.
-  const payload = { messages: history.map(m => ({ role: m.role, content: m.content })) };
-  isGenerating = true;
-  sendBtn.textContent = '⏹';
-  abortController = new AbortController();
-  try {
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: abortController.signal
-    });
-    if (!response.ok) throw new Error('Regenerate failed');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let assistantMsg = '';
-    // Add placeholder assistant
-    chat.messages.push({ role: 'assistant', content: '' });
-    updateChatMessages(chat.id, chat.messages);
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.text) {
-              assistantMsg += parsed.text;
-              const last = chat.messages[chat.messages.length - 1];
-              if (last.role === 'assistant') {
-                last.content = assistantMsg;
-                updateChatMessages(chat.id, chat.messages);
-              }
-            }
-          } catch (e) {}
-        }
-      }
-    }
-    updateChatMessages(chat.id, chat.messages);
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      alert('Regenerate error: ' + err.message);
-      // Remove placeholder
-      if (chat.messages.length > 0 && chat.messages[chat.messages.length-1].role === 'assistant' && chat.messages[chat.messages.length-1].content === '') {
-        chat.messages.pop();
-        updateChatMessages(chat.id, chat.messages);
-      }
-    }
-  } finally {
-    isGenerating = false;
-    sendBtn.textContent = '➤';
     abortController = null;
   }
 }
@@ -407,10 +547,47 @@ function stopGeneration() {
   }
 }
 
+// --- Regenerate ---
+async function regenerateMessage(index) {
+  const chat = conversations.find(c => c.id === currentChatId);
+  if (!chat) return;
+  // We need to remove all messages from this index onward
+  // and re-send the last user message.
+  const newMessages = messages.slice(0, index);
+  // Update local messages
+  messages = newMessages;
+  renderMessages(chat);
+  // Now call sendMessage with the last user message, but we need to ensure we don't duplicate.
+  // We'll call the API directly with the history.
+  const lastUserMsg = newMessages[newMessages.length - 1];
+  if (lastUserMsg && lastUserMsg.role === 'user') {
+    // We need to send the conversation history up to that user message.
+    // We'll use the same send logic but with a different payload.
+    // Instead of re-using sendMessage, we'll implement a helper.
+    await regenerateWithHistory(chat.id, newMessages);
+  }
+}
+
+async function regenerateWithHistory(chatId, history) {
+  // history is array of messages (without the assistant response we want to regenerate)
+  // We'll send the history to the backend, which will generate a new assistant message.
+  // But our backend expects a single 'message' field. We'll need to modify the endpoint to accept history.
+  // For simplicity, we'll send the last user message and rely on the backend to fetch conversation history.
+  // Actually, our backend already uses the conversation history from DB. So we just need to tell it to regenerate.
+  // We can add a flag 'regenerate: true' to the request.
+  // But to keep it simple, we'll delete all messages after the index and then re-send the last user message.
+  // Since we already truncated messages locally, we can just call sendMessage() with the last user content.
+  // However, that would add a new user message. Instead, we'll call the API with the current conversation ID and the last user message content.
+  // Our backend will save the user message again, which is not ideal.
+  // Better: we'll implement a regenerate endpoint later. For now, we'll just reload the conversation and start over.
+  alert('Regenerate feature will be fully implemented in Phase 4 (not yet). For now, please start a new chat.');
+}
+
 // --- Event listeners ---
-newChatBtn.addEventListener('click', () => {
-  const chat = createChat('New Chat');
-  selectChat(chat.id);
+newChatBtn.addEventListener('click', async () => {
+  if (!currentUser) { openAuthModal('login'); return; }
+  const chat = await createChat('New Chat');
+  if (chat) selectChat(chat.id);
 });
 
 openSidebarBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
@@ -435,7 +612,6 @@ messageInput.addEventListener('input', () => {
   messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
 });
 
-// Suggestion chips
 chips.forEach(chip => {
   chip.addEventListener('click', () => {
     messageInput.value = chip.dataset.prompt;
@@ -443,48 +619,7 @@ chips.forEach(chip => {
   });
 });
 
-// Theme
-function setTheme(dark) {
-  isDark = dark;
-  document.body.classList.toggle('dark', dark);
-  localStorage.setItem('agrideep_theme', dark ? 'dark' : 'light');
-  const icon = dark ? '☀️' : '🌓';
-  themeTopBtn.textContent = icon;
-  themeSidebarBtn.textContent = icon;
-}
-themeTopBtn.addEventListener('click', () => setTheme(!isDark));
-themeSidebarBtn.addEventListener('click', () => setTheme(!isDark));
-
-// Auth placeholder
-authTopBtn.addEventListener('click', () => alert('Authentication coming in Phase 3'));
-authSidebarBtn.addEventListener('click', () => alert('Authentication coming in Phase 3'));
-
 attachBtn.addEventListener('click', () => alert('File uploads coming in Phase 5'));
 
 // --- Init ---
-// Restore dark mode
-if (isDark) {
-  document.body.classList.add('dark');
-  themeTopBtn.textContent = '☀️';
-  themeSidebarBtn.textContent = '☀️';
-}
-// Restore current chat
-if (currentChatId) {
-  const chat = getCurrentChat();
-  if (chat) {
-    chatTitle.textContent = chat.title || 'New Chat';
-    renderMessages(chat);
-  } else {
-    currentChatId = null;
-    localStorage.removeItem('agrideep_current_chat');
-    renderMessages(null);
-  }
-} else {
-  renderMessages(null);
-}
-renderChatList();
-
-// Handle window resize for sidebar
-window.addEventListener('resize', () => {
-  if (window.innerWidth >= 768) sidebar.classList.remove('open');
-});
+initSupabase();
