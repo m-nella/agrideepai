@@ -3,12 +3,5 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {"dev":"next dev","build":"next build","start":"next start"},
-  "dependencies": {
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "@supabase/supabase-js": "^2.49.1",
-    "bcryptjs": "^2.4.3",
-    "jose": "^6.0.10"
-  }
+  "dependencies": {"@supabase/supabase-js":"^2.50.0","next":"^15.0.0","react":"^19.0.0","react-dom":"^19.0.0"}
 }
