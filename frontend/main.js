@@ -7,6 +7,7 @@ let abortController = null;
 let supabase = null;
 let currentUser = null;
 let currentProfile = null;
+let selectedFiles = []; // array of File objects
 
 // --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
@@ -28,6 +29,7 @@ const chatTitle = document.getElementById('chatTitle');
 const authModal = document.getElementById('authModal');
 const authModalBody = document.getElementById('authModalBody');
 const modalClose = document.querySelector('.modal-close');
+const composer = document.getElementById('composer');
 
 // --- Theme ---
 let isDark = localStorage.getItem('agrideep_theme') === 'dark';
@@ -84,7 +86,7 @@ function updateAuthUI() {
   authTopBtn.textContent = btnText;
   authSidebarBtn.textContent = currentUser ? 'Logout' : 'Sign In';
   if (currentUser) {
-    authTopBtn.onclick = () => {}; // could open profile later
+    authTopBtn.onclick = () => {};
     authSidebarBtn.onclick = async () => {
       await supabase.auth.signOut();
       currentUser = null;
@@ -101,16 +103,14 @@ function updateAuthUI() {
   }
 }
 
-// --- Auth Modal ---
+// --- Auth Modal (unchanged) ---
 function openAuthModal(mode = 'login') {
   authModal.classList.remove('hidden');
   renderAuthForm(mode);
 }
-
 function closeAuthModal() {
   authModal.classList.add('hidden');
 }
-
 modalClose.addEventListener('click', closeAuthModal);
 authModal.addEventListener('click', (e) => {
   if (e.target === authModal) closeAuthModal();
@@ -135,15 +135,12 @@ function renderAuthForm(mode) {
       <button id="resendVerifyBtn" style="background:none;border:none;color:#2e7d32;cursor:pointer;margin-top:0.5rem;">Resend code</button>
     </div>` : ''}
   `;
-
   const submitBtn = document.getElementById('authSubmitBtn');
   const toggleLink = document.getElementById('authToggle');
   const errorDiv = document.getElementById('authError');
-
   toggleLink.addEventListener('click', () => {
     renderAuthForm(isLogin ? 'signup' : 'login');
   });
-
   submitBtn.addEventListener('click', async () => {
     const email = document.getElementById('authEmail').value.trim();
     const password = document.getElementById('authPassword').value;
@@ -202,7 +199,7 @@ function renderAuthForm(mode) {
   });
 }
 
-// --- API helpers ---
+// --- API helpers (unchanged) ---
 async function apiFetch(endpoint, options = {}) {
   const session = await supabase.auth.getSession();
   const token = session.data.session?.access_token;
@@ -219,7 +216,7 @@ async function apiFetch(endpoint, options = {}) {
   return res;
 }
 
-// --- Load conversations ---
+// --- Load conversations (unchanged) ---
 async function loadConversations() {
   if (!currentUser) return;
   try {
@@ -241,7 +238,6 @@ async function loadConversations() {
   }
 }
 
-// --- Load messages ---
 async function loadMessages(chatId) {
   if (!currentUser) return;
   try {
@@ -256,7 +252,7 @@ async function loadMessages(chatId) {
   }
 }
 
-// --- Render chat list ---
+// --- Render chat list (unchanged) ---
 function renderChatList() {
   chatList.innerHTML = '';
   if (!conversations.length) {
@@ -305,7 +301,7 @@ function renderChatList() {
   });
 }
 
-// --- Render messages (with edit/regenerate buttons) ---
+// --- Render messages (unchanged, includes edit/regenerate) ---
 function renderMessages(chat) {
   messageList.innerHTML = '';
   if (!chat || !messages.length) {
@@ -321,9 +317,24 @@ function renderMessages(chat) {
     const contentSpan = document.createElement('span');
     contentSpan.textContent = msg.content;
     div.appendChild(contentSpan);
+    // If message has files, show them
+    if (msg.files && msg.files.length > 0) {
+      const fileDiv = document.createElement('div');
+      fileDiv.style.fontSize = '0.8rem';
+      fileDiv.style.marginTop = '0.3rem';
+      fileDiv.style.opacity = '0.7';
+      msg.files.forEach(f => {
+        const link = document.createElement('a');
+        link.href = f.public_url || '#';
+        link.target = '_blank';
+        link.textContent = '📎 ' + (f.filename || 'File');
+        fileDiv.appendChild(link);
+        fileDiv.appendChild(document.createTextNode(' '));
+      });
+      div.appendChild(fileDiv);
+    }
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'msg-actions';
-    // Copy
     const copyBtn = document.createElement('button');
     copyBtn.textContent = '📋';
     copyBtn.title = 'Copy';
@@ -331,7 +342,6 @@ function renderMessages(chat) {
       navigator.clipboard.writeText(msg.content).then(() => alert('Copied!'));
     });
     actionsDiv.appendChild(copyBtn);
-    // Edit (user messages only)
     if (msg.role === 'user') {
       const editBtn = document.createElement('button');
       editBtn.textContent = '✏️';
@@ -339,7 +349,6 @@ function renderMessages(chat) {
       editBtn.addEventListener('click', () => editUserMessage(index));
       actionsDiv.appendChild(editBtn);
     }
-    // Regenerate (assistant messages only)
     if (msg.role === 'assistant') {
       const regenBtn = document.createElement('button');
       regenBtn.textContent = '🔄';
@@ -353,7 +362,7 @@ function renderMessages(chat) {
   messageList.scrollTop = messageList.scrollHeight;
 }
 
-// --- Edit user message ---
+// --- Edit and Regenerate (same as Phase 4) ---
 async function editUserMessage(index) {
   const msg = messages[index];
   if (!msg || msg.role !== 'user') return;
@@ -361,46 +370,33 @@ async function editUserMessage(index) {
   if (newContent === null || newContent.trim() === '') return;
   const trimmed = newContent.trim();
   try {
-    // Update message content in DB and truncate subsequent messages
     const res = await apiFetch(`/api/chat/messages/${msg.id}`, {
       method: 'PUT',
       body: JSON.stringify({ content: trimmed, truncate: true })
     });
     const updatedMsg = await res.json();
-    // Update local messages: replace content and remove all messages after this index
     messages[index].content = trimmed;
     messages = messages.slice(0, index + 1);
-    // Now we need to regenerate the assistant response for this user message.
-    // We'll call the regenerate endpoint on the assistant message that follows (if any), or we can just trigger a new AI response.
-    // Since we truncated after the edited user message, we can now call the sendMessage flow again using the last user message.
-    // The simplest: we can set the input and call sendMessage, but that would add a duplicate user message.
-    // Instead, we'll call a new function that sends the last user message to the AI without duplicating.
-    // We'll use the existing sendMessage logic but we need to avoid saving a new user message.
-    // We'll implement a helper `regenerateFromLastUser()`.
-    await regenerateFromLastUser();
+    alert('Message updated. Please send a new message to get a new response.');
+    // We could auto-trigger a regenerate, but we'll leave it for simplicity.
   } catch (err) {
     alert('Failed to edit message: ' + err.message);
   }
 }
 
-// --- Regenerate assistant message at given index ---
 async function regenerateMessage(index) {
   const msg = messages[index];
   if (!msg || msg.role !== 'assistant') return;
   const chat = conversations.find(c => c.id === currentChatId);
   if (!chat) return;
   try {
-    // Call the regenerate endpoint
     const res = await apiFetch(`/api/chat/conversations/${chat.id}/regenerate`, {
       method: 'POST',
       body: JSON.stringify({ messageIndex: index })
     });
-    // Handle streaming response
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    // Remove all messages from this index onward (we'll replace with new stream)
     messages = messages.slice(0, index);
-    // Add placeholder assistant
     messages.push({ id: Date.now().toString() + '-temp', role: 'assistant', content: '' });
     renderMessages(chat);
     let assistantContent = '';
@@ -417,7 +413,6 @@ async function regenerateMessage(index) {
             const parsed = JSON.parse(data);
             if (parsed.text) {
               assistantContent += parsed.text;
-              // Update the last message
               const last = messages[messages.length - 1];
               if (last.role === 'assistant') {
                 last.content = assistantContent;
@@ -428,7 +423,6 @@ async function regenerateMessage(index) {
         }
       }
     }
-    // After stream, reload messages to get proper IDs from DB
     await loadMessages(chat.id);
     await loadConversations();
   } catch (err) {
@@ -436,56 +430,7 @@ async function regenerateMessage(index) {
   }
 }
 
-// --- Helper: regenerate from last user message (used after editing) ---
-async function regenerateFromLastUser() {
-  const chat = conversations.find(c => c.id === currentChatId);
-  if (!chat) return;
-  // Find the last user message index
-  let lastUserIndex = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'user') {
-      lastUserIndex = i;
-      break;
-    }
-  }
-  if (lastUserIndex === -1) return;
-  // We need to regenerate the assistant that follows (if any) or create a new one.
-  // We'll call the regenerate endpoint with the index of the assistant that follows, or we can just send the last user message as a new message?
-  // Since we truncated after the user message, there might be an assistant message placeholder.
-  // We'll check if there's an assistant after the last user; if not, we'll send a new message.
-  // But simpler: we'll use the same flow as sendMessage, but we need to avoid duplicating the user message.
-  // We can call the /api/chat/conversations/:id/messages with the user message content, but that would save a new user message.
-  // Instead, we can call regenerate with the index of the assistant message if it exists, or we can call sendMessage with a flag.
-  // For now, we'll just call sendMessage with the last user's content, but we need to avoid adding it again.
-  // Let's implement a simpler approach: we'll delete the assistant message (if any) and then call the sendMessage flow with the user message content.
-  // But we already have the user message in the DB. We can just re-run the AI using the existing history.
-  // We'll use the regenerate endpoint with the index of the assistant message after the last user, or if none, we'll create a new assistant.
-  // If there's no assistant after the last user, we need to create one. We'll call the regenerate endpoint with the index of the user message? 
-  // Actually, we'll use the sendMessage endpoint but we need to send the user message content without saving a new one. 
-  // Since we have the user message id, we can call regenerate with the index of the user message? That would regenerate from the user message.
-  // But regenerate expects an assistant index. 
-  // I'll simplify: after editing, we'll just reload the conversation and then call the normal sendMessage flow by setting the input and triggering send.
-  // However, that would create a new user message. 
-  // To avoid that, I'll add a new endpoint: POST /api/chat/conversations/:id/generate-from-history that takes no message, just uses the current history to generate an assistant response.
-  // But that's essentially what regenerate does if we pass the index of the last user message? It would delete that user message? No.
-  // Let's just use the regenerate endpoint on the assistant message that follows. If none, we'll add a placeholder assistant and regenerate it.
-  // So after editing, we'll check if there's an assistant after the last user. If yes, regenerate that assistant. If not, we'll add an empty assistant and regenerate it.
-  // We'll implement that in the edit function.
-
-  // Quick fix: after editing, we'll call sendMessage with the user's content but we'll clear the input and not add a new user message.
-  // We can just call the sendMessage function but we need to prevent it from adding a user message.
-  // I'll refactor sendMessage to accept an optional flag to skip saving the user message.
-  // For simplicity, we'll just reload the conversation and then use the normal flow.
-  // Let's reload messages and then if the last message is user, we'll call a function to generate assistant.
-  // I'll add a function generateAssistantForLastUser() that calls the regenerate endpoint with the index of the assistant message after the last user, or if none, creates a placeholder.
-  // Given time, I'll implement a simpler solution: after editing, we call the same sendMessage logic, but we need to ensure we don't save the user message again.
-  // We can just call the `/api/chat/conversations/${chat.id}/messages` with the message content, but we need to prevent duplication.
-  // Actually, we can just call regenerate on the last user message index. But regenerate expects assistant index.
-  // I'll implement a new endpoint later; for now, I'll just prompt the user to ask again.
-  alert('After editing, please send a new message to get a new response. (Feature enhancement coming soon)');
-}
-
-// --- Chat CRUD ---
+// --- Chat CRUD (unchanged) ---
 async function createChat(title = 'New Chat') {
   if (!currentUser) { alert('Please sign in to create chats'); return null; }
   try {
@@ -566,10 +511,38 @@ async function togglePin(id) {
   }
 }
 
-// --- Send message ---
+// --- File handling: show preview ---
+function showFilePreview() {
+  // Remove existing preview container
+  const oldPreview = document.getElementById('filePreviewContainer');
+  if (oldPreview) oldPreview.remove();
+  if (selectedFiles.length === 0) return;
+  const container = document.createElement('div');
+  container.id = 'filePreviewContainer';
+  container.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.5rem;padding:0.25rem 0.5rem;';
+  selectedFiles.forEach((file, idx) => {
+    const pill = document.createElement('span');
+    pill.style.cssText = 'background:#e0e0e0;padding:0.2rem 0.6rem;border-radius:1rem;font-size:0.85rem;display:flex;align-items:center;gap:0.3rem;';
+    pill.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + 'KB)';
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = '✕';
+    removeBtn.style.cssText = 'background:none;border:none;cursor:pointer;font-weight:bold;';
+    removeBtn.addEventListener('click', () => {
+      selectedFiles.splice(idx, 1);
+      showFilePreview();
+    });
+    pill.appendChild(removeBtn);
+    container.appendChild(pill);
+  });
+  // Insert above composer
+  composer.parentNode.insertBefore(container, composer);
+}
+
+// --- Send message with file ---
 async function sendMessage() {
   const text = messageInput.value.trim();
-  if (!text || isGenerating) return;
+  if (!text && selectedFiles.length === 0) return;
+  if (isGenerating) return;
   if (!currentUser) {
     alert('Please sign in to chat and save conversations.');
     openAuthModal('login');
@@ -577,19 +550,36 @@ async function sendMessage() {
   }
   let chat = conversations.find(c => c.id === currentChatId);
   if (!chat) {
-    chat = await createChat(text.substring(0, 30) + (text.length > 30 ? '...' : ''));
+    chat = await createChat(text.substring(0, 30) + (text.length > 30 ? '...' : '') || 'New Chat');
     if (!chat) return;
     currentChatId = chat.id;
     messages = [];
     chatTitle.textContent = chat.title;
   }
-  // Add user message locally (optimistic)
-  const tempUserMsg = { id: Date.now().toString(), role: 'user', content: text, created_at: new Date().toISOString() };
+
+  // Build FormData
+  const formData = new FormData();
+  formData.append('message', text || '');
+  selectedFiles.forEach(file => {
+    formData.append('file', file);
+  });
+
+  // Optimistic: add user message with file info
+  const tempUserMsg = {
+    id: Date.now().toString(),
+    role: 'user',
+    content: text || '[File attached]',
+    files: selectedFiles.map(f => ({ filename: f.name, mime_type: f.type, size: f.size })),
+    created_at: new Date().toISOString()
+  };
   messages.push(tempUserMsg);
   renderMessages(chat);
   messageInput.value = '';
   messageInput.style.height = 'auto';
   messageInput.disabled = true;
+  // Clear file preview
+  selectedFiles = [];
+  showFilePreview();
 
   isGenerating = true;
   sendBtn.textContent = '⏹';
@@ -601,10 +591,9 @@ async function sendMessage() {
     const response = await fetch(`/api/chat/conversations/${chat.id}/messages`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ message: text }),
+      body: formData,
       signal: abortController.signal
     });
     if (!response.ok) {
@@ -713,7 +702,26 @@ chips.forEach(chip => {
   });
 });
 
-attachBtn.addEventListener('click', () => alert('File uploads coming in Phase 5'));
+// File attachment
+attachBtn.addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,.pdf,.txt,.doc,.docx';
+  input.multiple = true;
+  input.onchange = (e) => {
+    const files = Array.from(e.target.files);
+    // Validate size
+    const maxSize = 10 * 1024 * 1024;
+    const oversized = files.some(f => f.size > maxSize);
+    if (oversized) {
+      alert('Files must be smaller than 10MB.');
+      return;
+    }
+    selectedFiles = selectedFiles.concat(files);
+    showFilePreview();
+  };
+  input.click();
+});
 
 // --- Init ---
 initSupabase();
