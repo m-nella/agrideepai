@@ -26,6 +26,10 @@ async function connectDb() {
     client = new MongoClient(MONGODB_URI);
     await client.connect();
     db = client.db(MONGODB_DB);
+    // Ensure indexes
+    await db.collection('verification_codes').createIndex({ email: 1 }, { unique: true });
+    await db.collection('verification_codes').createIndex({ expiry: 1 }, { expireAfterSeconds: 0 });
+    await db.collection('sessions').createIndex({ token: 1 }, { unique: true });
   }
   return db;
 }
@@ -85,7 +89,6 @@ async function sendVerificationEmail(email, code) {
 
 // ─── AI + Web Search ──────────────────────────────────────────
 async function performWebSearch(query) {
-  // Try Serper first, then Tavily
   if (SERPER_API_KEY) {
     try {
       const resp = await fetch('https://google.serper.dev/search', {
@@ -147,7 +150,6 @@ Now respond to the user's last message.`;
     ...messages,
   ];
 
-  // Try Groq first
   if (GROQ_API_KEY) {
     try {
       const groq = new Groq({ apiKey: GROQ_API_KEY });
@@ -163,12 +165,10 @@ Now respond to the user's last message.`;
     }
   }
 
-  // Fallback to Gemini
   if (GEMINI_API_KEY) {
     try {
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
       const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-      // Convert messages to Gemini format
       const history = fullMessages.slice(0, -1).map(m => ({
         role: m.role === 'user' ? 'user' : 'model',
         parts: [{ text: m.content }],
@@ -188,7 +188,7 @@ Now respond to the user's last message.`;
 // ─── Main handler ─────────────────────────────────────────────
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -199,12 +199,15 @@ module.exports = async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const path = url.pathname;
 
-    // ─── Authentication endpoints ──────────────────────────────
+    // ─── AUTH ENDPOINTS ─────────────────────────────────────────
 
     // POST /api/send-verification
     if (path === '/api/send-verification' && req.method === 'POST') {
       const { email } = req.body;
       if (!email) return sendJson(400, { error: 'Email required' });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return sendJson(400, { error: 'Invalid email format' });
+      }
       const code = generateCode();
       const expiry = new Date(Date.now() + 10 * 60 * 1000);
       await db.collection('verification_codes').updateOne(
@@ -223,14 +226,19 @@ module.exports = async (req, res) => {
         return sendJson(400, { error: 'All fields required' });
       }
 
+      // Check if user already exists
       const existing = await db.collection('users').findOne({ email });
-      if (existing) return sendJson(400, { error: 'Email already registered' });
+      if (existing) {
+        return sendJson(400, { error: 'Email already registered. Please login.' });
+      }
 
+      // Verify code
       const codeDoc = await db.collection('verification_codes').findOne({ email });
       if (!codeDoc) return sendJson(400, { error: 'No code found. Request a new one.' });
-      if (codeDoc.code !== verificationCode) return sendJson(400, { error: 'Invalid code' });
-      if (new Date() > codeDoc.expiry) return sendJson(400, { error: 'Code expired' });
+      if (codeDoc.code !== verificationCode) return sendJson(400, { error: 'Invalid verification code.' });
+      if (new Date() > codeDoc.expiry) return sendJson(400, { error: 'Code expired. Request a new one.' });
 
+      // Hash password and create user
       const hashed = await bcrypt.hash(password, 10);
       const user = { email, passwordHash: hashed, name, createdAt: new Date() };
       const result = await db.collection('users').insertOne(user);
@@ -238,6 +246,7 @@ module.exports = async (req, res) => {
 
       await db.collection('verification_codes').deleteOne({ email });
 
+      // Create session
       const token = generateToken();
       await db.collection('sessions').insertOne({ token, userId, createdAt: new Date() });
 
@@ -258,6 +267,7 @@ module.exports = async (req, res) => {
       const match = await bcrypt.compare(password, user.passwordHash);
       if (!match) return sendJson(400, { error: 'Invalid credentials' });
 
+      // Send verification code for login
       const code = generateCode();
       const expiry = new Date(Date.now() + 10 * 60 * 1000);
       await db.collection('verification_codes').updateOne(
@@ -276,8 +286,8 @@ module.exports = async (req, res) => {
 
       const codeDoc = await db.collection('verification_codes').findOne({ email });
       if (!codeDoc) return sendJson(400, { error: 'No code found. Request a new one.' });
-      if (codeDoc.code !== code) return sendJson(400, { error: 'Invalid code' });
-      if (new Date() > codeDoc.expiry) return sendJson(400, { error: 'Code expired' });
+      if (codeDoc.code !== code) return sendJson(400, { error: 'Invalid verification code.' });
+      if (new Date() > codeDoc.expiry) return sendJson(400, { error: 'Code expired. Request a new one.' });
 
       const user = await db.collection('users').findOne({ email });
       if (!user) return sendJson(404, { error: 'User not found' });
@@ -311,17 +321,15 @@ module.exports = async (req, res) => {
       if (!session) return sendJson(401, { error: 'Invalid token' });
 
       const userId = session.userId;
-      // Delete user, conversations, and sessions
       await db.collection('users').deleteOne({ _id: userId });
       await db.collection('conversations').deleteMany({ userId });
       await db.collection('sessions').deleteMany({ userId });
-      // Also delete verification codes for that email? Not needed.
       return sendJson(200, { success: true });
     }
 
-    // ─── Conversations endpoints ───────────────────────────────
+    // ─── CONVERSATIONS ──────────────────────────────────────────
 
-    // GET /api/conversations
+    // GET /api/conversations – user's own conversations (auth required)
     if (path === '/api/conversations' && req.method === 'GET') {
       const token = req.headers.authorization?.replace('Bearer ', '');
       if (!token) return sendJson(401, { error: 'Unauthorized' });
@@ -344,7 +352,21 @@ module.exports = async (req, res) => {
       return sendJson(200, { conversations: processed });
     }
 
-    // POST /api/conversations
+    // GET /api/conversations/:id – public (no auth) for sharing
+    if (path.startsWith('/api/conversations/') && req.method === 'GET' && path.split('/').length === 3) {
+      const id = path.split('/').pop();
+      if (!ObjectId.isValid(id)) return sendJson(400, { error: 'Invalid ID' });
+      const conv = await db.collection('conversations').findOne({ _id: new ObjectId(id) });
+      if (!conv) return sendJson(404, { error: 'Conversation not found' });
+      // Return only the messages and title (no user info)
+      return sendJson(200, {
+        title: conv.title,
+        messages: conv.messages,
+        pinned: false,
+      });
+    }
+
+    // POST /api/conversations – save/update conversations
     if (path === '/api/conversations' && req.method === 'POST') {
       const token = req.headers.authorization?.replace('Bearer ', '');
       if (!token) return sendJson(401, { error: 'Unauthorized' });
@@ -374,7 +396,7 @@ module.exports = async (req, res) => {
       return sendJson(200, { success: true });
     }
 
-    // DELETE /api/conversations/:id
+    // DELETE /api/conversations/:id – delete a conversation
     if (path.startsWith('/api/conversations/') && req.method === 'DELETE') {
       const id = path.split('/').pop();
       const token = req.headers.authorization?.replace('Bearer ', '');
@@ -392,7 +414,7 @@ module.exports = async (req, res) => {
       return sendJson(200, { success: true });
     }
 
-    // ─── AI endpoint ────────────────────────────────────────────
+    // ─── AI CHAT ──────────────────────────────────────────────────
 
     // POST /api/chat
     if (path === '/api/chat' && req.method === 'POST') {
@@ -405,13 +427,10 @@ module.exports = async (req, res) => {
       const { message, history, model, temperature, webSearchEnabled } = req.body;
       if (!message) return sendJson(400, { error: 'Message required' });
 
-      // Build messages array
       const messages = history ? [...history, { role: 'user', content: message }] : [{ role: 'user', content: message }];
 
-      // Perform web search if enabled (default true)
       let webResults = [];
       if (webSearchEnabled !== false) {
-        // Extract keywords from the last user message for search
         const searchQuery = messages[messages.length - 1].content;
         webResults = await performWebSearch(searchQuery);
       }
