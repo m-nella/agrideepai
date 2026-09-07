@@ -1,4 +1,4 @@
-// api/chat.js – AI endpoint with built‑in web search (no auth, no database)
+// api/chat.js – AI + built-in web search (no auth, no DB)
 module.exports = async (req, res) => {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,9 +16,8 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Message required' });
   }
 
-  // Environment keys
+  // Environment keys (set in Vercel)
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
-  const GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
   const SERPER_API_KEY = process.env.SERPER_API_KEY;
   const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 
@@ -61,7 +60,7 @@ module.exports = async (req, res) => {
     return [];
   }
 
-  // ─── AI Response ──────────────────────────────────────────────
+  // ─── AI ──────────────────────────────────────────────────────
   async function getAIResponse(messages, webResults = [], fileAttachments = []) {
     let fileContext = '';
     if (fileAttachments.length > 0) {
@@ -88,13 +87,12 @@ ${webResults.map((r, i) => `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.link}
 
 Now respond to the user's last message.`;
 
-    // Build messages array for AI
     const fullMessages = [
       { role: 'system', content: systemPrompt },
       ...messages,
     ];
 
-    // Try Groq first
+    // Only Groq (reliable, fast, free tier)
     if (GROQ_API_KEY) {
       try {
         const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -113,46 +111,21 @@ Now respond to the user's last message.`;
         if (resp.ok) {
           const data = await resp.json();
           return data.choices[0].message.content;
+        } else {
+          const errText = await resp.text();
+          console.error('Groq error:', resp.status, errText);
         }
       } catch (e) { console.error('Groq error:', e.message); }
-    }
-
-    // Fallback to Gemini
-    if (GEMINI_API_KEY) {
-      try {
-        // Convert messages to Gemini format
-        const genAI = require('@google/generative-ai');
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-        // Build history
-        const history = [];
-        const last = fullMessages.pop();
-        const rest = fullMessages.slice(1); // skip system
-        for (let i = 0; i < rest.length; i++) {
-          const m = rest[i];
-          const role = m.role === 'user' ? 'user' : 'model';
-          history.push({ role, parts: [{ text: m.content }] });
-        }
-        const chat = model.startChat({
-          history: history,
-          systemInstruction: systemPrompt,
-        });
-        const result = await chat.sendMessage(last.content);
-        return result.response.text();
-      } catch (e) { console.error('Gemini error:', e.message); }
     }
 
     return 'I am currently unable to generate a response. Please try again later.';
   }
 
   try {
-    // Build messages array from history and current message
     const messages = history ? [...history, { role: 'user', content: message }] : [{ role: 'user', content: message }];
-
-    // Perform web search (always enabled)
     const searchQuery = messages[messages.length - 1].content;
     const webResults = await performWebSearch(searchQuery);
 
-    // Attachments (if any)
     let fileAttachments = [];
     if (files && Array.isArray(files)) {
       fileAttachments = files.map(f => ({ name: f.name, type: f.type }));
