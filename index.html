@@ -2150,6 +2150,7 @@
         const token = getSessionToken();
         const user = getCurrentUser();
         if (token && user) {
+          console.log('🔄 Restoring session for:', user.email);
           state.user = user;
           state.sessionToken = token;
           state.isAuthenticated = true;
@@ -2195,8 +2196,10 @@
         }
 
         // Restore session
+        console.log('🔍 Checking for existing session...');
         const sessionRestored = await restoreSession();
         if (!sessionRestored) {
+          console.log('👤 No session found. Guest mode.');
           clearSession();
           state.user = null;
           state.sessionToken = null;
@@ -2206,6 +2209,8 @@
           state.activeId = null;
           renderHistory();
           emptyState.classList.remove('is-hidden');
+        } else {
+          console.log('✅ Session restored successfully.');
         }
 
         // Auto‑save every 10 seconds
