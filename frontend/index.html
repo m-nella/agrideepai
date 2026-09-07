@@ -8,7 +8,6 @@
   <meta name="description" content="AgriDeepAI – AI assistance for agriculture, livestock, and agribusiness." />
   <meta property="og:title" content="AgriDeepAI" />
   <meta property="og:description" content="Your smart agricultural AI assistant." />
-  <meta property="og:type" content="website" />
 </head>
 <body>
   <div id="app">
@@ -64,6 +63,17 @@
       </footer>
     </main>
   </div>
+
+  <!-- Auth Modal -->
+  <div id="authModal" class="modal hidden">
+    <div class="modal-content">
+      <span class="modal-close">&times;</span>
+      <div id="authModalBody">
+        <!-- dynamically filled by JS -->
+      </div>
+    </div>
+  </div>
+
   <script src="main.js" type="module"></script>
 </body>
 </html>
