@@ -500,6 +500,10 @@
             <button class="password-toggle" type="button" data-target="authConfirmPassword" aria-label="Toggle password visibility">👁</button>
           </div>
         </div>
+        <div class="field" id="authCodeField" style="display:none;">
+          <label for="authCode">Verification Code</label>
+          <input type="text" id="authCode" placeholder="Enter 6-digit code" />
+        </div>
         <div class="auth-error" id="authError">Invalid credentials.</div>
       </div>
       <div class="modal-actions">
@@ -662,9 +666,15 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- ==========================================================
-  JAVASCRIPT — Complete with Custom Auth (MongoDB + Brevo)
+  JAVASCRIPT — Full App with Verification Modal
   ========================================================== -->
   <script>
+    // Global error handler
+    window.onerror = function(message, source, lineno, colno, error) {
+      console.error('❌ Global error:', message, error);
+      return false;
+    };
+
     document.addEventListener('DOMContentLoaded', function() {
       console.log('🚀 AgriDeepAI script started.');
 
@@ -697,6 +707,8 @@
         userScrolledUp: false,
         isAuthenticated: false,
         dropdownOpen: false,
+        pendingSignup: null,
+        pendingLogin: null,
       };
 
       // ─── DOM REFS ──────────────────────────────────────────────
@@ -731,12 +743,14 @@
       const authEmail = $('authEmail');
       const authPassword = $('authPassword');
       const authConfirmPassword = $('authConfirmPassword');
+      const authCode = $('authCode');
       const authError = $('authError');
       const authSubmitBtn = $('authSubmitBtn');
       const authSwitchBtn = $('authSwitchBtn');
       const authGuestBtn = $('authGuestBtn');
       const authNameField = $('authNameField');
       const authConfirmField = $('authConfirmField');
+      const authCodeField = $('authCodeField');
 
       const settingsModal = $('settingsModal');
       const settingsCloseBtn = $('settingsCloseBtn');
@@ -865,46 +879,99 @@
 
       // ─── AUTH FUNCTIONS ─────────────────────────────────────────
       async function handleSignUp(email, password, name) {
-        // 1. Send verification code
         await callAPI('/api/send-verification', 'POST', { email });
         showToast('Verification code sent to your email.', 'success');
-        const code = prompt('Enter the 6‑digit verification code sent to your email:');
-        if (!code) return;
-        // 2. Complete sign-up
-        const result = await callAPI('/api/auth/signup', 'POST', {
-          email,
-          password,
-          name,
-          verificationCode: code,
-        });
-        setSessionToken(result.token);
-        setCurrentUser(result.user);
-        state.user = result.user;
-        state.sessionToken = result.token;
-        state.isAuthenticated = true;
-        updateUIForUser(result.user);
-        await loadConversations();
-        closeModal(authModal);
-        showToast('Account created!', 'success');
+        state.pendingSignup = { email, password, name };
+        // Switch modal to verify mode
+        authMode = 'verify';
+        authModalTitle.textContent = 'Verify Your Email';
+        authModalDesc.textContent = `We sent a 6‑digit code to ${email}. Enter it below.`;
+        authSubmitBtn.textContent = 'Verify';
+        authSwitchBtn.style.display = 'none';
+        authGuestBtn.style.display = 'none';
+        authNameField.style.display = 'none';
+        authConfirmField.style.display = 'none';
+        authCodeField.style.display = 'block';
+        authCode.value = '';
+        authCode.focus();
+        authError.textContent = '';
+        authError.classList.remove('is-visible');
+      }
+
+      async function verifySignUp() {
+        const code = authCode.value.trim();
+        if (!code) {
+          authError.textContent = 'Please enter the verification code.';
+          authError.classList.add('is-visible');
+          return;
+        }
+        const { email, password, name } = state.pendingSignup;
+        try {
+          const result = await callAPI('/api/auth/signup', 'POST', {
+            email,
+            password,
+            name,
+            verificationCode: code,
+          });
+          setSessionToken(result.token);
+          setCurrentUser(result.user);
+          state.user = result.user;
+          state.sessionToken = result.token;
+          state.isAuthenticated = true;
+          updateUIForUser(result.user);
+          await loadConversations();
+          closeModal(authModal);
+          showToast('Account created!', 'success');
+          state.pendingSignup = null;
+        } catch (err) {
+          authError.textContent = err.message;
+          authError.classList.add('is-visible');
+        }
       }
 
       async function handleSignIn(email, password) {
-        // 1. Request login code
         await callAPI('/api/auth/login', 'POST', { email, password });
         showToast('Verification code sent to your email.', 'success');
-        const code = prompt('Enter the 6‑digit verification code sent to your email:');
-        if (!code) return;
-        // 2. Verify login
-        const result = await callAPI('/api/auth/verify-login', 'POST', { email, code });
-        setSessionToken(result.token);
-        setCurrentUser(result.user);
-        state.user = result.user;
-        state.sessionToken = result.token;
-        state.isAuthenticated = true;
-        updateUIForUser(result.user);
-        await loadConversations();
-        closeModal(authModal);
-        showToast('Signed in!', 'success');
+        state.pendingLogin = { email };
+        authMode = 'verify';
+        authModalTitle.textContent = 'Verify Your Email';
+        authModalDesc.textContent = `We sent a 6‑digit code to ${email}. Enter it to complete sign‑in.`;
+        authSubmitBtn.textContent = 'Verify';
+        authSwitchBtn.style.display = 'none';
+        authGuestBtn.style.display = 'none';
+        authNameField.style.display = 'none';
+        authConfirmField.style.display = 'none';
+        authCodeField.style.display = 'block';
+        authCode.value = '';
+        authCode.focus();
+        authError.textContent = '';
+        authError.classList.remove('is-visible');
+      }
+
+      async function verifyLogin() {
+        const code = authCode.value.trim();
+        if (!code) {
+          authError.textContent = 'Please enter the verification code.';
+          authError.classList.add('is-visible');
+          return;
+        }
+        const email = state.pendingLogin.email;
+        try {
+          const result = await callAPI('/api/auth/verify-login', 'POST', { email, code });
+          setSessionToken(result.token);
+          setCurrentUser(result.user);
+          state.user = result.user;
+          state.sessionToken = result.token;
+          state.isAuthenticated = true;
+          updateUIForUser(result.user);
+          await loadConversations();
+          closeModal(authModal);
+          showToast('Signed in!', 'success');
+          state.pendingLogin = null;
+        } catch (err) {
+          authError.textContent = err.message;
+          authError.classList.add('is-visible');
+        }
       }
 
       async function handleSignOut() {
@@ -931,12 +998,12 @@
           avatarDisplay.textContent = name.charAt(0).toUpperCase();
           userNameDisplay.textContent = name;
           userSubDisplay.textContent = user.email || 'signed in';
-          settingsIcon.style.display = 'block';
+          settingsIcon.style.display = 'block';   // show gear
         } else {
           avatarDisplay.textContent = '👤';
           userNameDisplay.textContent = 'Sign In';
           userSubDisplay.textContent = 'Click to sign in';
-          settingsIcon.style.display = 'none';
+          settingsIcon.style.display = 'none';    // hide gear
         }
       }
 
@@ -997,12 +1064,6 @@
       }
 
       async function deleteConversation(convId) {
-        // Not implemented in backend DELETE, but we can handle via POST with empty list?
-        // For simplicity, we just remove from local and rely on next sync.
-        // Actually, we can call a DELETE route if we add it, but we'll keep it simple.
-        // We'll implement a soft delete by removing from state and saving the remaining.
-        // But we need a delete endpoint – we'll add it in the backend later.
-        // For now, we'll just remove from local and re-save the remaining.
         delete state.conversations[convId];
         if (state.activeId === convId) {
           state.activeId = null;
@@ -1010,7 +1071,6 @@
           renderHistory();
           if (Object.keys(state.conversations).length === 0) newChat();
         }
-        // Save the updated list
         const token = getSessionToken();
         if (token) {
           const convs = Object.values(state.conversations);
@@ -1031,7 +1091,7 @@
       }
 
       // ─── AUTH MODAL EVENTS ──────────────────────────────────────
-      let authMode = 'signin';
+      let authMode = 'signin'; // 'signin', 'signup', 'verify'
 
       function openAuthModal(mode = 'signin') {
         authMode = mode;
@@ -1041,14 +1101,18 @@
         authEmail.value = '';
         authPassword.value = '';
         authConfirmPassword.value = '';
+        authCode.value = '';
         authNameField.style.display = mode === 'signup' ? 'block' : 'none';
         authConfirmField.style.display = mode === 'signup' ? 'block' : 'none';
+        authCodeField.style.display = 'none';
+        authSwitchBtn.style.display = 'block';
+        authGuestBtn.style.display = 'block';
         if (mode === 'signin') {
           authModalTitle.textContent = 'Sign In';
           authModalDesc.textContent = 'Sign in to save your chats across devices.';
           authSubmitBtn.textContent = 'Sign In';
           authSwitchBtn.textContent = 'Create Account';
-        } else {
+        } else if (mode === 'signup') {
           authModalTitle.textContent = 'Create Account';
           authModalDesc.textContent = 'Join AgriDeepAI to save your chats.';
           authSubmitBtn.textContent = 'Sign Up';
@@ -1058,6 +1122,17 @@
       }
 
       authSubmitBtn.addEventListener('click', async () => {
+        if (authMode === 'verify') {
+          if (state.pendingSignup) {
+            await verifySignUp();
+          } else if (state.pendingLogin) {
+            await verifyLogin();
+          } else {
+            showToast('No pending verification.', 'error');
+          }
+          return;
+        }
+
         const email = authEmail.value.trim();
         const password = authPassword.value.trim();
         if (!email || !password) {
@@ -1090,6 +1165,10 @@
       });
 
       authSwitchBtn.addEventListener('click', () => {
+        if (authMode === 'verify') {
+          openAuthModal('signin');
+          return;
+        }
         openAuthModal(authMode === 'signin' ? 'signup' : 'signin');
       });
 
@@ -1121,6 +1200,16 @@
         }
       });
 
+      settingsIcon.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.isAuthenticated) {
+          if (state.dropdownOpen) closeDropdown();
+          else openDropdown();
+        } else {
+          openAuthModal('signin');
+        }
+      });
+
       function openDropdown() {
         state.dropdownOpen = true;
         accountDropdown.classList.add('is-open');
@@ -1130,7 +1219,7 @@
         accountDropdown.classList.remove('is-open');
       }
       document.addEventListener('click', (e) => {
-        if (state.dropdownOpen && !accountDropdown.contains(e.target) && e.target !== authBtn) {
+        if (state.dropdownOpen && !accountDropdown.contains(e.target) && e.target !== authBtn && e.target !== settingsIcon) {
           closeDropdown();
         }
       });
@@ -1161,16 +1250,6 @@
               break;
           }
         });
-      });
-
-      settingsIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (state.isAuthenticated) {
-          if (state.dropdownOpen) closeDropdown();
-          else openDropdown();
-        } else {
-          openAuthModal('signin');
-        }
       });
 
       // ─── ACCOUNT SETTINGS ───────────────────────────────────────
@@ -1900,7 +1979,7 @@
           renderHistory();
           newChat();
         }
-        // Auto‑save
+        // Auto‑save every 10 seconds
         setInterval(() => {
           if (state.isAuthenticated && state.activeId) {
             saveConversation(state.activeId);
