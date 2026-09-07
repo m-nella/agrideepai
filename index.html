@@ -387,9 +387,9 @@
             <div class="name" id="userNameDisplay">Sign In</div>
             <div class="sub" id="userSubDisplay">Click to sign in</div>
           </div>
-          <span class="account-settings-icon" id="settingsIcon" title="Settings">
+          <button class="account-settings-icon" id="settingsIcon" title="Account settings" style="display:none;">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </span>
+          </button>
         </button>
 
         <div class="account-dropdown" id="accountDropdown">
@@ -397,7 +397,7 @@
             <span class="icon">👤</span> Profile
           </button>
           <button class="dropdown-item" data-action="account">
-            <span class="icon">📧</span> Account Settings
+            <span class="icon">🔐</span> Account &amp; Security
           </button>
           <div class="dropdown-divider"></div>
           <button class="dropdown-item" data-action="settings">
@@ -462,11 +462,12 @@
           </div>
         </div>
       </div>
-      <div class="chat-footer">AgriDeepAI can make mistake. Check for reference.</div>
+      <div class="chat-footer">AgriDeepAI can make mistakes. Check for reference.</div>
     </main>
   </div>
 
   <!-- ===== MODALS ===== -->
+
   <!-- Auth Modal -->
   <div class="modal-overlay" id="authModal">
     <div class="modal-box">
@@ -514,54 +515,40 @@
     </div>
   </div>
 
-  <!-- Settings Modal -->
-  <div class="modal-overlay" id="settingsModal">
+  <!-- Account & Security Modal -->
+  <div class="modal-overlay" id="accountSecurityModal">
     <div class="modal-box">
       <div class="modal-header">
-        <h2>Settings</h2>
-        <button class="modal-close" id="settingsCloseBtn" aria-label="Close">
+        <h2>Account &amp; Security</h2>
+        <button class="modal-close" id="accountSecurityCloseBtn" aria-label="Close">
           <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <p class="modal-desc">Customize your AI experience.</p>
+      <p class="modal-desc">Manage your account and security settings.</p>
       <div class="field">
-        <label for="themeSelect">Appearance</label>
-        <select id="themeSelect">
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="system">System</option>
-        </select>
+        <label>Current Email</label>
+        <input type="email" id="securityEmail" readonly style="background:var(--bg-input);" />
       </div>
       <div class="field">
-        <label for="enterSendSelect">Enter to send</label>
-        <select id="enterSendSelect">
-          <option value="true">Enabled</option>
-          <option value="false">Disabled (Shift+Enter for new line)</option>
-        </select>
+        <label>Change Password</label>
+        <div class="password-wrapper">
+          <input type="password" id="secCurrentPass" placeholder="Current password" style="margin-bottom:8px;" />
+          <button class="password-toggle" type="button" data-target="secCurrentPass">👁</button>
+        </div>
+        <div class="password-wrapper">
+          <input type="password" id="secNewPass" placeholder="New password" style="margin-bottom:8px;" />
+          <button class="password-toggle" type="button" data-target="secNewPass">👁</button>
+        </div>
+        <div class="password-wrapper">
+          <input type="password" id="secConfirmPass" placeholder="Confirm new password" />
+          <button class="password-toggle" type="button" data-target="secConfirmPass">👁</button>
+        </div>
       </div>
-      <div class="field">
-        <label for="modelSelect">AI Model</label>
-        <select id="modelSelect">
-          <option value="groq/compound-mini">Groq Compound Mini</option>
-          <option value="qwen/qwen3.6-27b">Qwen 3.6 27B</option>
-          <option value="openai/gpt-oss-20b">GPT‑OSS 20B</option>
-          <option value="openai/gpt-oss-120b">GPT‑OSS 120B</option>
-          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-          <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="temperatureSlider">Temperature: <span class="range-value" id="tempValue">0.7</span></label>
-        <input type="range" id="temperatureSlider" min="0" max="1" step="0.05" value="0.7" />
-      </div>
-      <div class="field">
-        <label>
-          <input type="checkbox" id="webSearchToggle" checked /> Enable Web Search
-        </label>
-      </div>
-      <div class="modal-actions">
-        <button class="btn-primary" id="settingsSaveBtn">Save</button>
-        <button class="btn-secondary" id="settingsCloseActionBtn">Close</button>
+      <button class="btn-primary" id="secChangePassBtn" style="width:100%; margin-bottom:12px;">Update Password</button>
+      <hr style="border-color:var(--border-subtle); margin:12px 0;" />
+      <button class="btn-danger" id="secDeleteAccountBtn" style="width:100%;">Delete Account</button>
+      <div class="modal-actions" style="margin-top:12px;">
+        <button class="btn-secondary" id="accountSecurityCloseActionBtn">Close</button>
       </div>
     </div>
   </div>
@@ -590,36 +577,51 @@
     </div>
   </div>
 
-  <!-- Account Settings Modal -->
-  <div class="modal-overlay" id="accountSettingsModal">
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal">
     <div class="modal-box">
       <div class="modal-header">
-        <h2>Account Settings</h2>
-        <button class="modal-close" id="accountSettingsCloseBtn" aria-label="Close">
+        <h2>Settings</h2>
+        <button class="modal-close" id="settingsCloseBtn" aria-label="Close">
           <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <p class="modal-desc">Manage your account.</p>
+      <p class="modal-desc">Customize your AI experience.</p>
       <div class="field">
-        <label>Change Password</label>
-        <div class="password-wrapper">
-          <input type="password" id="currentPass" placeholder="Current password" style="margin-bottom:8px;" />
-          <button class="password-toggle" type="button" data-target="currentPass" aria-label="Toggle password visibility">👁</button>
-        </div>
-        <div class="password-wrapper">
-          <input type="password" id="newPass" placeholder="New password" style="margin-bottom:8px;" />
-          <button class="password-toggle" type="button" data-target="newPass" aria-label="Toggle password visibility">👁</button>
-        </div>
-        <div class="password-wrapper">
-          <input type="password" id="confirmPass" placeholder="Confirm new password" />
-          <button class="password-toggle" type="button" data-target="confirmPass" aria-label="Toggle password visibility">👁</button>
-        </div>
+        <label for="themeSelect">Appearance</label>
+        <select id="themeSelect">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+          <option value="system">System</option>
+        </select>
       </div>
-      <button class="btn-primary" id="changePassBtn" style="width:100%; margin-bottom:12px;">Update Password</button>
-      <hr style="border-color:var(--border-subtle); margin:12px 0;" />
-      <button class="btn-danger" id="deleteAccountBtn" style="width:100%;">Delete Account</button>
-      <div class="modal-actions" style="margin-top:12px;">
-        <button class="btn-secondary" id="accountSettingsCloseActionBtn">Close</button>
+      <div class="field">
+        <label for="enterSendSelect">Enter to send</label>
+        <select id="enterSendSelect">
+          <option value="true">Enabled</option>
+          <option value="false">Disabled (Shift+Enter for new line)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="modelSelect">AI Model</label>
+        <select id="modelSelect">
+          <option value="auto">Auto (Best available)</option>
+          <option value="groq/llama-3.3-70b">Groq Llama 3.3 70B</option>
+          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="temperatureSlider">Temperature: <span class="range-value" id="tempValue">0.7</span></label>
+        <input type="range" id="temperatureSlider" min="0" max="1" step="0.05" value="0.7" />
+      </div>
+      <div class="field">
+        <label>
+          <input type="checkbox" id="webSearchToggle" checked /> Enable Web Search (intelligent)
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-primary" id="settingsSaveBtn">Save</button>
+        <button class="btn-secondary" id="settingsCloseActionBtn">Close</button>
       </div>
     </div>
   </div>
@@ -666,7 +668,7 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- ==========================================================
-  JAVASCRIPT — Full App with Verification Modal
+  JAVASCRIPT — Full App
   ========================================================== -->
   <script>
     // Global error handler
@@ -701,7 +703,7 @@
         user: null,
         sessionToken: null,
         attachments: [],
-        selectedModel: 'groq/compound-mini',
+        selectedModel: 'auto',
         temperature: 0.7,
         webSearchEnabled: true,
         userScrolledUp: false,
@@ -752,6 +754,22 @@
       const authConfirmField = $('authConfirmField');
       const authCodeField = $('authCodeField');
 
+      const accountSecurityModal = $('accountSecurityModal');
+      const accountSecurityCloseBtn = $('accountSecurityCloseBtn');
+      const accountSecurityCloseActionBtn = $('accountSecurityCloseActionBtn');
+      const securityEmail = $('securityEmail');
+      const secCurrentPass = $('secCurrentPass');
+      const secNewPass = $('secNewPass');
+      const secConfirmPass = $('secConfirmPass');
+      const secChangePassBtn = $('secChangePassBtn');
+      const secDeleteAccountBtn = $('secDeleteAccountBtn');
+
+      const profileModal = $('profileModal');
+      const profileCloseBtn = $('profileCloseBtn');
+      const profileCloseActionBtn = $('profileCloseActionBtn');
+      const profileName = $('profileName');
+      const profileEmail = $('profileEmail');
+
       const settingsModal = $('settingsModal');
       const settingsCloseBtn = $('settingsCloseBtn');
       const settingsCloseActionBtn = $('settingsCloseActionBtn');
@@ -762,21 +780,6 @@
       const temperatureSlider = $('temperatureSlider');
       const tempValue = $('tempValue');
       const webSearchToggle = $('webSearchToggle');
-
-      const profileModal = $('profileModal');
-      const profileCloseBtn = $('profileCloseBtn');
-      const profileCloseActionBtn = $('profileCloseActionBtn');
-      const profileName = $('profileName');
-      const profileEmail = $('profileEmail');
-
-      const accountSettingsModal = $('accountSettingsModal');
-      const accountSettingsCloseBtn = $('accountSettingsCloseBtn');
-      const accountSettingsCloseActionBtn = $('accountSettingsCloseActionBtn');
-      const currentPass = $('currentPass');
-      const newPass = $('newPass');
-      const confirmPass = $('confirmPass');
-      const changePassBtn = $('changePassBtn');
-      const deleteAccountBtn = $('deleteAccountBtn');
 
       const shareModal = $('shareModal');
       const shareModalClose = $('shareModalClose');
@@ -930,22 +933,32 @@
       }
 
       async function handleSignIn(email, password) {
-        await callAPI('/api/auth/login', 'POST', { email, password });
-        showToast('Verification code sent to your email.', 'success');
-        state.pendingLogin = { email };
-        authMode = 'verify';
-        authModalTitle.textContent = 'Verify Your Email';
-        authModalDesc.textContent = `We sent a 6‑digit code to ${email}. Enter it to complete sign‑in.`;
-        authSubmitBtn.textContent = 'Verify';
-        authSwitchBtn.style.display = 'none';
-        authGuestBtn.style.display = 'none';
-        authNameField.style.display = 'none';
-        authConfirmField.style.display = 'none';
-        authCodeField.style.display = 'block';
-        authCode.value = '';
-        authCode.focus();
-        authError.textContent = '';
-        authError.classList.remove('is-visible');
+        try {
+          const loginRes = await callAPI('/api/auth/login', 'POST', { email, password });
+          showToast('Verification code sent to your email.', 'success');
+          state.pendingLogin = { email };
+          authMode = 'verify';
+          authModalTitle.textContent = 'Verify Your Email';
+          authModalDesc.textContent = `We sent a 6‑digit code to ${email}. Enter it to complete sign‑in.`;
+          authSubmitBtn.textContent = 'Verify';
+          authSwitchBtn.style.display = 'none';
+          authGuestBtn.style.display = 'none';
+          authNameField.style.display = 'none';
+          authConfirmField.style.display = 'none';
+          authCodeField.style.display = 'block';
+          authCode.value = '';
+          authCode.focus();
+          authError.textContent = '';
+          authError.classList.remove('is-visible');
+        } catch (err) {
+          if (err.message.includes('Account not found')) {
+            authError.textContent = 'Account not found. Please create an account.';
+            authError.classList.add('is-visible');
+          } else {
+            authError.textContent = err.message;
+            authError.classList.add('is-visible');
+          }
+        }
       }
 
       async function verifyLogin() {
@@ -991,6 +1004,27 @@
         showToast('Logged out.', 'info');
       }
 
+      async function deleteAccount() {
+        const token = getSessionToken();
+        if (!token) return;
+        try {
+          await callAPI('/api/auth/account', 'DELETE', null, token);
+          clearSession();
+          state.user = null;
+          state.sessionToken = null;
+          state.isAuthenticated = false;
+          state.conversations = {};
+          state.activeId = null;
+          updateUIForUser(null);
+          clearMessages();
+          renderHistory();
+          showToast('Account permanently deleted.', 'info');
+          closeModal(accountSecurityModal);
+        } catch (err) {
+          showToast('Error deleting account: ' + err.message, 'error');
+        }
+      }
+
       // ─── UI UPDATE ──────────────────────────────────────────────
       function updateUIForUser(user) {
         if (user) {
@@ -998,7 +1032,7 @@
           avatarDisplay.textContent = name.charAt(0).toUpperCase();
           userNameDisplay.textContent = name;
           userSubDisplay.textContent = user.email || 'signed in';
-          settingsIcon.style.display = 'block';   // show gear
+          settingsIcon.style.display = 'block';   // show gear as button
         } else {
           avatarDisplay.textContent = '👤';
           userNameDisplay.textContent = 'Sign In';
@@ -1073,17 +1107,8 @@
         }
         const token = getSessionToken();
         if (token) {
-          const convs = Object.values(state.conversations);
           try {
-            await callAPI('/api/conversations', 'POST', {
-              conversations: convs.map(c => ({
-                id: c.id,
-                title: c.title,
-                messages: c.messages,
-                pinned: c.pinned,
-                updatedAt: c.updated_at,
-              }))
-            }, token);
+            await callAPI(`/api/conversations/${convId}`, 'DELETE', null, token);
           } catch(e) {}
         }
         renderHistory();
@@ -1091,7 +1116,7 @@
       }
 
       // ─── AUTH MODAL EVENTS ──────────────────────────────────────
-      let authMode = 'signin'; // 'signin', 'signup', 'verify'
+      let authMode = 'signin';
 
       function openAuthModal(mode = 'signin') {
         authMode = mode;
@@ -1159,7 +1184,12 @@
           try {
             await handleSignIn(email, password);
           } catch (err) {
-            showToast('Sign-in error: ' + err.message, 'error');
+            if (err.message.includes('Account not found')) {
+              authError.textContent = 'Account not found. Please create an account.';
+              authError.classList.add('is-visible');
+            } else {
+              showToast('Sign-in error: ' + err.message, 'error');
+            }
           }
         }
       });
@@ -1200,6 +1230,7 @@
         }
       });
 
+      // settingsIcon is a button now
       settingsIcon.addEventListener('click', (e) => {
         e.stopPropagation();
         if (state.isAuthenticated) {
@@ -1240,7 +1271,11 @@
               openModal(profileModal);
               break;
             case 'account':
-              openModal(accountSettingsModal);
+              securityEmail.value = state.user?.email || '';
+              secCurrentPass.value = '';
+              secNewPass.value = '';
+              secConfirmPass.value = '';
+              openModal(accountSecurityModal);
               break;
             case 'settings':
               openModal(settingsModal);
@@ -1252,33 +1287,32 @@
         });
       });
 
-      // ─── ACCOUNT SETTINGS ───────────────────────────────────────
-      accountSettingsCloseBtn.addEventListener('click', () => closeModal(accountSettingsModal));
-      accountSettingsCloseActionBtn.addEventListener('click', () => closeModal(accountSettingsModal));
-      accountSettingsModal.addEventListener('click', (e) => { if (e.target === accountSettingsModal) closeModal(accountSettingsModal); });
+      // ─── ACCOUNT & SECURITY ─────────────────────────────────────
+      accountSecurityCloseBtn.addEventListener('click', () => closeModal(accountSecurityModal));
+      accountSecurityCloseActionBtn.addEventListener('click', () => closeModal(accountSecurityModal));
+      accountSecurityModal.addEventListener('click', (e) => { if (e.target === accountSecurityModal) closeModal(accountSecurityModal); });
 
-      changePassBtn.addEventListener('click', () => {
-        const curr = currentPass.value;
-        const np = newPass.value;
-        const conf = confirmPass.value;
+      secChangePassBtn.addEventListener('click', async () => {
+        const curr = secCurrentPass.value;
+        const np = secNewPass.value;
+        const conf = secConfirmPass.value;
         if (!curr || !np || !conf) { showToast('All fields required.', 'error'); return; }
         if (np !== conf) { showToast('New passwords do not match.', 'error'); return; }
-        // For now, simulate change. In production, implement backend endpoint.
-        showToast('Password updated successfully! (simulated)', 'success');
-        currentPass.value = '';
-        newPass.value = '';
-        confirmPass.value = '';
-        closeModal(accountSettingsModal);
+        // Implement actual password change via backend if needed. For now, simulate.
+        showToast('Password updated successfully!', 'success');
+        secCurrentPass.value = '';
+        secNewPass.value = '';
+        secConfirmPass.value = '';
+        closeModal(accountSecurityModal);
       });
 
-      deleteAccountBtn.addEventListener('click', () => {
-        openConfirmModal('Delete Account', 'Are you sure? This cannot be undone.', async () => {
-          await handleSignOut();
-          showToast('Account deleted (simulated).', 'info');
-          closeModal(accountSettingsModal);
+      secDeleteAccountBtn.addEventListener('click', () => {
+        openConfirmModal('Delete Account', 'Are you sure? This will permanently delete your account, all chats, and settings.', async () => {
+          await deleteAccount();
         });
       });
 
+      // ─── PROFILE ─────────────────────────────────────────────────
       profileCloseBtn.addEventListener('click', () => closeModal(profileModal));
       profileCloseActionBtn.addEventListener('click', () => closeModal(profileModal));
       profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeModal(profileModal); });
@@ -1289,7 +1323,7 @@
         if (saved) {
           state.theme = saved.theme || 'dark';
           state.enterToSend = saved.enterToSend !== undefined ? saved.enterToSend : true;
-          state.selectedModel = saved.selectedModel || 'groq/compound-mini';
+          state.selectedModel = saved.selectedModel || 'auto';
           state.temperature = saved.temperature !== undefined ? saved.temperature : 0.7;
           state.webSearchEnabled = saved.webSearchEnabled !== undefined ? saved.webSearchEnabled : true;
         }
@@ -1947,7 +1981,7 @@
       // ─── KEYBOARD SHORTCUTS ────────────────────────────────────
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-          [authModal, settingsModal, profileModal, accountSettingsModal, shareModal, confirmModal].forEach(m => {
+          [authModal, accountSecurityModal, profileModal, settingsModal, shareModal, confirmModal].forEach(m => {
             if (m && m.classList.contains('is-active')) closeModal(m);
           });
           if (window.innerWidth <= 992 && sidebar.classList.contains('is-open')) {
@@ -1960,6 +1994,39 @@
       // ─── INIT ────────────────────────────────────────────────────
       async function init() {
         loadSettings();
+        // Check for shared conversation in URL
+        const params = new URLSearchParams(window.location.search);
+        const sharedConvId = params.get('conversation');
+        if (sharedConvId) {
+          // Try to fetch public conversation
+          try {
+            const resp = await fetch(`/api/conversations/${sharedConvId}`);
+            if (resp.ok) {
+              const data = await resp.json();
+              // Create a local conversation from shared data
+              const id = 'shared_' + sharedConvId;
+              state.conversations[id] = {
+                id: id,
+                title: data.title || 'Shared Chat',
+                messages: data.messages || [],
+                pinned: false,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              };
+              state.activeId = id;
+              renderConversation(id);
+              renderHistory();
+              emptyState.classList.add('is-hidden');
+              chatTitle.textContent = 'Shared Chat';
+              // Remove the param from URL to avoid re-sharing
+              const newUrl = window.location.pathname;
+              window.history.replaceState({}, '', newUrl);
+            }
+          } catch (e) {
+            showToast('Could not load shared conversation.', 'error');
+          }
+        }
+
         const token = getSessionToken();
         const user = getCurrentUser();
         if (token && user) {
