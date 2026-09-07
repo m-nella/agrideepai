@@ -1,97 +1,196 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-const WELCOME = { id: "welcome", role: "assistant", content: "Hello! I’m AfriDeepAI, your agriculture and livestock intelligence assistant. Ask me about crops, livestock, soil, plant health, farming techniques, agribusiness, Rwanda, or global agriculture.", createdAt: new Date().toISOString() };
+const WELCOME = { id: "welcome", role: "assistant", content: "Hello! I'm AfriDeepAI. I can help with crops, livestock, soil, pests, plant diseases, animal management, agribusiness, and agriculture in Rwanda and around the world.", created_at: new Date().toISOString(), pinned: false };
 const GUEST_KEY = "afrideepai_guest_chats_v2";
-const newId = (prefix = "id") => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const clip = (value, length = 58) => value.length > length ? `${value.slice(0, length).trim()}…` : value;
+const guestId = () => `guest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const short = (text, n = 54) => text.length > n ? `${text.slice(0, n).trim()}…` : text;
 
-function Icon({ name, size = 20 }) {
-  const p = {
-    menu:<><path d="M4 6h16M4 12h16M4 18h16"/></>, close:<path d="M6 6l12 12M18 6L6 18"/>, plus:<path d="M12 5v14M5 12h14"/>,
-    send:<><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></>, stop:<rect x="7" y="7" width="10" height="10" rx="2"/>,
-    copy:<><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></>, edit:<><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5Z"/></>,
-    trash:<><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5"/></>, pin:<><path d="M12 17v5M8 3h8l-1 5 3 3v2H6v-2l3-3-1-5Z"/></>,
-    more:<><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></>,
-    search:<><circle cx="11" cy="11" r="6"/><path d="m20 20-4-4"/></>, attach:<path d="m21 11-8.6 8.6a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 1 1-2.8-2.8l8.2-8.2"/>,
-    regenerate:<><path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 4v7h-7"/></>, share:<><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/></>,
-    check:<path d="m5 12 4 4L19 6"/>, user:<><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4 3.5-6 8-6s7.2 2 8 6"/></>, arrow:<path d="m6 9 6 6 6-6"/>, navigator:<><path d="M7 4h10M7 12h10M7 20h10"/><circle cx="4" cy="4" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="20" r="1" fill="currentColor"/></>, login:<path d="M10 17l5-5-5-5M15 12H3M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/>, logout:<path d="m10 17 5-5-5-5M15 12H3M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/>
+const supabase = typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+  : null;
+
+function Icon({ name, size = 19 }) {
+  const paths = {
+    menu: <><path d="M4 6h16M4 12h16M4 18h16"/></>, close: <path d="M6 6l12 12M18 6L6 18"/>, plus: <path d="M12 5v14M5 12h14"/>, send: <><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></>, stop: <rect x="7" y="7" width="10" height="10" rx="2"/>, copy: <><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></>, edit: <><path d="M12 20h9"/><path d="m16.5 3.5 4 4L8 20l-4 1 1-4Z"/></>, trash: <><path d="M4 7h16M10 11v5M14 11v5M9 7V4h6v3M6 7l1 13h10l1-13"/></>, pin: <><path d="M12 17v5"/><path d="M8 3h8l-1 5 3 3v2H6v-2l3-3Z"/></>, more: <><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></>, user: <><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.2-6 8-6s6.5 2 8 6"/></>, logout: <><path d="M10 17l5-5-5-5M15 12H3"/><path d="M12 4h7v16h-7"/></>, search: <><circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2"/></>, nav: <><path d="M5 5h14M5 12h14M5 19h10"/></>, share: <><circle cx="18" cy="5" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="18" cy="19" r="2"/><path d="m8 11 8-5M8 13l8 5"/></>, attach: <path d="m20.5 11.5-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7"/>, refresh: <><path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 4v7h-7"/></>, arrow: <path d="m9 18 6-6-6-6"/>
   };
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{p[name]}</svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
-
-function RichText({ text }) {
-  const blocks = text.replace(/\r/g, "").split(/\n\n+/);
-  return <div className="rich-text">{blocks.map((block, i) => {
-    if (block.startsWith("```")) { const lines = block.split("\n"); return <pre key={i}><code>{lines.slice(1, lines.at(-1)==="```"?-1:undefined).join("\n")}</code></pre>; }
-    if (/^###\s/.test(block)) return <h3 key={i}>{block.replace(/^###\s/, "")}</h3>;
-    if (/^##\s/.test(block)) return <h2 key={i}>{block.replace(/^##\s/, "")}</h2>;
-    if (/^#\s/.test(block)) return <h1 key={i}>{block.replace(/^#\s/, "")}</h1>;
-    if (block.split("\n").every(x => /^[-*]\s+/.test(x))) return <ul key={i}>{block.split("\n").map((x,j)=><li key={j}>{inline(x.replace(/^[-*]\s+/, ""))}</li>)}</ul>;
-    if (block.split("\n").every(x => /^\d+[.)]\s+/.test(x))) return <ol key={i}>{block.split("\n").map((x,j)=><li key={j}>{inline(x.replace(/^\d+[.)]\s+/, ""))}</li>)}</ol>;
-    return <p key={i}>{block.split("\n").map((x,j)=><span key={j}>{inline(x)}{j < block.split("\n").length-1 && <br/>}</span>)}</p>;
-  })}</div>;
-}
-function inline(value) { const parts=value.split(/(`[^`]+`|\*\*[^*]+\*\*)/g); return parts.map((p,i)=>p.startsWith("`")?<code key={i}>{p.slice(1,-1)}</code>:p.startsWith("**")?<strong key={i}>{p.slice(2,-2)}</strong>:p); }
 
 export default function Home() {
-  const [sidebarOpen,setSidebarOpen]=useState(true),[mobileSidebar,setMobileSidebar]=useState(false),[navigatorOpen,setNavigatorOpen]=useState(false);
-  const [chats,setChats]=useState([{id:"guest-welcome",title:"Welcome to AfriDeepAI",pinned:false,messages:[WELCOME],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}]);
-  const [activeChatId,setActiveChatId]=useState("guest-welcome"),[input,setInput]=useState(""),[isGenerating,setIsGenerating]=useState(false),[error,setError]=useState("");
-  const [copiedId,setCopiedId]=useState(null),[editing,setEditing]=useState(null),[editingValue,setEditingValue]=useState(""),[chatMenu,setChatMenu]=useState(null),[activeMessageId,setActiveMessageId]=useState(null);
-  const [user,setUser]=useState(null),[settingsOpen,setSettingsOpen]=useState(false),[settingsMode,setSettingsMode]=useState("password"),[settingsStep,setSettingsStep]=useState("form"),[settingsForm,setSettingsForm]=useState({currentPassword:"",newPassword:"",newEmail:"",code:"",deletePassword:""}),[settingsError,setSettingsError]=useState(""),[settingsBusy,setSettingsBusy]=useState(false),[authOpen,setAuthOpen]=useState(false),[authMode,setAuthMode]=useState("signin"),[authStep,setAuthStep]=useState("form"),[authForm,setAuthForm]=useState({name:"",email:"",password:"",code:""}),[authError,setAuthError]=useState(""),[authBusy,setAuthBusy]=useState(false);
-  const textareaRef=useRef(null), abortRef=useRef(null), endRef=useRef(null), fileRef=useRef(null);
-  const activeChat=useMemo(()=>chats.find(c=>c.id===activeChatId)||chats[0],[chats,activeChatId]); const messages=activeChat?.messages||[];
+  const [sidebar, setSidebar] = useState(true);
+  const [navOpen, setNavOpen] = useState(false);
+  const [chats, setChats] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+  const [input, setInput] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [controller, setController] = useState(null);
+  const [activeMessage, setActiveMessage] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [editValue, setEditValue] = useState("");
+  const [query, setQuery] = useState("");
+  const [session, setSession] = useState(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [authMode, setAuthMode] = useState("signin");
+  const [authMessage, setAuthMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", password: "", newEmail: "", newPassword: "" });
+  const scrollRef = useRef(null);
+  const inputRef = useRef(null);
 
-  useEffect(()=>{try{const saved=JSON.parse(localStorage.getItem(GUEST_KEY)||"null");if(Array.isArray(saved)&&saved.length){setChats(saved);setActiveChatId(saved[0].id);}}catch{} fetch("/api/auth/me").then(r=>r.json()).then(async d=>{if(d.user){setUser(d.user);await loadCloudChats();}}).catch(()=>{});},[]);
-  useEffect(()=>{if(!user)localStorage.setItem(GUEST_KEY,JSON.stringify(chats));},[chats,user]);
-  useEffect(()=>{if(textareaRef.current){textareaRef.current.style.height="auto";textareaRef.current.style.height=`${Math.min(textareaRef.current.scrollHeight,180)}px`; }},[input]);
-  useEffect(()=>{endRef.current?.scrollIntoView({behavior:isGenerating?"auto":"smooth"});},[messages.length,isGenerating]);
-  useEffect(()=>{const observer=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio)[0];if(visible)setActiveMessageId(visible.target.id);},{root:null,threshold:[0.25,0.5,0.75]});document.querySelectorAll("[data-message-id]").forEach(el=>observer.observe(el));return()=>observer.disconnect();},[messages.length,activeChatId]);
+  const activeChat = useMemo(() => chats.find(c => c.id === activeId), [chats, activeId]);
+  const messages = activeChat?.messages || [];
+  const visibleChats = useMemo(() => chats.filter(c => c.title.toLowerCase().includes(query.toLowerCase())), [chats, query]);
+  const signedIn = !!session?.user;
 
-  async function loadCloudChats(){const r=await fetch("/api/chats");if(!r.ok)return;const d=await r.json();const normalized=(d.chats||[]).map(c=>({...c,createdAt:c.created_at,updatedAt:c.updated_at,messages:(c.messages||[]).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).map(m=>({...m,createdAt:m.created_at,updatedAt:m.updated_at}))}));if(normalized.length){setChats(normalized);setActiveChatId(normalized[0].id);}else createNewChat(true);}
-  function updateChat(id,fn){setChats(all=>all.map(c=>c.id===id?fn(c):c));}
-  async function createNewChat(cloud=false){const shouldCloud=cloud||Boolean(user);if(shouldCloud){const r=await fetch("/api/chats",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:"New conversation"})});if(r.ok){const d=await r.json();const c={...d.chat,messages:[],createdAt:d.chat.created_at,updatedAt:d.chat.updated_at};setChats(x=>[c,...x]);setActiveChatId(c.id);setMobileSidebar(false);return;}}const c={id:newId("chat"),title:"New conversation",pinned:false,messages:[],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};setChats(x=>[c,...x]);setActiveChatId(c.id);setMobileSidebar(false);}
-  async function persistMessage(chatId,message){if(!user)return;const r=await fetch(`/api/chats/${chatId}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role:message.role,content:message.content})});if(r.ok){const d=await r.json();updateChat(chatId,c=>({...c,messages:c.messages.map(m=>m.id===message.id?{...m,id:d.message.id,createdAt:d.message.created_at}:m)}));}}
-  async function persistChatPatch(chatId,patch){if(!user)return;await fetch(`/api/chats/${chatId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});}
-  async function sendMessage(override){const content=(override??input).trim();if(!content||isGenerating||!activeChat)return;setError("");const chatId=activeChat.id;const msg={id:newId("message"),role:"user",content,createdAt:new Date().toISOString()};updateChat(chatId,c=>({...c,title:c.title==="New conversation"?clip(content):c.title,messages:[...c.messages,msg],updatedAt:new Date().toISOString()}));if(user&&activeChat.title==="New conversation")persistChatPatch(chatId,{title:clip(content)});setInput("");setIsGenerating(true);await persistMessage(chatId,msg);try{abortRef.current=new AbortController();const context=[...messages,msg].map(m=>({role:m.role,content:m.content}));const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},signal:abortRef.current.signal,body:JSON.stringify({messages:context})});const d=await r.json();if(!r.ok)throw new Error(d.error||"The AI could not answer right now.");const answer={id:newId("message"),role:"assistant",content:d.message,createdAt:new Date().toISOString()};updateChat(chatId,c=>({...c,messages:[...c.messages,answer],updatedAt:new Date().toISOString()}));await persistMessage(chatId,answer);}catch(e){if(e.name!=="AbortError")setError(e.message||"Generation failed. Please try again.");}finally{setIsGenerating(false);abortRef.current=null;}}
-  function stopGenerating(){abortRef.current?.abort();setIsGenerating(false);}
-  async function copy(text,id){try{await navigator.clipboard.writeText(text);setCopiedId(id);setTimeout(()=>setCopiedId(null),1600);}catch{}}
-  async function toggleMessagePin(id){const target=messages.find(m=>m.id===id);if(!target)return;const pinned=!target.pinned;if(user) await fetch(`/api/chats/${activeChat.id}/messages/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({pinned})});updateChat(activeChat.id,c=>({...c,messages:c.messages.map(m=>m.id===id?{...m,pinned}:m)}));}
-  async function deleteMessage(id){if(user) await fetch(`/api/chats/${activeChat.id}/messages/${id}`,{method:"DELETE"});updateChat(activeChat.id,c=>({...c,messages:c.messages.filter(m=>m.id!==id)}));}
-  async function saveEdit(){if(!editing||!editingValue.trim())return;const content=editingValue.trim();if(user) await fetch(`/api/chats/${activeChat.id}/messages/${editing}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({content})});updateChat(activeChat.id,c=>({...c,messages:c.messages.map(m=>m.id===editing?{...m,content,edited:true}:m)}));setEditing(null);setEditingValue("");}
-  async function renameChat(chat){const title=window.prompt("Rename conversation",chat.title);if(!title?.trim())return;updateChat(chat.id,c=>({...c,title:title.trim()}));await persistChatPatch(chat.id,{title:title.trim()});}
-  async function pinChat(chat){updateChat(chat.id,c=>({...c,pinned:!c.pinned}));await persistChatPatch(chat.id,{pinned:!chat.pinned});}
-  async function removeChat(chat){if(!window.confirm("Delete this conversation?"))return;if(user)await fetch(`/api/chats/${chat.id}`,{method:"DELETE"});setChats(all=>{const next=all.filter(c=>c.id!==chat.id);if(next.length){setActiveChatId(next[0].id);return next;}const fallback={id:newId("chat"),title:"New conversation",pinned:false,messages:[],createdAt:new Date().toISOString()};setActiveChatId(fallback.id);return[fallback];});}
-  async function shareChat(){const text=messages.map(m=>`${m.role==="user"?"You":"AfriDeepAI"}:\n${m.content}`).join("\n\n");if(navigator.share){try{await navigator.share({title:activeChat.title,text});return;}catch{}}copy(text,"share");}
-  function openAuth(mode="signin"){setAuthMode(mode);setAuthStep("form");setAuthError("");setAuthOpen(true);}
-  async function authSubmit(e){e.preventDefault();setAuthBusy(true);setAuthError("");try{let endpoint,body;if(authMode==="signup"){endpoint="/api/auth/signup";body={name:authForm.name,email:authForm.email,password:authForm.password};}else if(authMode==="signin"){endpoint="/api/auth/signin";body={email:authForm.email,password:authForm.password};}else {endpoint="/api/auth/request-password-reset";body={email:authForm.email};}const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);setAuthStep("code");}catch(e){setAuthError(e.message||"Could not continue.");}finally{setAuthBusy(false);}}
-  async function verifyAuth(e){e.preventDefault();setAuthBusy(true);setAuthError("");try{let endpoint,body;if(authMode==="signup"){endpoint="/api/auth/verify-signup";body={name:authForm.name,email:authForm.email,password:authForm.password,code:authForm.code};}else if(authMode==="signin"){endpoint="/api/auth/verify-login";body={email:authForm.email,code:authForm.code};}else {endpoint="/api/auth/reset-password";body={email:authForm.email,password:authForm.password,code:authForm.code};}const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);if(authMode==="forgot"){setAuthMode("signin");setAuthStep("form");setAuthError("Password updated. You can sign in now.");return;}setUser(d.user);setAuthOpen(false);localStorage.removeItem(GUEST_KEY);await loadCloudChats();}catch(e){setAuthError(e.message||"Verification failed.");}finally{setAuthBusy(false);}}
-  async function signOut(){await fetch("/api/auth/signout",{method:"POST"});setUser(null);setSettingsOpen(false);setChats([{id:"guest-welcome",title:"Welcome to AfriDeepAI",pinned:false,messages:[WELCOME],createdAt:new Date().toISOString()}]);setActiveChatId("guest-welcome");}
-  async function submitSettings(e){e.preventDefault();setSettingsBusy(true);setSettingsError("");try{let endpoint,body;if(settingsMode==="password"){endpoint="/api/auth/change-password";body={currentPassword:settingsForm.currentPassword,newPassword:settingsForm.newPassword};}else if(settingsMode==="email"&&settingsStep==="form"){endpoint="/api/auth/request-change-email";body={newEmail:settingsForm.newEmail};}else if(settingsMode==="email"){endpoint="/api/auth/verify-change-email";body={newEmail:settingsForm.newEmail,code:settingsForm.code};}else{endpoint="/api/auth/delete-account";body={password:settingsForm.deletePassword};}const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);if(settingsMode==="email"&&settingsStep==="form"){setSettingsStep("code");return;}if(settingsMode==="email"&&d.user){setUser(d.user);setSettingsOpen(false);return;}if(settingsMode==="delete"){await signOut();return;}setSettingsOpen(false);}catch(e){setSettingsError(e.message||"Could not update account.");}finally{setSettingsBusy(false);}}
+  useEffect(() => { boot(); }, []);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages.length, generating]);
+  useEffect(() => { const t = setTimeout(() => inputRef.current?.focus(), 50); return () => clearTimeout(t); }, [activeId]);
+
+  async function boot() {
+    if (supabase) {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+      supabase.auth.onAuthStateChange((_event, next) => setSession(next));
+      if (data.session) return loadCloud(data.session.user.id);
+    }
+    loadGuest();
+  }
+
+  function loadGuest() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(GUEST_KEY) || "[]");
+      const list = saved.length ? saved : [{ id: guestId(), title: "Welcome to AfriDeepAI", pinned: false, created_at: new Date().toISOString(), messages: [WELCOME] }];
+      setChats(list); setActiveId(list[0].id);
+    } catch { setChats([{ id: guestId(), title: "Welcome to AfriDeepAI", pinned: false, created_at: new Date().toISOString(), messages: [WELCOME] }]); }
+  }
+
+  async function loadCloud(userId = session?.user?.id) {
+    if (!supabase || !userId) return loadGuest();
+    const { data: cloudChats } = await supabase.from("chats").select("*").eq("user_id", userId).order("pinned", { ascending: false }).order("updated_at", { ascending: false });
+    const ids = (cloudChats || []).map(c => c.id);
+    let cloudMessages = [];
+    if (ids.length) ({ data: cloudMessages } = await supabase.from("messages").select("*").in("chat_id", ids).order("created_at", { ascending: true }));
+    const list = (cloudChats || []).map(c => ({ ...c, messages: (cloudMessages || []).filter(m => m.chat_id === c.id) }));
+    if (!list.length) {
+      const { data: created } = await supabase.from("chats").insert({ user_id: userId, title: "Welcome to AfriDeepAI" }).select().single();
+      if (created) list.push({ ...created, messages: [WELCOME] });
+    }
+    setChats(list); setActiveId(list[0]?.id || null);
+  }
+
+  function saveGuest(next) { setChats(next); localStorage.setItem(GUEST_KEY, JSON.stringify(next)); }
+  function titleFrom(text) { const clean = text.replace(/\s+/g, " ").trim(); return short(clean || "New conversation", 46); }
+
+  async function newChat() {
+    if (signedIn && supabase) {
+      const { data, error } = await supabase.from("chats").insert({ user_id: session.user.id, title: "New conversation" }).select().single();
+      if (!error && data) { setChats(x => [{ ...data, messages: [] }, ...x]); setActiveId(data.id); }
+      return;
+    }
+    const c = { id: guestId(), title: "New conversation", pinned: false, created_at: new Date().toISOString(), messages: [] };
+    saveGuest([c, ...chats]); setActiveId(c.id);
+  }
+
+  async function persistMessage(chatId, message) {
+    if (!signedIn || !supabase) return message;
+    const { data } = await supabase.from("messages").insert({ chat_id: chatId, user_id: session.user.id, role: message.role, content: message.content, pinned: !!message.pinned }).select().single();
+    return data || message;
+  }
+
+  async function persistChat(chatId, patch) {
+    if (signedIn && supabase) await supabase.from("chats").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", chatId);
+  }
+
+  function patchChat(chatId, fn) {
+    setChats(prev => { const next = prev.map(c => c.id === chatId ? fn(c) : c); if (!signedIn) localStorage.setItem(GUEST_KEY, JSON.stringify(next)); return next; });
+  }
+
+  async function sendMessage(override) {
+    const text = (override ?? input).trim();
+    if (!text || generating || !activeChat) return;
+    const chatId = activeChat.id;
+    let userMessage = { id: guestId(), role: "user", content: text, pinned: false, created_at: new Date().toISOString() };
+    if (!signedIn) { patchChat(chatId, c => ({ ...c, title: c.title === "New conversation" ? titleFrom(text) : c.title, messages: [...c.messages, userMessage] })); }
+    else {
+      userMessage = await persistMessage(chatId, userMessage);
+      const title = activeChat.title === "New conversation" ? titleFrom(text) : activeChat.title;
+      patchChat(chatId, c => ({ ...c, title, messages: [...c.messages, userMessage] }));
+      if (title !== activeChat.title) await persistChat(chatId, { title });
+    }
+    setInput(""); setGenerating(true);
+    const ac = new AbortController(); setController(ac);
+    try {
+      const history = [...messages, userMessage].map(m => ({ role: m.role, content: m.content }));
+      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: history }), signal: ac.signal });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Unable to generate a response.");
+      let ai = { id: guestId(), role: "assistant", content: data.message, pinned: false, created_at: new Date().toISOString() };
+      ai = await persistMessage(chatId, ai);
+      patchChat(chatId, c => ({ ...c, messages: [...c.messages, ai] }));
+      await persistChat(chatId, {});
+    } catch (e) {
+      if (e.name !== "AbortError") patchChat(chatId, c => ({ ...c, messages: [...c.messages, { id: guestId(), role: "assistant", content: `**AfriDeepAI could not complete that response.**\n\n${e.message}`, error: true, created_at: new Date().toISOString() }] }));
+    } finally { setGenerating(false); setController(null); }
+  }
+
+  function stop() { controller?.abort(); setGenerating(false); setController(null); }
+  async function copy(text) { try { await navigator.clipboard.writeText(text); } catch {} }
+  async function togglePin(message) { patchChat(activeId, c => ({ ...c, messages: c.messages.map(m => m.id === message.id ? { ...m, pinned: !m.pinned } : m) })); if (signedIn && supabase && message.id && !message.id.startsWith("guest-")) await supabase.from("messages").update({ pinned: !message.pinned }).eq("id", message.id); }
+  async function deleteMessage(message) { patchChat(activeId, c => ({ ...c, messages: c.messages.filter(m => m.id !== message.id) })); if (signedIn && supabase && !message.id.startsWith("guest-")) await supabase.from("messages").delete().eq("id", message.id); }
+  async function saveEdit() { if (!editing || !editValue.trim()) return; const value = editValue.trim(); patchChat(activeId, c => ({ ...c, messages: c.messages.map(m => m.id === editing.id ? { ...m, content: value, edited: true } : m) })); if (signedIn && supabase && !editing.id.startsWith("guest-")) await supabase.from("messages").update({ content: value }).eq("id", editing.id); setEditing(null); setEditValue(""); }
+  async function regenerate(message) { const before = messages.filter(m => m.created_at <= message.created_at && m.id !== message.id); await deleteMessage(message); const lastUser = [...before].reverse().find(m => m.role === "user"); if (lastUser) await sendMessage(lastUser.content); }
+  async function renameChat(chat) { const title = prompt("Conversation name", chat.title); if (!title?.trim()) return; patchChat(chat.id, c => ({ ...c, title: title.trim() })); await persistChat(chat.id, { title: title.trim() }); }
+  async function deleteChat(chat) { if (!confirm(`Delete “${chat.title}”?`)) return; if (signedIn && supabase) await supabase.from("chats").delete().eq("id", chat.id); const next = chats.filter(c => c.id !== chat.id); if (!signedIn) saveGuest(next); else setChats(next); if (activeId === chat.id) setActiveId(next[0]?.id || null); if (!next.length) newChat(); }
+  async function toggleChatPin(chat) { const pinned = !chat.pinned; patchChat(chat.id, c => ({ ...c, pinned })); await persistChat(chat.id, { pinned }); setChats(prev => [...prev].sort((a,b) => Number(b.pinned)-Number(a.pinned))); }
+  function shareChat() { const text = messages.map(m => `${m.role === "user" ? "You" : "AfriDeepAI"}:\n${m.content}`).join("\n\n"); copy(text); alert("Conversation copied. You can now paste it anywhere."); }
+
+  async function authSubmit(e) {
+    e.preventDefault(); if (!supabase) return setAuthMessage("Supabase environment variables are not configured yet.");
+    setBusy(true); setAuthMessage("");
+    try {
+      if (authMode === "signup") { const { error } = await supabase.auth.signUp({ email: form.email, password: form.password, options: { data: { name: form.name }, emailRedirectTo: `${location.origin}` } }); if (error) throw error; setAuthMessage("Account created. Check your email and verify your address before signing in."); }
+      if (authMode === "signin") { const { data, error } = await supabase.auth.signInWithPassword({ email: form.email, password: form.password }); if (error) throw error; setSession(data.session); setAccountOpen(false); await loadCloud(data.user.id); }
+      if (authMode === "reset") { const { error } = await supabase.auth.resetPasswordForEmail(form.email, { redirectTo: location.origin }); if (error) throw error; setAuthMessage("Password reset instructions were sent to your email."); }
+      if (authMode === "email") { const { error } = await supabase.auth.updateUser({ email: form.newEmail }); if (error) throw error; setAuthMessage("A confirmation email was sent to your new address."); }
+      if (authMode === "password") { const { error } = await supabase.auth.updateUser({ password: form.newPassword }); if (error) throw error; setAuthMessage("Password updated successfully."); }
+    } catch (err) { setAuthMessage(err.message || "Something went wrong."); } finally { setBusy(false); }
+  }
+  async function signOut() { if (supabase) await supabase.auth.signOut(); setSession(null); setAccountOpen(false); loadGuest(); }
+  async function deleteAccount() {
+    if (!confirm("This permanently deletes your account and all cloud chats. Continue?")) return;
+    if (!session?.access_token) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/chat", { method: "DELETE", headers: { Authorization: `Bearer ${session.access_token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Unable to delete the account.");
+      await supabase?.auth.signOut(); setSession(null); setAccountOpen(false); loadGuest();
+    } catch (e) { setAuthMessage(e.message || "Unable to delete the account."); } finally { setBusy(false); }
+  }
 
   return <main className="app-shell">
-    <div className={`backdrop ${mobileSidebar?"show":""}`} onClick={()=>setMobileSidebar(false)}/>
-    <aside className={`sidebar ${sidebarOpen?"":"collapsed"} ${mobileSidebar?"mobile-open":""}`}>
-      <div className="sidebar-top"><div className="brand"><div className="brand-logo"><img src="/logo.png" alt="AfriDeepAI"/></div><strong>AfriDeepAI</strong></div><button className="icon-button" onClick={()=>setSidebarOpen(v=>!v)} title="Toggle sidebar"><Icon name={sidebarOpen?"close":"menu"}/></button></div>
-      <div className="sidebar-new"><button className="new-chat" onClick={()=>createNewChat()}><Icon name="plus"/><span>New chat</span></button></div>
-      <div className="chat-list"><div className="list-label">Chats</div>{[...chats].sort((a,b)=>Number(b.pinned)-Number(a.pinned)||new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)).map(chat=><div className="chat-item-wrap" key={chat.id}><button className={`chat-item ${chat.id===activeChatId?"active":""}`} onClick={()=>{setActiveChatId(chat.id);setMobileSidebar(false)}}><span>{chat.pinned&&<span className="tiny-pin">●</span>}{chat.title}</span><i onClick={e=>{e.stopPropagation();setChatMenu(chatMenu===chat.id?null:chat.id)}}><Icon name="more" size={17}/></i></button>{chatMenu===chat.id&&<div className="chat-popover"><button onClick={()=>renameChat(chat)}>Rename</button><button onClick={()=>pinChat(chat)}>{chat.pinned?"Unpin":"Pin"}</button><button onClick={()=>shareChat()}>Share</button><button className="danger" onClick={()=>removeChat(chat)}>Delete</button></div>}</div>)}</div>
-      <div className="sidebar-account">{user?<button className="account-button" onClick={()=>{setSettingsOpen(true);setSettingsMode("password");setSettingsStep("form");setSettingsError("")}}><span className="avatar">{user.name?.slice(0,1).toUpperCase()}</span><span className="account-copy"><strong>{user.name}</strong><small>{user.email}</small></span><Icon name="more"/></button>:<button className="account-button" onClick={()=>openAuth("signin")}><span className="avatar"><Icon name="user" size={18}/></span><span className="account-copy"><strong>Guest</strong><small>Log in or create account</small></span><Icon name="more"/></button>}</div>
+    <aside className={`sidebar ${sidebar ? "" : "collapsed"}`}>
+      <div className="brand"><img src="/logo.png" alt="AfriDeepAI"/><strong>AfriDeep<span>AI</span></strong><button className="icon-btn" onClick={() => setSidebar(false)}><Icon name="menu"/></button></div>
+      <button className="new-chat" onClick={newChat}><Icon name="plus"/> New chat</button>
+      <div className="chat-search"><Icon name="search" size={17}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search chats"/></div>
+      <div className="chat-list">{visibleChats.map(chat => <div key={chat.id} className={`chat-row ${chat.id === activeId ? "active" : ""}`}><button className="chat-select" onClick={() => setActiveId(chat.id)}>{chat.pinned && <span>📌</span>}{chat.title}</button><div className="chat-actions"><button onClick={() => renameChat(chat)}><Icon name="edit" size={15}/></button><button onClick={() => toggleChatPin(chat)}><Icon name="pin" size={15}/></button><button onClick={() => deleteChat(chat)}><Icon name="trash" size={15}/></button></div></div>)}</div>
+      <button className="account" onClick={() => { setAuthMode(signedIn ? "account" : "signin"); setAuthMessage(""); setAccountOpen(true); }}><div className="avatar">{signedIn ? (session.user.email?.[0] || "U").toUpperCase() : <Icon name="user"/>}</div><div><strong>{signedIn ? session.user.user_metadata?.name || "Account" : "Guest"}</strong><span>{signedIn ? short(session.user.email || "", 28) : "Log in or create account"}</span></div></button>
     </aside>
 
-    <section className="chat-shell">
-      <header className="chat-header"><div className="header-left"><button className="icon-button mobile-only" onClick={()=>setMobileSidebar(true)}><Icon name="menu"/></button><div><h1>{activeChat?.title||"AfriDeepAI"}</h1><span>AfriDeepAI Agriculture Intelligence</span></div></div><div className="header-actions"><button className={`icon-button ${navigatorOpen?"selected":""}`} onClick={()=>setNavigatorOpen(v=>!v)} title="Message navigator"><Icon name="navigator"/></button><button className="icon-button" onClick={shareChat} title="Share conversation"><Icon name="share"/></button></div></header>
-      <div className="conversation-layout"><div className="conversation-column"><div className="messages-area">
-        {!messages.length?<section className="empty-chat"><div className="empty-logo"><img src="/logo.png" alt=""/></div><h2>How can AfriDeepAI help you?</h2><p>Professional intelligence for agriculture and livestock in Rwanda and around the world.</p><div className="suggestions">{[["Crop production","Best practices for growing maize in Rwanda"],["Livestock","How can I improve dairy cow feeding and milk production?"],["Plant health","How can I identify common tomato diseases?"],["Agribusiness","Give me ideas for starting a small agricultural business."]].map(([a,b])=><button key={a} onClick={()=>setInput(b)}><small>{a}</small><strong>{b}</strong></button>)}</div></section>:<div className="messages-list">{messages.map(message=><article id={`msg-${message.id}`} data-message-id className={`message-row ${message.role}`} key={message.id}>{message.role==="assistant"&&<div className="assistant-avatar"><img src="/logo.png" alt="AfriDeepAI"/></div>}<div className="message-wrap">{message.role==="assistant"&&<div className="message-author">AfriDeepAI</div>}{editing===message.id?<div className="message-editor"><textarea value={editingValue} onChange={e=>setEditingValue(e.target.value)} autoFocus/><div><button onClick={()=>setEditing(null)}>Cancel</button><button className="save" onClick={saveEdit}>Save</button></div></div>:<><div className={`message-bubble ${message.role}`}><RichText text={message.content}/></div>{message.edited&&<small className="edited">Edited</small>}<div className="message-actions"><button onClick={()=>copy(message.content,message.id)} title="Copy">{copiedId===message.id?<Icon name="check" size={16}/>:<Icon name="copy" size={16}/>}</button><button onClick={()=>toggleMessagePin(message.id)} title={message.pinned?"Unpin":"Pin"} className={message.pinned?"pinned-action":""}><Icon name="pin" size={16}/></button>{message.role==="user"&&<button onClick={()=>{setEditing(message.id);setEditingValue(message.content)}} title="Edit"><Icon name="edit" size={16}/></button>}{message.role==="assistant"&&<button onClick={()=>sendMessage(messages.filter(m=>m.id!==message.id).at(-1)?.content)} title="Regenerate"><Icon name="regenerate" size={16}/></button>}<button onClick={()=>deleteMessage(message.id)} className="danger-action" title="Delete"><Icon name="trash" size={16}/></button><button onClick={()=>shareChat()} title="Share"><Icon name="share" size={16}/></button></div></>}</div></article>)}{isGenerating&&<div className="thinking"><div className="assistant-avatar"><img src="/logo.png" alt=""/></div><div><span/><span/><span/></div></div>}<div ref={endRef}/></div>}
-      </div>{error&&<div className="error-banner">{error}<button onClick={()=>setError("")}>×</button></div>}
-      <div className="composer-zone"><div className="composer"><input ref={fileRef} type="file" hidden accept="image/*,.pdf,.txt,.doc,.docx" onChange={e=>{if(e.target.files?.[0])setError(`File selected: ${e.target.files[0].name}. File analysis will be added when the selected AI model supports this file type.`)}}/><button className="composer-icon" onClick={()=>fileRef.current?.click()} title="Attach file"><Icon name="attach"/></button><textarea ref={textareaRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();isGenerating?stopGenerating():sendMessage();}}} placeholder="Ask about agriculture and livestock…" rows="1"/>{isGenerating?<button className="send-button stop" onClick={stopGenerating} title="Stop"><Icon name="stop"/></button>:<button className="send-button" disabled={!input.trim()} onClick={()=>sendMessage()} title="Send"><Icon name="send"/></button>}</div><p>AfriDeepAI can make mistakes. Verify important agricultural decisions with qualified local professionals.</p></div></div>
-      {navigatorOpen&&<aside className="message-navigator"><div className="navigator-head"><div><strong>Message navigator</strong><span>{messages.length} messages</span></div><button className="icon-button" onClick={()=>setNavigatorOpen(false)}><Icon name="close" size={18}/></button></div><div className="navigator-list">{messages.map((m,i)=><button key={m.id} className={`${activeMessageId===`msg-${m.id}`?"current":""} ${m.role}`} onClick={()=>document.getElementById(`msg-${m.id}`)?.scrollIntoView({behavior:"smooth",block:"center"})}><span className="nav-number">{i+1}</span><span className="nav-preview">{m.content.replace(/\s+/g," ")}</span><i/></button>)}</div></aside>}
+    <section className="workspace">
+      <header className="topbar"><button className="icon-btn show-sidebar" onClick={() => setSidebar(true)}><Icon name="menu"/></button><div><strong>{activeChat?.title || "AfriDeepAI"}</strong><span> Agriculture & livestock intelligence</span></div><div className="top-actions"><button className="icon-btn" onClick={() => setNavOpen(!navOpen)} title="Message navigator"><Icon name="nav"/></button><button className="icon-btn" onClick={shareChat} title="Share conversation"><Icon name="share"/></button></div></header>
+      <div className="conversation" ref={scrollRef} onScroll={e => { const els = [...e.currentTarget.querySelectorAll("[data-message]")]; let best = null, distance = Infinity; els.forEach(el => { const d = Math.abs(el.getBoundingClientRect().top - e.currentTarget.getBoundingClientRect().top - 90); if (d < distance) { distance = d; best = el.dataset.message; } }); if (best) setActiveMessage(best); }}>
+        <div className="conversation-inner">{!messages.length && <div className="empty"><img src="/logo.png" alt=""/><h1>How can I help with agriculture today?</h1><p>Ask about crops, livestock, soil, pests, diseases, farming or agribusiness.</p></div>}
+        {messages.map(message => <article key={message.id} data-message={message.id} className={`message ${message.role}`}><div className="message-head"><span>{message.role === "user" ? "You" : "AfriDeepAI"}</span>{message.pinned && <span className="pinned">Pinned</span>}</div>{editing?.id === message.id ? <div className="edit-box"><textarea value={editValue} onChange={e => setEditValue(e.target.value)}/><div><button onClick={saveEdit}>Save</button><button onClick={() => setEditing(null)}>Cancel</button></div></div> : <div className="message-content">{message.content.split("\n").map((line,i) => <p key={i}>{line || " "}</p>)}</div>}<div className="message-tools"><button onClick={() => copy(message.content)} title="Copy"><Icon name="copy" size={16}/></button><button onClick={() => togglePin(message)} title="Pin"><Icon name="pin" size={16}/></button>{message.role === "user" && <button onClick={() => { setEditing(message); setEditValue(message.content); }} title="Edit"><Icon name="edit" size={16}/></button>}{message.role === "assistant" && <button onClick={() => regenerate(message)} title="Regenerate"><Icon name="refresh" size={16}/></button>}<button onClick={() => deleteMessage(message)} title="Delete"><Icon name="trash" size={16}/></button></div></article>)}{generating && <div className="thinking"><span></span><span></span><span></span> AfriDeepAI is thinking…</div>}</div>
       </div>
+      <div className="composer-wrap"><div className="composer"><textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); generating ? stop() : sendMessage(); } }} placeholder="Ask AfriDeepAI about agriculture and livestock…" rows={1}/><button className="send" onClick={() => generating ? stop() : sendMessage()} title={generating ? "Stop" : "Send"}>{generating ? <Icon name="stop"/> : <Icon name="send"/>}</button></div><p>AfriDeepAI can make mistakes. Verify critical agricultural and veterinary decisions.</p></div>
     </section>
 
-    {authOpen&&<div className="modal-backdrop" onMouseDown={()=>!authBusy&&setAuthOpen(false)}><section className="auth-modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-close" onClick={()=>setAuthOpen(false)}><Icon name="close"/></button><div className="auth-brand"><img src="/logo.png" alt=""/><div><strong>{authMode==="signup"?"Create account":authMode==="forgot"?"Reset password":"Welcome back"}</strong><span>{authStep==="code"?"Enter the verification code sent to your email.":"Securely access your AfriDeepAI chats."}</span></div></div>{authError&&<div className="auth-error">{authError}</div>}{authStep==="form"?<form onSubmit={authSubmit}>{authMode==="signup"&&<label>Name<input required value={authForm.name} onChange={e=>setAuthForm({...authForm,name:e.target.value})}/></label>}<label>Email<input required type="email" value={authForm.email} onChange={e=>setAuthForm({...authForm,email:e.target.value})}/></label>{authMode!=="forgot"&&<label>Password<input required minLength="8" type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm,password:e.target.value})}/></label>}{authMode==="forgot"&&<label>New password<input required minLength="8" type="password" value={authForm.password} onChange={e=>setAuthForm({...authForm,password:e.target.value})}/></label>}<button className="auth-submit" disabled={authBusy}>{authBusy?"Please wait…":authMode==="signup"?"Create account":authMode==="forgot"?"Send reset code":"Continue"}</button></form>:<form onSubmit={verifyAuth}><label>Verification code<input required inputMode="numeric" maxLength="6" value={authForm.code} onChange={e=>setAuthForm({...authForm,code:e.target.value.replace(/\D/g,"")})}/></label><button className="auth-submit" disabled={authBusy}>{authBusy?"Verifying…":authMode==="forgot"?"Reset password":"Verify and continue"}</button></form>}<div className="auth-links">{authMode!=="forgot"&&<button onClick={()=>{setAuthMode(authMode==="signin"?"signup":"signin");setAuthStep("form");setAuthError("")}}>{authMode==="signin"?"Create an account":"Already have an account? Sign in"}</button>}{authMode==="signin"&&<button onClick={()=>{setAuthMode("forgot");setAuthStep("form");setAuthError("")}}>Forgot password?</button>}</div></section></div>}
+    <aside className={`navigator ${navOpen ? "open" : ""}`}><div className="navigator-head"><strong>Message navigator</strong><button className="icon-btn" onClick={() => setNavOpen(false)}><Icon name="close"/></button></div><div className="navigator-list">{messages.map((m,i) => <button key={m.id} className={activeMessage === m.id ? "active" : ""} onClick={() => { document.querySelector(`[data-message="${m.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }); setActiveMessage(m.id); }}><span>{i+1}</span><em>{m.role === "user" ? "You" : "AI"}</em><strong>{short(m.content, 60)}</strong><i></i></button>)}</div></aside>
 
-    {settingsOpen&&<div className="modal-backdrop" onMouseDown={()=>!settingsBusy&&setSettingsOpen(false)}><section className="auth-modal settings-modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-close" onClick={()=>setSettingsOpen(false)}><Icon name="close"/></button><div className="auth-brand"><img src="/logo.png" alt=""/><div><strong>Account settings</strong><span>Manage your AfriDeepAI account securely.</span></div></div><div className="settings-tabs"><button className={settingsMode==="password"?"active":""} onClick={()=>{setSettingsMode("password");setSettingsStep("form");setSettingsError("")}}>Password</button><button className={settingsMode==="email"?"active":""} onClick={()=>{setSettingsMode("email");setSettingsStep("form");setSettingsError("")}}>Email</button><button className={settingsMode==="delete"?"active danger":""} onClick={()=>{setSettingsMode("delete");setSettingsStep("form");setSettingsError("")}}>Delete</button></div>{settingsError&&<div className="auth-error">{settingsError}</div>}<form onSubmit={submitSettings}>{settingsMode==="password"&&<><label>Current password<input required type="password" value={settingsForm.currentPassword} onChange={e=>setSettingsForm({...settingsForm,currentPassword:e.target.value})}/></label><label>New password<input required minLength="8" type="password" value={settingsForm.newPassword} onChange={e=>setSettingsForm({...settingsForm,newPassword:e.target.value})}/></label></>}{settingsMode==="email"&&settingsStep==="form"&&<label>New email<input required type="email" value={settingsForm.newEmail} onChange={e=>setSettingsForm({...settingsForm,newEmail:e.target.value})}/></label>}{settingsMode==="email"&&settingsStep==="code"&&<label>Verification code<input required inputMode="numeric" maxLength="6" value={settingsForm.code} onChange={e=>setSettingsForm({...settingsForm,code:e.target.value.replace(/\D/g,"")})}/></label>}{settingsMode==="delete"&&<><div className="delete-warning">Deleting your account permanently removes your cloud conversations and messages.</div><label>Confirm your password<input required type="password" value={settingsForm.deletePassword} onChange={e=>setSettingsForm({...settingsForm,deletePassword:e.target.value})}/></label></>}<button className={`auth-submit ${settingsMode==="delete"?"delete-submit":""}`} disabled={settingsBusy}>{settingsBusy?"Please wait…":settingsMode==="password"?"Change password":settingsMode==="email"?(settingsStep==="form"?"Send verification code":"Verify new email"):"Permanently delete account"}</button></form><button className="signout-link" onClick={signOut}><Icon name="logout" size={16}/> Sign out</button></section></div>}
+    {accountOpen && <div className="modal-backdrop" onMouseDown={() => setAccountOpen(false)}><section className="modal" onMouseDown={e => e.stopPropagation()}><button className="modal-close" onClick={() => setAccountOpen(false)}><Icon name="close"/></button>{authMode === "account" ? <><img src="/logo.png" alt="AfriDeepAI"/><h2>Your account</h2><p>{session?.user?.email}</p><button className="wide" onClick={() => setAuthMode("email")}>Change email</button><button className="wide" onClick={() => setAuthMode("password")}>Change password</button><button className="wide danger" onClick={deleteAccount}>Delete account</button><button className="wide" onClick={signOut}>Sign out</button></> : <><img src="/logo.png" alt="AfriDeepAI"/><h2>{authMode === "signup" ? "Create account" : authMode === "reset" ? "Reset password" : authMode === "email" ? "Change email" : authMode === "password" ? "Change password" : "Welcome back"}</h2><form onSubmit={authSubmit}>{authMode === "signup" && <input placeholder="Your name" value={form.name} onChange={e => setForm({...form,name:e.target.value})} required/>}{["signin","signup","reset"].includes(authMode) && <input type="email" placeholder="Email address" value={form.email} onChange={e => setForm({...form,email:e.target.value})} required/>}{["signin","signup"].includes(authMode) && <input type="password" placeholder="Password" value={form.password} onChange={e => setForm({...form,password:e.target.value})} required minLength="6"/>}{authMode === "email" && <input type="email" placeholder="New email address" value={form.newEmail} onChange={e => setForm({...form,newEmail:e.target.value})} required/>}{authMode === "password" && <input type="password" placeholder="New password" value={form.newPassword} onChange={e => setForm({...form,newPassword:e.target.value})} required minLength="6"/>}<button className="wide primary" disabled={busy}>{busy ? "Please wait…" : "Continue"}</button></form>{authMessage && <p className="auth-message">{authMessage}</p>}{authMode === "signin" && <div className="auth-links"><button onClick={() => setAuthMode("signup")}>Create account</button><button onClick={() => setAuthMode("reset")}>Forgot password?</button></div>}{authMode === "signup" && <div className="auth-links"><button onClick={() => setAuthMode("signin")}>Already have an account? Sign in</button></div>}</>}</section></div>}
   </main>;
 }
