@@ -133,7 +133,7 @@
     .chat-item .chat-actions button.is-pinned{color:var(--warning)}
     .chat-item .chat-actions button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
     .empty-history{color:var(--text-muted);font-size:13px;text-align:center;padding:32px 12px;line-height:1.6}
-    .sidebar-footer{padding:10px 12px 12px;border-top:1px solid var(--border-subtle);flex-shrink:0;position:relative}
+    .sidebar-footer{padding:10px 12px 12px;border-top:1px solid var(--border-subtle);flex-shrink:0;position:relative;overflow:hidden}
     .auth-btn{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius-md);cursor:pointer;transition:var(--transition-fast);width:100%;background:none;border:none;color:var(--text-primary);font-size:13px;font-family:inherit;text-align:left;min-height:40px}
     .auth-btn:hover{background:var(--bg-hover)}
     .auth-btn .avatar{width:28px;height:28px;border-radius:50%;background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--text-secondary);flex-shrink:0;overflow:hidden}
@@ -280,14 +280,14 @@
     .modal-box .error-msg.is-visible{display:block}
     .modal-box .modal-actions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
     .modal-box .modal-actions button{flex:1;padding:10px 16px;border:none;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast);font-family:inherit;min-width:70px}
-    .modal-box .modal-actions .btn-primary{background:var(--accent);color:#fff}
-    .modal-box .modal-actions .btn-primary:hover{background:var(--accent-hover)}
-    .modal-box .modal-actions .btn-secondary{background:var(--bg-elevated);color:var(--text-primary)}
+    .modal-box .modal-actions .btn-primary{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast)}
+    .modal-box .modal-actions .btn-primary:hover{background:var(--accent-hover);transform:scale(0.98)}
+    .modal-box .modal-actions .btn-secondary{background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border-subtle);padding:10px 16px;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast)}
     .modal-box .modal-actions .btn-secondary:hover{background:var(--bg-hover)}
-    .modal-box .modal-actions .btn-ghost{background:transparent;color:var(--text-muted)}
+    .modal-box .modal-actions .btn-ghost{background:transparent;color:var(--text-muted);border:none;padding:10px 16px;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast)}
     .modal-box .modal-actions .btn-ghost:hover{color:var(--text-primary);background:var(--bg-hover)}
-    .modal-box .modal-actions .btn-danger{background:var(--error);color:#fff}
-    .modal-box .modal-actions .btn-danger:hover{opacity:0.85}
+    .modal-box .modal-actions .btn-danger{background:var(--error);color:#fff;border:none;padding:10px 16px;border-radius:var(--radius-md);font-size:14px;font-weight:600;cursor:pointer;transition:var(--transition-fast)}
+    .modal-box .modal-actions .btn-danger:hover{opacity:0.85;transform:scale(0.98)}
     .share-modal .modal-box{max-width:480px}
     .share-link-container{display:flex;gap:8px;margin:16px 0;background:var(--bg-input);border-radius:var(--radius-md);padding:8px 12px;border:1px solid var(--border-subtle);align-items:center}
     .share-link-container input{flex:1;background:transparent;border:none;outline:none;color:var(--text-primary);font-size:13px;font-family:inherit;padding:4px 0;min-width:0}
@@ -614,7 +614,7 @@
     </div>
   </div>
 
-  <!-- Settings Modal -->
+  <!-- Settings Modal (Simplified) -->
   <div class="modal-overlay" id="settingsModal">
     <div class="modal-box">
       <div class="modal-header">
@@ -633,27 +633,8 @@
         </select>
       </div>
       <div class="field">
-        <label for="enterSendSelect">Enter to send</label>
-        <select id="enterSendSelect">
-          <option value="true">Enabled</option>
-          <option value="false">Disabled (Shift+Enter for new line)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="modelSelect">AI Model</label>
-        <select id="modelSelect">
-          <option value="auto">Auto (Best available)</option>
-          <option value="groq/llama-3.3-70b">Groq Llama 3.3 70B</option>
-          <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="temperatureSlider">Temperature: <span class="range-value" id="tempValue">0.7</span></label>
-        <input type="range" id="temperatureSlider" min="0" max="1" step="0.05" value="0.7" />
-      </div>
-      <div class="field">
         <label>
-          <input type="checkbox" id="webSearchToggle" checked /> Enable Web Search (intelligent)
+          <input type="checkbox" id="webSearchToggle" checked /> Enable Web Search
         </label>
       </div>
       <div class="modal-actions">
@@ -733,9 +714,6 @@
         isGenerating: false,
         abortController: null,
         theme: 'dark',
-        enterToSend: true,
-        selectedModel: 'auto',
-        temperature: 0.7,
         webSearchEnabled: true,
         user: null,
         sessionToken: null,
@@ -814,11 +792,7 @@
       const settingsCloseBtn = $('settingsCloseBtn');
       const settingsCloseActionBtn = $('settingsCloseActionBtn');
       const themeSelect = $('themeSelect');
-      const enterSendSelect = $('enterSendSelect');
       const settingsSaveBtn = $('settingsSaveBtn');
-      const modelSelect = $('modelSelect');
-      const temperatureSlider = $('temperatureSlider');
-      const tempValue = $('tempValue');
       const webSearchToggle = $('webSearchToggle');
 
       const shareModal = $('shareModal');
@@ -1134,8 +1108,12 @@
       // ─── CONVERSATIONS ──────────────────────────────────────────
       async function loadConversations() {
         const token = getSessionToken();
-        if (!token) return;
+        if (!token) {
+          console.log('⚠️ No session token, skipping conversation load.');
+          return;
+        }
         try {
+          console.log('📥 Loading conversations with token:', token.substring(0, 20) + '...');
           const data = await callAPI('/api/conversations', 'GET', null, token);
           const convs = {};
           for (const conv of data.conversations) {
@@ -1160,6 +1138,15 @@
             switchConversation(latest);
           }
         } catch (err) {
+          console.error('❌ Load conversations error:', err);
+          // If token is invalid, clear session
+          if (err.message.includes('Unauthorized') || err.message.includes('Invalid token')) {
+            console.log('🔑 Token invalid, clearing session.');
+            clearSession();
+            state.isAuthenticated = false;
+            state.user = null;
+            updateUIForUser(null);
+          }
           showToast('Failed to load conversations: ' + err.message, 'error');
         }
       }
@@ -1414,7 +1401,6 @@
         if (!token) return;
         try {
           await callAPI('/api/auth/change-email', 'PUT', { newEmail, verificationCode: code }, token);
-          // Update local user
           const user = getCurrentUser();
           if (user) {
             user.email = newEmail;
@@ -1468,32 +1454,19 @@
         const saved = Storage.get('settings');
         if (saved) {
           state.theme = saved.theme || 'dark';
-          state.enterToSend = saved.enterToSend !== undefined ? saved.enterToSend : true;
-          state.selectedModel = saved.selectedModel || 'auto';
-          state.temperature = saved.temperature !== undefined ? saved.temperature : 0.7;
           state.webSearchEnabled = saved.webSearchEnabled !== undefined ? saved.webSearchEnabled : true;
         }
         applyTheme(state.theme);
         themeSelect.value = state.theme;
-        enterSendSelect.value = state.enterToSend ? 'true' : 'false';
-        modelSelect.value = state.selectedModel;
-        temperatureSlider.value = state.temperature;
-        tempValue.textContent = state.temperature;
         webSearchToggle.checked = state.webSearchEnabled;
       }
 
       function saveSettings() {
         state.theme = themeSelect.value;
-        state.enterToSend = enterSendSelect.value === 'true';
-        state.selectedModel = modelSelect.value;
-        state.temperature = parseFloat(temperatureSlider.value);
         state.webSearchEnabled = webSearchToggle.checked;
         applyTheme(state.theme);
         Storage.set('settings', {
           theme: state.theme,
-          enterToSend: state.enterToSend,
-          selectedModel: state.selectedModel,
-          temperature: state.temperature,
           webSearchEnabled: state.webSearchEnabled,
         });
         closeModal(settingsModal);
@@ -1505,10 +1478,6 @@
         document.documentElement.setAttribute('data-theme', resolved);
         if (theme !== 'system') Storage.set('theme', theme);
       }
-
-      temperatureSlider.addEventListener('input', () => {
-        tempValue.textContent = temperatureSlider.value;
-      });
 
       settingsCloseBtn.addEventListener('click', () => closeModal(settingsModal));
       settingsCloseActionBtn.addEventListener('click', () => closeModal(settingsModal));
@@ -1850,8 +1819,6 @@
           const payload = {
             message,
             history,
-            model: state.selectedModel,
-            temperature: state.temperature,
             webSearchEnabled: state.webSearchEnabled,
             files: fileDataArray,
           };
@@ -1950,7 +1917,7 @@
       });
 
       userInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && state.enterToSend) {
+        if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           sendMessage();
         }
@@ -2158,6 +2125,7 @@
           await loadConversations();
           return true;
         }
+        console.log('👤 No session found.');
         return false;
       }
 
@@ -2196,10 +2164,8 @@
         }
 
         // Restore session
-        console.log('🔍 Checking for existing session...');
         const sessionRestored = await restoreSession();
         if (!sessionRestored) {
-          console.log('👤 No session found. Guest mode.');
           clearSession();
           state.user = null;
           state.sessionToken = null;
@@ -2209,8 +2175,6 @@
           state.activeId = null;
           renderHistory();
           emptyState.classList.remove('is-hidden');
-        } else {
-          console.log('✅ Session restored successfully.');
         }
 
         // Auto‑save every 10 seconds
