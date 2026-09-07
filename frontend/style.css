@@ -21,10 +21,9 @@ body {
   border-right: 1px solid #3a3f40;
   display: flex;
   flex-direction: column;
-  transition: transform 0.3s;
   flex-shrink: 0;
-  overflow: hidden;
   z-index: 10;
+  transition: transform 0.3s;
 }
 #sidebar.closed {
   margin-left: -280px;
@@ -164,6 +163,7 @@ body {
   display: flex;
   flex-direction: column;
   padding: 1rem;
+  scroll-behavior: smooth;
 }
 #welcomeScreen {
   flex: 1;
@@ -198,37 +198,56 @@ body {
   flex: 1;
   display: none;
   flex-direction: column;
-  gap: 0.75rem;
-  padding-bottom: 1rem;
+  gap: 1.5rem;
 }
+.message-row {
+  display: flex;
+  width: 100%;
+}
+.message-row.user { justify-content: flex-end; }
+.message-row.assistant { justify-content: flex-start; }
+
 .message {
-  max-width: 80%;
-  padding: 0.6rem 1rem;
+  max-width: min(780px, 85%);
+  padding: 0.8rem 1.2rem;
   border-radius: 1.2rem;
-  line-height: 1.5;
+  line-height: 1.6;
   word-wrap: break-word;
   animation: fadeIn 0.2s;
   position: relative;
 }
 .message.user {
-  align-self: flex-end;
   background: #2e4a33;
-  border-bottom-right-radius: 0.25rem;
+  border-bottom-right-radius: 0.3rem;
   color: #e8e6e1;
 }
 .message.assistant {
-  align-self: flex-start;
   background: #2a2e2f;
   border: 1px solid #3a3f40;
-  border-bottom-left-radius: 0.25rem;
+  border-bottom-left-radius: 0.3rem;
   color: #e8e6e1;
+  width: 100%;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+.assistant-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+  font-weight: 500;
+  font-size: 0.85rem;
+  color: #66bb6a;
+}
+.assistant-header img {
+  height: 1.2rem;
+  width: auto;
+}
 
 .message .msg-actions {
   display: flex;
   gap: 0.5rem;
-  margin-top: 0.3rem;
+  margin-top: 0.4rem;
   opacity: 0;
   transition: opacity 0.2s;
 }
@@ -239,23 +258,24 @@ body {
   cursor: pointer;
   font-size: 0.8rem;
   color: #aaa;
+  padding: 0.1rem 0.3rem;
 }
 .message .msg-actions button:hover { color: #fff; }
 
 /* Sources */
-.message .sources {
+.sources {
   margin-top: 0.5rem;
   font-size: 0.85rem;
   border-top: 1px solid #3a3f40;
   padding-top: 0.3rem;
 }
-.message .sources ul {
+.sources ul {
   list-style: none;
   padding-left: 0.5rem;
   margin: 0.2rem 0;
 }
-.message .sources li { margin: 0.1rem 0; }
-.message .sources a { color: #66bb6a; text-decoration: underline; }
+.sources li { margin: 0.1rem 0; }
+.sources a { color: #66bb6a; text-decoration: underline; }
 
 /* Composer */
 #composerArea {
@@ -284,6 +304,8 @@ body {
   color: #e8e6e1;
   max-height: 120px;
   font-family: inherit;
+  min-height: 2.2rem;
+  line-height: 1.5;
 }
 #composer textarea::placeholder { color: #888; }
 #composer button {
@@ -291,13 +313,15 @@ body {
   border: none;
   color: white;
   border-radius: 2rem;
-  padding: 0.5rem 0.9rem;
+  padding: 0.4rem 0.7rem;
   cursor: pointer;
-  transition: background 0.2s, opacity 0.3s;
+  transition: opacity 0.2s, background 0.2s;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 2.4rem;
+  min-height: 2.4rem;
 }
 #composer button:hover { background: #1b5e20; }
 #composer button:disabled {
@@ -305,16 +329,17 @@ body {
   cursor: default;
 }
 #composer button:disabled:hover { background: #2e7d32; }
+#composer button .stop-icon { display: none; }
+#composer button.generating .send-icon { display: none; }
+#composer button.generating .stop-icon { display: block; }
 #attachBtn {
   background: transparent !important;
   color: #aaa !important;
   padding: 0.2rem 0.4rem;
+  min-width: auto;
+  min-height: auto;
 }
 #attachBtn:hover { color: #fff !important; }
-#sendBtn svg { width: 20px; height: 20px; }
-#sendBtn .stop-icon { display: none; }
-#sendBtn.generating .send-icon { display: none; }
-#sendBtn.generating .stop-icon { display: block; }
 
 .footer-note {
   text-align: center;
@@ -408,6 +433,7 @@ hr { border: none; border-top: 1px solid #3a3f40; margin: 1rem 0; }
   #closeSidebarBtn { display: block; }
   .logo-img { height: 1.6rem; }
   .welcome-logo { height: 4rem; }
+  .message { max-width: 90%; }
 }
 @media (min-width: 769px) {
   #closeSidebarBtn { display: none; }
