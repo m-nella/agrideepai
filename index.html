@@ -3,28 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>AgriDeepAI — Professional AI Assistant for Agriculture &amp; Livestock</title>
-  <meta name="description" content="AgriDeepAI is a free, intelligent AI assistant specialized in agriculture, livestock, crop diseases, farming techniques, and agribusiness in Rwanda and globally." />
-  <meta name="keywords" content="agriculture AI, livestock AI, Rwanda agriculture, crop diseases, farming assistant, agribusiness, AI chatbot, free AI" />
-  <link rel="canonical" href="https://agrideepai.vercel.app/" />
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agrideepai.vercel.app/" />
-  <meta property="og:title" content="AgriDeepAI — Professional AI Assistant for Agriculture &amp; Livestock" />
-  <meta property="og:description" content="Free, intelligent AI assistant for agriculture, livestock, crop diseases, and agribusiness in Rwanda and beyond." />
-  <meta property="og:image" content="https://agrideepai.vercel.app/logo.png" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:url" content="https://agrideepai.vercel.app/" />
-  <meta name="twitter:title" content="AgriDeepAI — Professional AI Assistant for Agriculture &amp; Livestock" />
-  <meta name="twitter:description" content="Free, intelligent AI assistant for agriculture, livestock, crop diseases, and agribusiness in Rwanda and beyond." />
-  <meta name="twitter:image" content="https://agrideepai.vercel.app/logo.png" />
+  <title>AgriDeepAI — Professional AI Assistant</title>
   <link rel="icon" href="logo.png" type="image/png" />
-
-  <!-- Libraries -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-
   <style>
     /* ==========================================================
        DESIGN TOKENS — Professional Green Accent
@@ -346,6 +330,10 @@
     .password-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     .auth-error{color:var(--error);font-size:13px;margin-top:4px;padding:6px 10px;background:rgba(255,59,48,0.1);border-radius:var(--radius-sm);border-left:3px solid var(--error);display:none}
     .auth-error.is-visible{display:block}
+    .resend-btn{padding:6px 14px;font-size:13px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-secondary);cursor:pointer;transition:var(--transition-fast);font-family:inherit;white-space:nowrap}
+    .resend-btn:hover:not(:disabled){background:var(--bg-hover);color:var(--text-primary)}
+    .resend-btn:disabled{opacity:0.5;cursor:not-allowed}
+    .resend-timer{font-size:12px;color:var(--text-muted);margin-top:4px}
   </style>
 </head>
 <body>
@@ -499,7 +487,11 @@
         </div>
         <div class="field" id="authCodeField" style="display:none;">
           <label for="authCode">Verification Code</label>
-          <input type="text" id="authCode" placeholder="Enter 6-digit code" />
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="authCode" placeholder="Enter 6-digit code" style="flex:1;" />
+            <button class="resend-btn" id="resendCodeBtn">Resend</button>
+          </div>
+          <div class="resend-timer" id="resendTimer"></div>
         </div>
         <div class="auth-error" id="authError">Invalid credentials.</div>
       </div>
@@ -526,6 +518,16 @@
         <input type="email" id="securityEmail" readonly style="background:var(--bg-input);" />
       </div>
       <div class="field">
+        <label>Change Email</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="email" id="secNewEmail" placeholder="New email" style="flex:1;" />
+          <button class="resend-btn" id="secSendEmailCodeBtn">Send Code</button>
+        </div>
+        <div style="margin-top:4px;">
+          <input type="text" id="secEmailCode" placeholder="Enter code" style="width:100%; padding:8px 12px; border-radius:var(--radius-md); border:1px solid var(--border-subtle); background:var(--bg-input); color:var(--text-primary);" />
+        </div>
+      </div>
+      <div class="field">
         <label>Change Password</label>
         <div class="password-wrapper">
           <input type="password" id="secCurrentPass" placeholder="Current password" style="margin-bottom:8px;" />
@@ -540,6 +542,7 @@
           <button class="password-toggle" type="button" data-target="secConfirmPass">👁</button>
         </div>
       </div>
+      <button class="btn-primary" id="secChangeEmailBtn" style="width:100%; margin-bottom:12px;">Update Email</button>
       <button class="btn-primary" id="secChangePassBtn" style="width:100%; margin-bottom:12px;">Update Password</button>
       <hr style="border-color:var(--border-subtle); margin:12px 0;" />
       <button class="btn-danger" id="secDeleteAccountBtn" style="width:100%;">Delete Account</button>
@@ -703,6 +706,8 @@
         attachments: [],
         pendingSignup: null,
         pendingLogin: null,
+        resendCooldown: false,
+        secResendCooldown: false,
       };
 
       // ─── DOM REFS ──────────────────────────────────────────────
@@ -745,15 +750,21 @@
       const authNameField = $('authNameField');
       const authConfirmField = $('authConfirmField');
       const authCodeField = $('authCodeField');
+      const resendCodeBtn = $('resendCodeBtn');
+      const resendTimer = $('resendTimer');
 
       const accountSecurityModal = $('accountSecurityModal');
       const accountSecurityCloseBtn = $('accountSecurityCloseBtn');
       const accountSecurityCloseActionBtn = $('accountSecurityCloseActionBtn');
       const securityEmail = $('securityEmail');
+      const secNewEmail = $('secNewEmail');
+      const secEmailCode = $('secEmailCode');
+      const secSendEmailCodeBtn = $('secSendEmailCodeBtn');
       const secCurrentPass = $('secCurrentPass');
       const secNewPass = $('secNewPass');
       const secConfirmPass = $('secConfirmPass');
       const secChangePassBtn = $('secChangePassBtn');
+      const secChangeEmailBtn = $('secChangeEmailBtn');
       const secDeleteAccountBtn = $('secDeleteAccountBtn');
 
       const profileModal = $('profileModal');
@@ -817,7 +828,7 @@
         Storage.remove('user');
       }
 
-      // ─── TOAST SYSTEM ───────────────────────────────────────────
+      // ─── TOAST ──────────────────────────────────────────────────
       function showToast(message, type = 'info', duration = 3000) {
         const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
         const toast = document.createElement('div');
@@ -872,7 +883,48 @@
         return data;
       }
 
-      // ─── AUTH FUNCTIONS ─────────────────────────────────────────
+      // ─── AUTH ──────────────────────────────────────────────────
+      // Resend Code
+      async function resendVerificationCode(email) {
+        if (state.resendCooldown) return;
+        if (!email) return;
+        try {
+          await callAPI('/api/send-verification', 'POST', { email });
+          showToast('New code sent!', 'success');
+          startResendCooldown(30);
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+        }
+      }
+
+      function startResendCooldown(seconds) {
+        state.resendCooldown = true;
+        resendCodeBtn.disabled = true;
+        let remaining = seconds;
+        resendTimer.textContent = `Resend in ${remaining}s`;
+        const interval = setInterval(() => {
+          remaining--;
+          if (remaining <= 0) {
+            clearInterval(interval);
+            resendCodeBtn.disabled = false;
+            resendTimer.textContent = '';
+            state.resendCooldown = false;
+          } else {
+            resendTimer.textContent = `Resend in ${remaining}s`;
+          }
+        }, 1000);
+      }
+
+      resendCodeBtn.addEventListener('click', async () => {
+        const email = authEmail.value.trim();
+        if (!isValidEmail(email)) {
+          showToast('Enter a valid email first.', 'error');
+          return;
+        }
+        await resendVerificationCode(email);
+      });
+
+      // Sign Up
       async function handleSignUp(email, password, name) {
         await callAPI('/api/send-verification', 'POST', { email });
         showToast('Verification code sent to your email.', 'success');
@@ -890,6 +942,8 @@
         authCode.focus();
         authError.textContent = '';
         authError.classList.remove('is-visible');
+        resendCodeBtn.dataset.email = email;
+        startResendCooldown(30);
       }
 
       async function verifySignUp() {
@@ -923,6 +977,7 @@
         }
       }
 
+      // Sign In
       async function handleSignIn(email, password) {
         try {
           await callAPI('/api/auth/login', 'POST', { email, password });
@@ -941,6 +996,8 @@
           authCode.focus();
           authError.textContent = '';
           authError.classList.remove('is-visible');
+          resendCodeBtn.dataset.email = email;
+          startResendCooldown(30);
         } catch (err) {
           if (err.message.includes('Account not found')) {
             authError.textContent = 'Account not found. Please create an account.';
@@ -1058,7 +1115,10 @@
           renderHistory();
           const ids = Object.keys(convs);
           if (ids.length === 0) {
-            newChat();
+            // No default chat – just show empty
+            state.activeId = null;
+            clearMessages();
+            renderHistory();
           } else {
             const latest = ids.sort((a,b) => new Date(convs[b].updated_at) - new Date(convs[a].updated_at))[0];
             switchConversation(latest);
@@ -1105,7 +1165,8 @@
         }
         renderHistory();
         if (Object.keys(state.conversations).length === 0) {
-          newChat();
+          // Show empty state – no default chat
+          emptyState.classList.remove('is-hidden');
         } else {
           const firstId = Object.keys(state.conversations)[0];
           switchConversation(firstId);
@@ -1130,6 +1191,10 @@
         authCodeField.style.display = 'none';
         authSwitchBtn.style.display = 'block';
         authGuestBtn.style.display = 'block';
+        resendCodeBtn.dataset.email = '';
+        resendTimer.textContent = '';
+        state.resendCooldown = false;
+        resendCodeBtn.disabled = false;
         if (mode === 'signin') {
           authModalTitle.textContent = 'Sign In';
           authModalDesc.textContent = 'Sign in to save your chats across devices.';
@@ -1264,6 +1329,8 @@
               break;
             case 'account':
               securityEmail.value = state.user?.email || '';
+              secNewEmail.value = '';
+              secEmailCode.value = '';
               secCurrentPass.value = '';
               secNewPass.value = '';
               secConfirmPass.value = '';
@@ -1284,18 +1351,70 @@
       accountSecurityCloseActionBtn.addEventListener('click', () => closeModal(accountSecurityModal));
       accountSecurityModal.addEventListener('click', (e) => { if (e.target === accountSecurityModal) closeModal(accountSecurityModal); });
 
+      // Change Email
+      secSendEmailCodeBtn.addEventListener('click', async () => {
+        const email = secNewEmail.value.trim();
+        if (!isValidEmail(email)) {
+          showToast('Enter a valid new email.', 'error');
+          return;
+        }
+        try {
+          await callAPI('/api/send-verification', 'POST', { email });
+          showToast('Verification code sent to new email.', 'success');
+          secSendEmailCodeBtn.textContent = 'Sent!';
+          setTimeout(() => secSendEmailCodeBtn.textContent = 'Send Code', 3000);
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+        }
+      });
+
+      secChangeEmailBtn.addEventListener('click', async () => {
+        const newEmail = secNewEmail.value.trim();
+        const code = secEmailCode.value.trim();
+        if (!newEmail || !code) {
+          showToast('New email and code required.', 'error');
+          return;
+        }
+        const token = getSessionToken();
+        if (!token) return;
+        try {
+          await callAPI('/api/auth/change-email', 'PUT', { newEmail, verificationCode: code }, token);
+          // Update local user
+          const user = getCurrentUser();
+          if (user) {
+            user.email = newEmail;
+            setCurrentUser(user);
+            state.user.email = newEmail;
+            updateUIForUser(user);
+          }
+          showToast('Email updated!', 'success');
+          secNewEmail.value = '';
+          secEmailCode.value = '';
+          closeModal(accountSecurityModal);
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+        }
+      });
+
+      // Change Password
       secChangePassBtn.addEventListener('click', async () => {
         const curr = secCurrentPass.value;
         const np = secNewPass.value;
         const conf = secConfirmPass.value;
-        if (!curr || !np || !conf) { showToast('All fields required.', 'error'); return; }
+        if (!curr || !np || !conf) { showToast('All password fields required.', 'error'); return; }
         if (np !== conf) { showToast('New passwords do not match.', 'error'); return; }
-        // In production, call /api/auth/change-password
-        showToast('Password updated successfully! (simulated)', 'success');
-        secCurrentPass.value = '';
-        secNewPass.value = '';
-        secConfirmPass.value = '';
-        closeModal(accountSecurityModal);
+        const token = getSessionToken();
+        if (!token) return;
+        try {
+          await callAPI('/api/auth/change-password', 'PUT', { currentPassword: curr, newPassword: np }, token);
+          showToast('Password updated!', 'success');
+          secCurrentPass.value = '';
+          secNewPass.value = '';
+          secConfirmPass.value = '';
+          closeModal(accountSecurityModal);
+        } catch (err) {
+          showToast('Error: ' + err.message, 'error');
+        }
       });
 
       secDeleteAccountBtn.addEventListener('click', () => {
@@ -1919,18 +2038,11 @@
       }
 
       function newChat() {
-        const empty = Object.values(state.conversations).find(c => c.messages.length === 0);
-        if (empty) {
-          if (state.activeId === empty.id) { userInput.focus(); return; }
-          switchConversation(empty.id);
-          userInput.focus();
-          return;
-        }
-        const newId = createConversation('New Chat');
-        state.activeId = newId;
+        // Don't create a conversation – just show empty state
+        state.activeId = null;
         document.querySelectorAll('.message-wrapper').forEach(el => el.remove());
         emptyState.classList.remove('is-hidden');
-        chatTitle.textContent = 'New Chat';
+        chatTitle.textContent = 'AgriDeepAI';
         renderHistory();
         userInput.value = '';
         userInput.style.height = 'auto';
@@ -1987,6 +2099,33 @@
         }
       });
 
+      // ─── PASSWORD TOGGLE (global) ─────────────────────────────
+      document.querySelectorAll('.password-toggle').forEach(btn => {
+        btn.addEventListener('click', function() {
+          const target = document.getElementById(this.dataset.target);
+          if (target) {
+            const isPassword = target.type === 'password';
+            target.type = isPassword ? 'text' : 'password';
+            this.textContent = isPassword ? '🙈' : '👁';
+          }
+        });
+      });
+
+      // ─── SESSION RESTORE ──────────────────────────────────────
+      async function restoreSession() {
+        const token = getSessionToken();
+        const user = getCurrentUser();
+        if (token && user) {
+          state.user = user;
+          state.sessionToken = token;
+          state.isAuthenticated = true;
+          updateUIForUser(user);
+          await loadConversations();
+          return true;
+        }
+        return false;
+      }
+
       // ─── INIT ────────────────────────────────────────────────────
       async function init() {
         loadSettings();
@@ -2021,15 +2160,10 @@
           }
         }
 
-        const token = getSessionToken();
-        const user = getCurrentUser();
-        if (token && user) {
-          state.user = user;
-          state.sessionToken = token;
-          state.isAuthenticated = true;
-          updateUIForUser(user);
-          await loadConversations();
-        } else {
+        // Restore session
+        const sessionRestored = await restoreSession();
+        if (!sessionRestored) {
+          // Guest or no session
           clearSession();
           state.user = null;
           state.sessionToken = null;
@@ -2038,9 +2172,11 @@
           state.conversations = {};
           state.activeId = null;
           renderHistory();
-          newChat();
+          // Show empty state – no default chat
+          emptyState.classList.remove('is-hidden');
         }
 
+        // Auto‑save every 10 seconds
         setInterval(() => {
           if (state.isAuthenticated && state.activeId) {
             saveConversation(state.activeId);
