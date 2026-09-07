@@ -1,7 +1,7 @@
 {
   "name": "agrideepai",
   "version": "3.0.0",
-  "description": "AgriDeepAI — Professional AI Assistant for Agriculture & Livestock",
+  "description": "AgriDeepAI — Professional AI Assistant",
   "main": "api/chat.js",
   "dependencies": {
     "mongodb": "^6.8.0",
