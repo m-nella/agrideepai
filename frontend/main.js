@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend Logic
+// AGRIDEEPAI – Frontend Application
 // ============================================================
 
 // --- DOM refs ---
@@ -38,9 +38,7 @@ async function initSupabase() {
   try {
     const res = await fetch('/api/config');
     const config = await res.json();
-    const { createClient } = await import(
-      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
-    );
+    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
 
     state.supabase.auth.onAuthStateChange((event, session) => {
@@ -73,8 +71,8 @@ async function initSupabase() {
 // --- Auth UI ---
 function updateAuthUI() {
   if (state.currentUser) {
-    const displayName = state.currentUser.email?.split('@')[0] || 'User';
-    authSidebarBtn.textContent = '👤 ' + displayName;
+    const name = state.currentUser.email?.split('@')[0] || 'User';
+    authSidebarBtn.textContent = '👤 ' + name;
     authSidebarBtn.onclick = () => openSettingsModal();
   } else {
     authSidebarBtn.textContent = 'Sign In';
@@ -104,14 +102,14 @@ function loadLocalConversations() {
   const stored = localStorage.getItem('agrideep_local_chats');
   state.chats = stored ? JSON.parse(stored) : [];
   const currentId = localStorage.getItem('agrideep_local_current');
-  if (currentId && state.chats.some((c) => c.id === currentId)) {
+  if (currentId && state.chats.some(c => c.id === currentId)) {
     state.activeChatId = currentId;
   } else {
     state.activeChatId = null;
   }
   renderChatList();
   if (state.activeChatId) {
-    const chat = state.chats.find((c) => c.id === state.activeChatId);
+    const chat = state.chats.find(c => c.id === state.activeChatId);
     if (chat) {
       state.messages = chat.messages || [];
       renderMessages();
@@ -141,7 +139,7 @@ async function loadCloudConversations() {
     state.chats = await res.json();
     renderChatList();
     if (state.activeChatId) {
-      const exists = state.chats.some((c) => c.id === state.activeChatId);
+      const exists = state.chats.some(c => c.id === state.activeChatId);
       if (!exists) state.activeChatId = null;
     }
     if (state.activeChatId) {
@@ -151,9 +149,7 @@ async function loadCloudConversations() {
       renderMessages();
       chatTitle.textContent = 'AgriDeepAI';
     }
-  } catch (err) {
-    console.error(err);
-  }
+  } catch (err) { console.error(err); }
 }
 
 async function loadCloudMessages(chatId) {
@@ -161,31 +157,28 @@ async function loadCloudMessages(chatId) {
   try {
     const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
     state.messages = await res.json();
-    const chat = state.chats.find((c) => c.id === chatId);
+    const chat = state.chats.find(c => c.id === chatId);
     if (chat) chatTitle.textContent = chat.title || 'New Chat';
     renderMessages();
     renderChatList();
-  } catch (err) {
-    console.error(err);
-  }
+  } catch (err) { console.error(err); }
 }
 
 // --- Render chat list ---
 function renderChatList() {
   chatList.innerHTML = '';
   if (!state.chats.length) {
-    chatList.innerHTML =
-      '<div style="text-align:center;color:#484f58;padding:1.5rem 0;font-size:0.9rem;">No chats yet</div>';
+    chatList.innerHTML = '<div style="text-align:center;color:#484f58;padding:1.5rem 0;font-size:0.9rem;">No chats yet</div>';
     return;
   }
   const sorted = [...state.chats].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
-    const dateA = a.updated_at || a.updatedAt || a.createdAt;
-    const dateB = b.updated_at || b.updatedAt || b.createdAt;
-    return new Date(dateB) - new Date(dateA);
+    const da = a.updated_at || a.updatedAt || a.createdAt;
+    const db = b.updated_at || b.updatedAt || b.createdAt;
+    return new Date(db) - new Date(da);
   });
-  sorted.forEach((chat) => {
+  sorted.forEach(chat => {
     const div = document.createElement('div');
     div.className = `chat-item${chat.id === state.activeChatId ? ' active' : ''}`;
     div.dataset.id = chat.id;
@@ -207,28 +200,19 @@ function renderChatList() {
     const pinBtn = document.createElement('button');
     pinBtn.textContent = chat.pinned ? '📌' : '📍';
     pinBtn.title = chat.pinned ? 'Unpin' : 'Pin';
-    pinBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      togglePin(chat.id);
-    });
+    pinBtn.addEventListener('click', e => { e.stopPropagation(); togglePin(chat.id); });
     actions.appendChild(pinBtn);
 
     const renameBtn = document.createElement('button');
     renameBtn.textContent = '✏️';
     renameBtn.title = 'Rename';
-    renameBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      renameChat(chat.id);
-    });
+    renameBtn.addEventListener('click', e => { e.stopPropagation(); renameChat(chat.id); });
     actions.appendChild(renameBtn);
 
     const delBtn = document.createElement('button');
     delBtn.textContent = '🗑️';
     delBtn.title = 'Delete';
-    delBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      deleteChat(chat.id);
-    });
+    delBtn.addEventListener('click', e => { e.stopPropagation(); deleteChat(chat.id); });
     actions.appendChild(delBtn);
 
     div.appendChild(actions);
@@ -258,8 +242,7 @@ function renderMessages() {
     if (msg.role === 'assistant') {
       const header = document.createElement('div');
       header.className = 'assistant-header';
-      header.innerHTML =
-        '<img src="/logo.png" alt="AgriDeepAI" /> AgriDeepAI';
+      header.innerHTML = '<img src="/logo.png" alt="AgriDeepAI" /> AgriDeepAI';
       msgDiv.appendChild(header);
     }
 
@@ -270,20 +253,13 @@ function renderMessages() {
     // Sources / files
     if (msg.files && msg.files.length > 0) {
       const fileDiv = document.createElement('div');
-      fileDiv.style.cssText =
-        'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
-      msg.files.forEach((f) => {
+      fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
+      msg.files.forEach(f => {
         if (f.sources) {
           const sourcesDiv = document.createElement('div');
           sourcesDiv.className = 'sources';
-          sourcesDiv.innerHTML =
-            '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
-            f.sources
-              .map(
-                (s) =>
-                  `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`
-              )
-              .join('') +
+          sourcesDiv.innerHTML = '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
+            f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`).join('') +
             '</ul>';
           msgDiv.appendChild(sourcesDiv);
         } else if (f.public_url) {
@@ -306,16 +282,14 @@ function renderMessages() {
     copyBtn.textContent = '📋';
     copyBtn.title = 'Copy';
     copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(msg.content).then(() => {
-        showToast('Copied!');
-      });
+      navigator.clipboard.writeText(msg.content).then(() => showToast('Copied!'));
     });
     actionsDiv.appendChild(copyBtn);
 
     if (msg.role === 'user') {
       const editBtn = document.createElement('button');
       editBtn.textContent = '✏️';
-      editBtn.title = 'Edit message';
+      editBtn.title = 'Edit';
       editBtn.addEventListener('click', () => editUserMessage(index));
       actionsDiv.appendChild(editBtn);
     }
@@ -323,7 +297,7 @@ function renderMessages() {
     if (msg.role === 'assistant') {
       const regenBtn = document.createElement('button');
       regenBtn.textContent = '🔄';
-      regenBtn.title = 'Regenerate response';
+      regenBtn.title = 'Regenerate';
       regenBtn.addEventListener('click', () => regenerateMessage(index));
       actionsDiv.appendChild(regenBtn);
     }
@@ -334,62 +308,27 @@ function renderMessages() {
   });
 
   const container = document.getElementById('chatContainer');
-  if (isNearBottom(container)) {
-    container.scrollTop = container.scrollHeight;
-  }
+  if (isNearBottom(container)) container.scrollTop = container.scrollHeight;
 }
 
 function isNearBottom(container, threshold = 150) {
-  return (
-    container.scrollHeight - container.scrollTop - container.clientHeight <
-    threshold
-  );
+  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
 }
 
-// --- Toast notification ---
-function showToast(message) {
-  const existing = document.querySelector('.agrideep-toast');
-  if (existing) existing.remove();
-
-  const toast = document.createElement('div');
-  toast.className = 'agrideep-toast';
-  toast.textContent = message;
-  Object.assign(toast.style, {
-    position: 'fixed',
-    bottom: '80px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    background: '#238636',
-    color: '#fff',
-    padding: '0.5rem 1.2rem',
-    borderRadius: '8px',
-    fontSize: '0.9rem',
-    fontWeight: '500',
-    boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-    zIndex: '9999',
-    transition: 'opacity 0.3s, transform 0.3s',
-    opacity: '0',
-    transform: 'translateX(-50%) translateY(10px)',
-  });
-  document.body.appendChild(toast);
-
-  requestAnimationFrame(() => {
-    toast.style.opacity = '1';
-    toast.style.transform = 'translateX(-50%) translateY(0)';
-  });
-
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateX(-50%) translateY(10px)';
-    setTimeout(() => toast.remove(), 300);
-  }, 2000);
+function showToast(msg) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#238636;color:#fff;padding:0.5rem 1.2rem;border-radius:8px;font-size:0.9rem;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:9999;opacity:0;transition:opacity 0.3s;';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.style.opacity = '1');
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2000);
 }
 
 // --- Chat CRUD ---
 function createLocalChat(title = 'New Chat') {
   const chat = {
     id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-    title: title,
+    title,
     messages: [],
     pinned: false,
     updatedAt: new Date().toISOString(),
@@ -404,10 +343,7 @@ function createLocalChat(title = 'New Chat') {
 async function createChat(title = 'New Chat') {
   if (state.currentUser) {
     try {
-      const res = await apiFetch('/api/chat/conversations', {
-        method: 'POST',
-        body: JSON.stringify({ title }),
-      });
+      const res = await apiFetch('/api/chat/conversations', { method: 'POST', body: JSON.stringify({ title }) });
       const chat = await res.json();
       state.chats.unshift(chat);
       renderChatList();
@@ -427,7 +363,7 @@ async function selectChat(id) {
     await loadCloudMessages(id);
     renderChatList();
   } else {
-    const chat = state.chats.find((c) => c.id === id);
+    const chat = state.chats.find(c => c.id === id);
     if (chat) {
       state.messages = chat.messages || [];
       renderMessages();
@@ -444,7 +380,7 @@ async function deleteChat(id) {
   if (state.currentUser) {
     try {
       await apiFetch(`/api/chat/conversations/${id}`, { method: 'DELETE' });
-      state.chats = state.chats.filter((c) => c.id !== id);
+      state.chats = state.chats.filter(c => c.id !== id);
       if (state.activeChatId === id) {
         state.activeChatId = null;
         state.messages = [];
@@ -452,11 +388,9 @@ async function deleteChat(id) {
         chatTitle.textContent = 'AgriDeepAI';
       }
       renderChatList();
-    } catch (err) {
-      showToast('Failed to delete');
-    }
+    } catch (err) { showToast('Failed to delete'); }
   } else {
-    state.chats = state.chats.filter((c) => c.id !== id);
+    state.chats = state.chats.filter(c => c.id !== id);
     if (state.activeChatId === id) {
       state.activeChatId = null;
       state.messages = [];
@@ -469,50 +403,39 @@ async function deleteChat(id) {
 }
 
 async function renameChat(id) {
-  const chat = state.chats.find((c) => c.id === id);
+  const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
   const newTitle = prompt('New title:', chat.title);
-  if (newTitle && newTitle.trim()) {
-    if (state.currentUser) {
-      try {
-        const res = await apiFetch(`/api/chat/conversations/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify({ title: newTitle.trim() }),
-        });
-        const updated = await res.json();
-        const idx = state.chats.findIndex((c) => c.id === id);
-        if (idx !== -1) state.chats[idx] = updated;
-        renderChatList();
-        if (state.activeChatId === id) chatTitle.textContent = updated.title;
-      } catch (err) {
-        showToast('Failed to rename');
-      }
-    } else {
-      chat.title = newTitle.trim();
-      chat.updatedAt = new Date().toISOString();
-      saveLocalConversations();
+  if (!newTitle || !newTitle.trim()) return;
+  if (state.currentUser) {
+    try {
+      const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ title: newTitle.trim() }) });
+      const updated = await res.json();
+      const idx = state.chats.findIndex(c => c.id === id);
+      if (idx !== -1) state.chats[idx] = updated;
       renderChatList();
-      if (state.activeChatId === id) chatTitle.textContent = chat.title;
-    }
+      if (state.activeChatId === id) chatTitle.textContent = updated.title;
+    } catch (err) { showToast('Failed to rename'); }
+  } else {
+    chat.title = newTitle.trim();
+    chat.updatedAt = new Date().toISOString();
+    saveLocalConversations();
+    renderChatList();
+    if (state.activeChatId === id) chatTitle.textContent = chat.title;
   }
 }
 
 async function togglePin(id) {
-  const chat = state.chats.find((c) => c.id === id);
+  const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
   if (state.currentUser) {
     try {
-      const res = await apiFetch(`/api/chat/conversations/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ pinned: !chat.pinned }),
-      });
+      const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ pinned: !chat.pinned }) });
       const updated = await res.json();
-      const idx = state.chats.findIndex((c) => c.id === id);
+      const idx = state.chats.findIndex(c => c.id === id);
       if (idx !== -1) state.chats[idx] = updated;
       renderChatList();
-    } catch (err) {
-      showToast('Failed to update pin');
-    }
+    } catch (err) { showToast('Failed to update pin'); }
   } else {
     chat.pinned = !chat.pinned;
     chat.updatedAt = new Date().toISOString();
@@ -525,45 +448,38 @@ async function togglePin(id) {
 function resizeComposer() {
   messageInput.style.height = '0px';
   const maxHeight = 120;
-  const scrollHeight = messageInput.scrollHeight;
-  messageInput.style.height = Math.min(scrollHeight, maxHeight) + 'px';
-  messageInput.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+  const sh = messageInput.scrollHeight;
+  messageInput.style.height = Math.min(sh, maxHeight) + 'px';
+  messageInput.style.overflowY = sh > maxHeight ? 'auto' : 'hidden';
 }
 
 function updateSendButton() {
-  const hasContent = messageInput.value.trim() !== '' || state.attachments.length > 0;
-  sendBtn.style.opacity = hasContent ? '1' : '0.35';
+  const has = messageInput.value.trim() !== '' || state.attachments.length > 0;
+  sendBtn.style.opacity = has ? '1' : '0.35';
 }
 
 function showFilePreview() {
-  const oldPreview = document.getElementById('filePreviewContainer');
-  if (oldPreview) oldPreview.remove();
-  if (state.attachments.length === 0) return;
-
+  const old = document.getElementById('filePreviewContainer');
+  if (old) old.remove();
+  if (!state.attachments.length) return;
   const container = document.createElement('div');
   container.id = 'filePreviewContainer';
-  container.style.cssText =
-    'display:flex;flex-wrap:wrap;gap:0.4rem;padding:0.25rem 0.5rem;';
-
-  state.attachments.forEach((file, idx) => {
+  container.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.4rem;padding:0.25rem 0.5rem;';
+  state.attachments.forEach((f, idx) => {
     const pill = document.createElement('span');
-    pill.style.cssText =
-      'background:#21262d;padding:0.2rem 0.6rem;border-radius:16px;font-size:0.8rem;display:flex;align-items:center;gap:0.3rem;color:#c9d1d9;border:1px solid #30363d;';
-    pill.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + 'KB)';
-
-    const removeBtn = document.createElement('button');
-    removeBtn.textContent = '✕';
-    removeBtn.style.cssText =
-      'background:none;border:none;cursor:pointer;font-weight:bold;color:#8b949e;padding:0 2px;';
-    removeBtn.addEventListener('click', () => {
+    pill.style.cssText = 'background:#21262d;padding:0.2rem 0.6rem;border-radius:16px;font-size:0.8rem;display:flex;align-items:center;gap:0.3rem;color:#c9d1d9;border:1px solid #30363d;';
+    pill.textContent = f.name + ' (' + (f.size/1024).toFixed(0) + 'KB)';
+    const rm = document.createElement('button');
+    rm.textContent = '✕';
+    rm.style.cssText = 'background:none;border:none;cursor:pointer;font-weight:bold;color:#8b949e;padding:0 2px;';
+    rm.addEventListener('click', () => {
       state.attachments.splice(idx, 1);
       showFilePreview();
       updateSendButton();
     });
-    pill.appendChild(removeBtn);
+    pill.appendChild(rm);
     container.appendChild(pill);
   });
-
   composer.parentNode.insertBefore(container, composer);
 }
 
@@ -573,7 +489,7 @@ async function sendMessage() {
   if (!text && state.attachments.length === 0) return;
   if (state.isGenerating) return;
 
-  let chat = state.chats.find((c) => c.id === state.activeChatId);
+  let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 30) + (text.length > 30 ? '...' : '') || 'New Chat';
     chat = await createChat(title);
@@ -592,11 +508,7 @@ async function sendMessage() {
     id: 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
     role: 'user',
     content: text || '[File attached]',
-    files: state.attachments.map((f) => ({
-      filename: f.name,
-      mime_type: f.type,
-      size: f.size,
-    })),
+    files: state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size })),
     created_at: new Date().toISOString(),
   };
   state.messages.push(userMsg);
@@ -607,6 +519,7 @@ async function sendMessage() {
   renderMessages();
 
   messageInput.value = '';
+  const atts = [...state.attachments];
   state.attachments = [];
   showFilePreview();
   resizeComposer();
@@ -637,9 +550,8 @@ async function sendMessage() {
     let response;
     const formData = new FormData();
     formData.append('message', text || '');
-    // Always search enabled
     formData.append('search', 'true');
-    state.attachments.forEach((f) => formData.append('file', f));
+    atts.forEach(f => formData.append('file', f));
 
     if (state.currentUser) {
       const session = await state.supabase.auth.getSession();
@@ -652,9 +564,7 @@ async function sendMessage() {
       });
     } else {
       const payload = {
-        messages: state.messages
-          .filter((m) => m.role !== 'system')
-          .map((m) => ({ role: m.role, content: m.content })),
+        messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
       };
       response = await fetch('/api/chat/guest', {
         method: 'POST',
@@ -671,7 +581,7 @@ async function sendMessage() {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let fullContent = '';
+    let full = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -685,10 +595,10 @@ async function sendMessage() {
           try {
             const parsed = JSON.parse(data);
             if (parsed.text) {
-              fullContent += parsed.text;
+              full += parsed.text;
               const last = state.messages[state.messages.length - 1];
               if (last && last.role === 'assistant') {
-                last.content = fullContent;
+                last.content = full;
                 if (!state.currentUser) {
                   chat.messages = state.messages;
                   saveLocalConversations();
@@ -707,9 +617,7 @@ async function sendMessage() {
                 renderMessages();
               }
             }
-          } catch (e) {
-            // ignore parse errors
-          }
+          } catch (e) {}
         }
       }
     }
@@ -779,14 +687,13 @@ async function editUserMessage(index) {
 
   if (state.currentUser) {
     try {
-      const res = await apiFetch(`/api/chat/messages/${msg.id}`, {
+      await apiFetch(`/api/chat/messages/${msg.id}`, {
         method: 'PUT',
         body: JSON.stringify({ content: trimmed, truncate: true }),
       });
-      const updated = await res.json();
       msg.content = trimmed;
       state.messages = state.messages.slice(0, index + 1);
-      const chat = state.chats.find((c) => c.id === state.activeChatId);
+      const chat = state.chats.find(c => c.id === state.activeChatId);
       if (!state.currentUser && chat) {
         chat.messages = state.messages;
         saveLocalConversations();
@@ -799,7 +706,7 @@ async function editUserMessage(index) {
   } else {
     msg.content = trimmed;
     state.messages = state.messages.slice(0, index + 1);
-    const chat = state.chats.find((c) => c.id === state.activeChatId);
+    const chat = state.chats.find(c => c.id === state.activeChatId);
     if (chat) {
       chat.messages = state.messages;
       saveLocalConversations();
@@ -813,7 +720,7 @@ async function editUserMessage(index) {
 async function regenerateMessage(index) {
   const msg = state.messages[index];
   if (!msg || msg.role !== 'assistant') return;
-  const chat = state.chats.find((c) => c.id === state.activeChatId);
+  const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) return;
 
   if (!state.currentUser) {
@@ -846,7 +753,7 @@ async function regenerateMessage(index) {
     };
     state.messages.push(newAssistant);
     renderMessages();
-    let fullContent = '';
+    let full = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -859,10 +766,10 @@ async function regenerateMessage(index) {
           try {
             const parsed = JSON.parse(data);
             if (parsed.text) {
-              fullContent += parsed.text;
+              full += parsed.text;
               const last = state.messages[state.messages.length - 1];
               if (last && last.role === 'assistant') {
-                last.content = fullContent;
+                last.content = full;
                 renderMessages();
               }
             }
@@ -880,9 +787,7 @@ async function regenerateMessage(index) {
 // --- Guest send helper ---
 async function sendGuestMessage(text, chat) {
   const payload = {
-    messages: state.messages
-      .filter((m) => m.role !== 'system')
-      .map((m) => ({ role: m.role, content: m.content })),
+    messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
   };
 
   state.isGenerating = true;
@@ -900,7 +805,7 @@ async function sendGuestMessage(text, chat) {
     if (!response.ok) throw new Error('AI request failed');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let fullContent = '';
+    let full = '';
     const newAssistant = {
       id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
       role: 'assistant',
@@ -924,10 +829,10 @@ async function sendGuestMessage(text, chat) {
           try {
             const parsed = JSON.parse(data);
             if (parsed.text) {
-              fullContent += parsed.text;
+              full += parsed.text;
               const last = state.messages[state.messages.length - 1];
               if (last && last.role === 'assistant') {
-                last.content = fullContent;
+                last.content = full;
                 renderMessages();
               }
             }
@@ -964,11 +869,9 @@ function openAuthModal(mode = 'login') {
   authModal.classList.remove('hidden');
   renderAuthForm(mode);
 }
-
 function closeAuthModal() {
   authModal.classList.add('hidden');
 }
-
 modalClose.addEventListener('click', closeAuthModal);
 authModal.addEventListener('click', (e) => {
   if (e.target === authModal) closeAuthModal();
@@ -1013,16 +916,11 @@ function renderAuthForm(mode) {
     }
     try {
       if (isLogin) {
-        const { data, error } = await state.supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { data, error } = await state.supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         closeAuthModal();
       } else {
-        const fullName =
-          document.getElementById('authFullName')?.value.trim() ||
-          email.split('@')[0];
+        const fullName = document.getElementById('authFullName')?.value.trim() || email.split('@')[0];
         const { data, error } = await state.supabase.auth.signUp({
           email,
           password,
@@ -1034,10 +932,7 @@ function renderAuthForm(mode) {
         const userId = data.user.id;
         document.getElementById('verifyBtn').addEventListener('click', async () => {
           const code = document.getElementById('verifyCode').value.trim();
-          if (!code) {
-            showToast('Enter the code');
-            return;
-          }
+          if (!code) { showToast('Enter the code'); return; }
           const res = await fetch('/api/auth/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1101,9 +996,7 @@ function openSettingsModal() {
 
   const closeModal = () => modal.remove();
   modal.querySelector('#settingsClose').addEventListener('click', closeModal);
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) closeModal();
-  });
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 
   modal.querySelector('#changePasswordBtn').addEventListener('click', async () => {
     const currentPassword = modal.querySelector('#currentPassword').value;
@@ -1114,12 +1007,11 @@ function openSettingsModal() {
       return;
     }
     try {
-      const res = await apiFetch('/api/auth/change-password', {
+      await apiFetch('/api/auth/change-password', {
         method: 'POST',
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      const data = await res.json();
-      showToast(data.message || 'Password changed');
+      showToast('Password changed');
       modal.querySelector('#settingsError').style.display = 'none';
       modal.querySelector('#currentPassword').value = '';
       modal.querySelector('#newPassword').value = '';
@@ -1137,12 +1029,11 @@ function openSettingsModal() {
       return;
     }
     try {
-      const res = await apiFetch('/api/auth/change-email', {
+      await apiFetch('/api/auth/change-email', {
         method: 'POST',
         body: JSON.stringify({ newEmail }),
       });
-      const data = await res.json();
-      showToast(data.message || 'Email change requested. Please verify the new email.');
+      showToast('Email change requested. Verify new email.');
       modal.querySelector('#settingsError').style.display = 'none';
       modal.querySelector('#newEmail').value = '';
     } catch (err) {
@@ -1155,9 +1046,8 @@ function openSettingsModal() {
     if (!confirm('Permanently delete your account? This cannot be undone!')) return;
     if (!confirm('All your conversations will be lost. Continue?')) return;
     try {
-      const res = await apiFetch('/api/auth/delete-account', { method: 'DELETE' });
-      const data = await res.json();
-      showToast(data.message || 'Account deleted');
+      await apiFetch('/api/auth/delete-account', { method: 'DELETE' });
+      showToast('Account deleted');
       await state.supabase.auth.signOut();
       closeModal();
     } catch (err) {
@@ -1211,8 +1101,7 @@ attachBtn.addEventListener('click', () => {
   input.onchange = (e) => {
     const files = Array.from(e.target.files);
     const maxSize = 10 * 1024 * 1024;
-    const oversized = files.some((f) => f.size > maxSize);
-    if (oversized) {
+    if (files.some(f => f.size > maxSize)) {
       showToast('Files must be smaller than 10MB.');
       return;
     }
@@ -1223,11 +1112,7 @@ attachBtn.addEventListener('click', () => {
   input.click();
 });
 
-// --- Init ---
-initSupabase();
-updateSendButton();
-
-// Close sidebar on outside click (mobile)
+// --- Close sidebar on backdrop click (mobile) ---
 document.addEventListener('click', (e) => {
   if (window.innerWidth < 768) {
     const isOpen = sidebar.classList.contains('open');
@@ -1236,3 +1121,7 @@ document.addEventListener('click', (e) => {
     }
   }
 });
+
+// --- Init ---
+initSupabase();
+updateSendButton();
