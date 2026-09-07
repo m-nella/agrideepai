@@ -1,9 +1,0 @@
-{
-  "name": "agrideepai",
-  "version": "4.0.0",
-  "description": "AgriDeepAI — AI Assistant for Agriculture",
-  "main": "api/chat.js",
-  "engines": {
-    "node": "24.x"
-  }
-}
