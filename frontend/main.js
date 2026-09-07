@@ -7,7 +7,8 @@ let abortController = null;
 let supabase = null;
 let currentUser = null;
 let currentProfile = null;
-let selectedFiles = []; // array of File objects
+let selectedFiles = [];
+let searchEnabled = false; // new toggle
 
 // --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
@@ -45,6 +46,27 @@ if (isDark) { document.body.classList.add('dark'); themeTopBtn.textContent = '�
 themeTopBtn.addEventListener('click', () => setTheme(!isDark));
 themeSidebarBtn.addEventListener('click', () => setTheme(!isDark));
 
+// --- Add search toggle button to composer ---
+function addSearchToggle() {
+  const existing = document.getElementById('searchToggle');
+  if (existing) return;
+  const toggle = document.createElement('button');
+  toggle.id = 'searchToggle';
+  toggle.textContent = '🌐';
+  toggle.title = 'Toggle web search';
+  toggle.style.cssText = 'background:transparent;border:none;font-size:1.2rem;cursor:pointer;padding:0.2rem 0.4rem;';
+  toggle.addEventListener('click', () => {
+    searchEnabled = !searchEnabled;
+    toggle.style.opacity = searchEnabled ? '1' : '0.4';
+    toggle.style.filter = searchEnabled ? 'none' : 'grayscale(1)';
+  });
+  toggle.style.opacity = '0.4';
+  toggle.style.filter = 'grayscale(1)';
+  // Insert before attachBtn
+  const attachBtnEl = document.getElementById('attachBtn');
+  attachBtnEl.parentNode.insertBefore(toggle, attachBtnEl);
+}
+
 // --- Supabase initialization ---
 async function initSupabase() {
   try {
@@ -75,12 +97,13 @@ async function initSupabase() {
     } else {
       updateAuthUI();
     }
+    addSearchToggle();
   } catch (err) {
     console.error('Failed to init Supabase:', err);
   }
 }
 
-// --- Auth UI ---
+// --- Auth UI (unchanged) ---
 function updateAuthUI() {
   const btnText = currentUser ? '👤 ' + (currentUser.email?.split('@')[0] || 'User') : 'Sign In';
   authTopBtn.textContent = btnText;
@@ -301,7 +324,7 @@ function renderChatList() {
   });
 }
 
-// --- Render messages (unchanged, includes edit/regenerate) ---
+// --- Render messages (with sources) ---
 function renderMessages(chat) {
   messageList.innerHTML = '';
   if (!chat || !messages.length) {
@@ -317,22 +340,31 @@ function renderMessages(chat) {
     const contentSpan = document.createElement('span');
     contentSpan.textContent = msg.content;
     div.appendChild(contentSpan);
-    // If message has files, show them
+    // Show files if any
     if (msg.files && msg.files.length > 0) {
       const fileDiv = document.createElement('div');
-      fileDiv.style.fontSize = '0.8rem';
-      fileDiv.style.marginTop = '0.3rem';
-      fileDiv.style.opacity = '0.7';
+      fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
       msg.files.forEach(f => {
-        const link = document.createElement('a');
-        link.href = f.public_url || '#';
-        link.target = '_blank';
-        link.textContent = '📎 ' + (f.filename || 'File');
-        fileDiv.appendChild(link);
-        fileDiv.appendChild(document.createTextNode(' '));
+        if (f.sources) {
+          // Display sources
+          const sourcesDiv = document.createElement('div');
+          sourcesDiv.style.marginTop = '0.5rem';
+          sourcesDiv.innerHTML = '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
+            f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank" style="color:#2e7d32;text-decoration:underline;">${s.title || s.url}</a></li>`).join('') +
+            '</ul>';
+          div.appendChild(sourcesDiv);
+        } else if (f.public_url) {
+          const link = document.createElement('a');
+          link.href = f.public_url;
+          link.target = '_blank';
+          link.textContent = '📎 ' + (f.filename || 'File');
+          fileDiv.appendChild(link);
+          fileDiv.appendChild(document.createTextNode(' '));
+        }
       });
-      div.appendChild(fileDiv);
+      if (fileDiv.children.length > 0) div.appendChild(fileDiv);
     }
+    // Actions
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'msg-actions';
     const copyBtn = document.createElement('button');
@@ -362,7 +394,7 @@ function renderMessages(chat) {
   messageList.scrollTop = messageList.scrollHeight;
 }
 
-// --- Edit and Regenerate (same as Phase 4) ---
+// --- Edit and Regenerate (same as Phase 5) ---
 async function editUserMessage(index) {
   const msg = messages[index];
   if (!msg || msg.role !== 'user') return;
@@ -378,7 +410,6 @@ async function editUserMessage(index) {
     messages[index].content = trimmed;
     messages = messages.slice(0, index + 1);
     alert('Message updated. Please send a new message to get a new response.');
-    // We could auto-trigger a regenerate, but we'll leave it for simplicity.
   } catch (err) {
     alert('Failed to edit message: ' + err.message);
   }
@@ -511,9 +542,8 @@ async function togglePin(id) {
   }
 }
 
-// --- File handling: show preview ---
+// --- File preview (unchanged) ---
 function showFilePreview() {
-  // Remove existing preview container
   const oldPreview = document.getElementById('filePreviewContainer');
   if (oldPreview) oldPreview.remove();
   if (selectedFiles.length === 0) return;
@@ -534,11 +564,10 @@ function showFilePreview() {
     pill.appendChild(removeBtn);
     container.appendChild(pill);
   });
-  // Insert above composer
   composer.parentNode.insertBefore(container, composer);
 }
 
-// --- Send message with file ---
+// --- Send message with search flag ---
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text && selectedFiles.length === 0) return;
@@ -560,6 +589,7 @@ async function sendMessage() {
   // Build FormData
   const formData = new FormData();
   formData.append('message', text || '');
+  formData.append('search', searchEnabled ? 'true' : 'false');
   selectedFiles.forEach(file => {
     formData.append('file', file);
   });
@@ -577,7 +607,6 @@ async function sendMessage() {
   messageInput.value = '';
   messageInput.style.height = 'auto';
   messageInput.disabled = true;
-  // Clear file preview
   selectedFiles = [];
   showFilePreview();
 
@@ -603,6 +632,7 @@ async function sendMessage() {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let assistantMsg = '';
+    let sources = null;
     // Add placeholder assistant
     const tempAssistantId = Date.now().toString() + '-assistant';
     messages.push({ id: tempAssistantId, role: 'assistant', content: '', created_at: new Date().toISOString() });
@@ -626,11 +656,14 @@ async function sendMessage() {
                 last.content = assistantMsg;
                 renderMessages(chat);
               }
+            } else if (parsed.sources) {
+              sources = parsed.sources;
             }
           } catch (e) { /* ignore */ }
         }
       }
     }
+    // After streaming, reload to get the saved message with sources
     await loadMessages(chat.id);
     await loadConversations();
   } catch (err) {
@@ -655,7 +688,7 @@ async function sendMessage() {
   }
 }
 
-// --- Stop generation ---
+// --- Stop generation (unchanged) ---
 function stopGeneration() {
   if (abortController) {
     abortController.abort();
@@ -702,7 +735,6 @@ chips.forEach(chip => {
   });
 });
 
-// File attachment
 attachBtn.addEventListener('click', () => {
   const input = document.createElement('input');
   input.type = 'file';
@@ -710,7 +742,6 @@ attachBtn.addEventListener('click', () => {
   input.multiple = true;
   input.onchange = (e) => {
     const files = Array.from(e.target.files);
-    // Validate size
     const maxSize = 10 * 1024 * 1024;
     const oversized = files.some(f => f.size > maxSize);
     if (oversized) {
