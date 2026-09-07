@@ -8,7 +8,7 @@ let supabase = null;
 let currentUser = null;
 let currentProfile = null;
 let selectedFiles = [];
-let searchEnabled = false; // new toggle
+let searchEnabled = false;
 
 // --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
@@ -46,7 +46,7 @@ if (isDark) { document.body.classList.add('dark'); themeTopBtn.textContent = '�
 themeTopBtn.addEventListener('click', () => setTheme(!isDark));
 themeSidebarBtn.addEventListener('click', () => setTheme(!isDark));
 
-// --- Add search toggle button to composer ---
+// --- Add search toggle ---
 function addSearchToggle() {
   const existing = document.getElementById('searchToggle');
   if (existing) return;
@@ -62,12 +62,11 @@ function addSearchToggle() {
   });
   toggle.style.opacity = '0.4';
   toggle.style.filter = 'grayscale(1)';
-  // Insert before attachBtn
   const attachBtnEl = document.getElementById('attachBtn');
   attachBtnEl.parentNode.insertBefore(toggle, attachBtnEl);
 }
 
-// --- Supabase initialization ---
+// --- Supabase init ---
 async function initSupabase() {
   try {
     const res = await fetch('/api/config');
@@ -103,23 +102,14 @@ async function initSupabase() {
   }
 }
 
-// --- Auth UI (unchanged) ---
+// --- Auth UI ---
 function updateAuthUI() {
   const btnText = currentUser ? '👤 ' + (currentUser.email?.split('@')[0] || 'User') : 'Sign In';
   authTopBtn.textContent = btnText;
-  authSidebarBtn.textContent = currentUser ? 'Logout' : 'Sign In';
+  authSidebarBtn.textContent = currentUser ? '⚙️' : 'Sign In';
   if (currentUser) {
-    authTopBtn.onclick = () => {};
-    authSidebarBtn.onclick = async () => {
-      await supabase.auth.signOut();
-      currentUser = null;
-      updateAuthUI();
-      conversations = [];
-      currentChatId = null;
-      renderChatList();
-      renderMessages(null);
-      chatTitle.textContent = 'AgriDeepAI';
-    };
+    authTopBtn.onclick = () => openSettingsModal();
+    authSidebarBtn.onclick = () => openSettingsModal();
   } else {
     authTopBtn.onclick = () => openAuthModal('login');
     authSidebarBtn.onclick = () => openAuthModal('login');
@@ -222,7 +212,109 @@ function renderAuthForm(mode) {
   });
 }
 
-// --- API helpers (unchanged) ---
+// --- Settings Modal ---
+function openSettingsModal() {
+  if (!currentUser) return;
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.id = 'settingsModal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <span class="modal-close" id="settingsClose">&times;</span>
+      <h2>Account Settings</h2>
+      <p style="margin-bottom:1rem;color:#666;">Email: ${currentUser.email}</p>
+      <div id="settingsError" class="error-msg" style="display:none;"></div>
+      <h3>Change Password</h3>
+      <label>Current Password</label>
+      <input type="password" id="currentPassword" placeholder="Current password" />
+      <label>New Password</label>
+      <input type="password" id="newPassword" placeholder="New password" />
+      <button class="btn-primary" id="changePasswordBtn">Change Password</button>
+      <hr style="margin:1rem 0;" />
+      <h3>Change Email</h3>
+      <label>New Email</label>
+      <input type="email" id="newEmail" placeholder="New email" />
+      <button class="btn-primary" id="changeEmailBtn">Change Email</button>
+      <hr style="margin:1rem 0;" />
+      <h3 style="color:#d32f2f;">Delete Account</h3>
+      <p style="color:#d32f2f;font-size:0.9rem;">This action is permanent and cannot be undone.</p>
+      <button class="btn-primary" id="deleteAccountBtn" style="background:#d32f2f;">Delete Account</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  const closeModal = () => modal.remove();
+  modal.querySelector('#settingsClose').addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+  // Change Password
+  modal.querySelector('#changePasswordBtn').addEventListener('click', async () => {
+    const currentPassword = modal.querySelector('#currentPassword').value;
+    const newPassword = modal.querySelector('#newPassword').value;
+    if (!currentPassword || !newPassword) {
+      modal.querySelector('#settingsError').textContent = 'Both fields required.';
+      modal.querySelector('#settingsError').style.display = 'block';
+      return;
+    }
+    try {
+      const res = await apiFetch('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      const data = await res.json();
+      alert(data.message || 'Password changed');
+      modal.querySelector('#settingsError').style.display = 'none';
+      modal.querySelector('#currentPassword').value = '';
+      modal.querySelector('#newPassword').value = '';
+    } catch (err) {
+      modal.querySelector('#settingsError').textContent = err.message;
+      modal.querySelector('#settingsError').style.display = 'block';
+    }
+  });
+
+  // Change Email
+  modal.querySelector('#changeEmailBtn').addEventListener('click', async () => {
+    const newEmail = modal.querySelector('#newEmail').value.trim();
+    if (!newEmail) {
+      modal.querySelector('#settingsError').textContent = 'New email required.';
+      modal.querySelector('#settingsError').style.display = 'block';
+      return;
+    }
+    try {
+      const res = await apiFetch('/api/auth/change-email', {
+        method: 'POST',
+        body: JSON.stringify({ newEmail })
+      });
+      const data = await res.json();
+      alert(data.message || 'Email change requested. Please verify the new email.');
+      modal.querySelector('#settingsError').style.display = 'none';
+      modal.querySelector('#newEmail').value = '';
+    } catch (err) {
+      modal.querySelector('#settingsError').textContent = err.message;
+      modal.querySelector('#settingsError').style.display = 'block';
+    }
+  });
+
+  // Delete Account
+  modal.querySelector('#deleteAccountBtn').addEventListener('click', async () => {
+    if (!confirm('Are you sure you want to permanently delete your account? This cannot be undone!')) return;
+    if (!confirm('All your conversations and data will be lost. Continue?')) return;
+    try {
+      const res = await apiFetch('/api/auth/delete-account', {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      alert(data.message || 'Account deleted');
+      await supabase.auth.signOut();
+      closeModal();
+    } catch (err) {
+      modal.querySelector('#settingsError').textContent = err.message;
+      modal.querySelector('#settingsError').style.display = 'block';
+    }
+  });
+}
+
+// --- API helper ---
 async function apiFetch(endpoint, options = {}) {
   const session = await supabase.auth.getSession();
   const token = session.data.session?.access_token;
@@ -239,7 +331,7 @@ async function apiFetch(endpoint, options = {}) {
   return res;
 }
 
-// --- Load conversations (unchanged) ---
+// --- Load conversations ---
 async function loadConversations() {
   if (!currentUser) return;
   try {
@@ -324,7 +416,7 @@ function renderChatList() {
   });
 }
 
-// --- Render messages (with sources) ---
+// --- Render messages with sources (unchanged) ---
 function renderMessages(chat) {
   messageList.innerHTML = '';
   if (!chat || !messages.length) {
@@ -340,15 +432,13 @@ function renderMessages(chat) {
     const contentSpan = document.createElement('span');
     contentSpan.textContent = msg.content;
     div.appendChild(contentSpan);
-    // Show files if any
     if (msg.files && msg.files.length > 0) {
       const fileDiv = document.createElement('div');
       fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
       msg.files.forEach(f => {
         if (f.sources) {
-          // Display sources
           const sourcesDiv = document.createElement('div');
-          sourcesDiv.style.marginTop = '0.5rem';
+          sourcesDiv.className = 'sources';
           sourcesDiv.innerHTML = '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
             f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank" style="color:#2e7d32;text-decoration:underline;">${s.title || s.url}</a></li>`).join('') +
             '</ul>';
@@ -364,7 +454,6 @@ function renderMessages(chat) {
       });
       if (fileDiv.children.length > 0) div.appendChild(fileDiv);
     }
-    // Actions
     const actionsDiv = document.createElement('div');
     actionsDiv.className = 'msg-actions';
     const copyBtn = document.createElement('button');
@@ -394,7 +483,7 @@ function renderMessages(chat) {
   messageList.scrollTop = messageList.scrollHeight;
 }
 
-// --- Edit and Regenerate (same as Phase 5) ---
+// --- Edit and Regenerate (unchanged) ---
 async function editUserMessage(index) {
   const msg = messages[index];
   if (!msg || msg.role !== 'user') return;
@@ -542,7 +631,7 @@ async function togglePin(id) {
   }
 }
 
-// --- File preview (unchanged) ---
+// --- File preview ---
 function showFilePreview() {
   const oldPreview = document.getElementById('filePreviewContainer');
   if (oldPreview) oldPreview.remove();
@@ -567,7 +656,7 @@ function showFilePreview() {
   composer.parentNode.insertBefore(container, composer);
 }
 
-// --- Send message with search flag ---
+// --- Send message ---
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text && selectedFiles.length === 0) return;
@@ -586,7 +675,6 @@ async function sendMessage() {
     chatTitle.textContent = chat.title;
   }
 
-  // Build FormData
   const formData = new FormData();
   formData.append('message', text || '');
   formData.append('search', searchEnabled ? 'true' : 'false');
@@ -594,7 +682,6 @@ async function sendMessage() {
     formData.append('file', file);
   });
 
-  // Optimistic: add user message with file info
   const tempUserMsg = {
     id: Date.now().toString(),
     role: 'user',
@@ -633,7 +720,6 @@ async function sendMessage() {
     const decoder = new TextDecoder();
     let assistantMsg = '';
     let sources = null;
-    // Add placeholder assistant
     const tempAssistantId = Date.now().toString() + '-assistant';
     messages.push({ id: tempAssistantId, role: 'assistant', content: '', created_at: new Date().toISOString() });
     renderMessages(chat);
@@ -663,7 +749,6 @@ async function sendMessage() {
         }
       }
     }
-    // After streaming, reload to get the saved message with sources
     await loadMessages(chat.id);
     await loadConversations();
   } catch (err) {
@@ -688,7 +773,7 @@ async function sendMessage() {
   }
 }
 
-// --- Stop generation (unchanged) ---
+// --- Stop generation ---
 function stopGeneration() {
   if (abortController) {
     abortController.abort();
