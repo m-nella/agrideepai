@@ -1,4 +1,3 @@
-/* Reset & base – always dark */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: system-ui, -apple-system, sans-serif;
@@ -14,7 +13,6 @@ body {
   overflow: hidden;
 }
 
-/* Sidebar */
 #sidebar {
   width: 280px;
   background: #242829;
@@ -124,7 +122,6 @@ body {
 }
 .sidebar-footer button:hover { background: #3a3f40; }
 
-/* Main content */
 #mainContent {
   flex: 1;
   display: flex;
@@ -262,7 +259,6 @@ body {
 }
 .message .msg-actions button:hover { color: #fff; }
 
-/* Sources */
 .sources {
   margin-top: 0.5rem;
   font-size: 0.85rem;
@@ -277,7 +273,6 @@ body {
 .sources li { margin: 0.1rem 0; }
 .sources a { color: #66bb6a; text-decoration: underline; }
 
-/* Composer */
 #composerArea {
   flex-shrink: 0;
   padding: 0.5rem 1rem 1rem;
@@ -348,7 +343,6 @@ body {
   margin-top: 0.5rem;
 }
 
-/* Modal */
 .modal {
   position: fixed;
   top: 0;
@@ -415,7 +409,6 @@ body {
 .modal-content .error-msg { color: #ef5350; font-size: 0.9rem; margin-top: 0.3rem; }
 hr { border: none; border-top: 1px solid #3a3f40; margin: 1rem 0; }
 
-/* Responsive */
 @media (max-width: 768px) {
   #sidebar {
     position: fixed;
