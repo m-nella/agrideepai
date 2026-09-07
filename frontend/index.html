@@ -3,64 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  
-  <!-- Primary Meta Tags -->
   <title>AgriDeepAI – Smart AI for Agriculture &amp; Livestock</title>
-  <meta name="title" content="AgriDeepAI – Smart AI for Agriculture &amp; Livestock" />
-  <meta name="description" content="AgriDeepAI is a free, intelligent AI assistant specialized in agriculture, livestock, crop farming, plant health, soil management, and agribusiness – with focus on Rwanda and Africa." />
-  <meta name="keywords" content="AgriDeepAI, agriculture AI, livestock assistant, crop disease diagnosis, farming advice, Rwanda agriculture, African farming, agribusiness, AI for farmers" />
-  <link rel="canonical" href="https://agrideepai.agentdomains.co/" />
-
-  <!-- Favicon -->
   <link rel="icon" href="/logo.png" type="image/png" />
   <link rel="apple-touch-icon" href="/logo.png" />
-
-  <!-- Open Graph / Facebook -->
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://agrideepai.agentdomains.co/" />
+  <meta name="description" content="AgriDeepAI – free AI assistant for agriculture, livestock, crop farming, and agribusiness." />
   <meta property="og:title" content="AgriDeepAI – Smart AI for Agriculture &amp; Livestock" />
   <meta property="og:description" content="Free AI assistant for farmers, students, and agribusiness – ask about crops, animals, soil, and more." />
-  <meta property="og:image" content="https://agrideepai.agentdomains.co/logo.png" />
-
-  <!-- Twitter -->
-  <meta property="twitter:card" content="summary_large_image" />
-  <meta property="twitter:url" content="https://agrideepai.agentdomains.co/" />
-  <meta property="twitter:title" content="AgriDeepAI – Smart AI for Agriculture &amp; Livestock" />
-  <meta property="twitter:description" content="Free AI assistant for agriculture, livestock, and agribusiness – powered by Google Gemini." />
-  <meta property="twitter:image" content="https://agrideepai.agentdomains.co/logo.png" />
-
-  <!-- JSON‑LD Structured Data (for rich results) -->
+  <meta property="og:image" content="/logo.png" />
+  <meta property="og:type" content="website" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- JSON‑LD Structured Data -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "WebApplication",
     "name": "AgriDeepAI",
     "url": "https://agrideepai.agentdomains.co/",
-    "description": "AgriDeepAI is a free, intelligent AI assistant specialized in agriculture, livestock, crop farming, plant health, soil management, and agribusiness – with strong focus on Rwanda and Africa.",
+    "description": "AgriDeepAI – free AI assistant for agriculture and livestock.",
     "applicationCategory": "AI Assistant",
     "operatingSystem": "All",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    },
-    "author": {
-      "@type": "Person",
-      "name": "Ornella Mutuyimana"
-    },
-    "creator": {
-      "@type": "Person",
-      "name": "Ornella Mutuyimana"
-    }
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Person", "name": "Ornella Mutuyimana" },
+    "creator": { "@type": "Person", "name": "Ornella Mutuyimana" }
   }
   </script>
-
-  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="app">
     <!-- Sidebar -->
-    <aside id="sidebar" class="closed">
+    <aside id="sidebar">
       <div class="sidebar-header">
         <div class="logo">
           <img src="/logo.png" alt="AgriDeepAI" class="logo-img" />
@@ -72,7 +43,6 @@
       <div id="chatList"></div>
       <div class="sidebar-footer">
         <button id="authSidebarBtn">Sign In</button>
-        <button id="themeSidebarBtn">🌓</button>
       </div>
     </aside>
 
@@ -81,10 +51,6 @@
       <header id="topBar">
         <button id="openSidebarBtn" aria-label="Open sidebar">☰</button>
         <span id="chatTitle">AgriDeepAI</span>
-        <div class="top-actions">
-          <button id="themeTopBtn">🌓</button>
-          <button id="authTopBtn">Sign In</button>
-        </div>
       </header>
 
       <div id="chatContainer">
@@ -103,11 +69,15 @@
 
       <footer id="composerArea">
         <div id="composer">
-          <button id="attachBtn" aria-label="Attach file">📎</button>
+          <button id="attachBtn" aria-label="Attach file">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
           <textarea id="messageInput" rows="1" placeholder="Ask about agriculture or livestock..."></textarea>
-          <button id="sendBtn" aria-label="Send">➤</button>
+          <button id="sendBtn" aria-label="Send">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
         </div>
-        <div class="footer-note">AgriDeepAI – AI for Agriculture &amp; Livestock</div>
+        <div class="footer-note">AgriDeepAI can make a mistake. Check for reference.</div>
       </footer>
     </main>
   </div>
@@ -116,9 +86,7 @@
   <div id="authModal" class="modal hidden">
     <div class="modal-content">
       <span class="modal-close">&times;</span>
-      <div id="authModalBody">
-        <!-- dynamically filled -->
-      </div>
+      <div id="authModalBody"></div>
     </div>
   </div>
 
