@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (with custom modals)
+// AGRIDEEPAI – Full Frontend (Fixed Send/Stop, Pin/Unpin)
 // ============================================================
 
 // --- Logging ---
@@ -1071,7 +1071,7 @@ async function togglePin(id) {
       const updated = await res.json();
       const idx = state.chats.findIndex(c => c.id === id);
       if (idx !== -1) state.chats[idx] = updated;
-      renderChatList();
+      renderChatList(); // re-render to update pin icon
     } catch (err) {
       log(`Pin error: ${err.message}`, 'error');
       showToast('Failed to update pin', true);
@@ -1080,7 +1080,7 @@ async function togglePin(id) {
     chat.pinned = !chat.pinned;
     chat.updatedAt = new Date().toISOString();
     saveLocalConversations();
-    renderChatList();
+    renderChatList(); // re-render to update pin icon
   }
   chatMenu.classList.add('hidden');
 }
@@ -1212,6 +1212,7 @@ async function sendMessage() {
   if (!hasText && !hasAttachments) return;
   if (state.isGenerating) return;
 
+  // Create chat if none exists
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
@@ -1270,9 +1271,7 @@ async function sendMessage() {
   renderMessages();
 
   state.isGenerating = true;
-  sendBtn.classList.add('generating');
-  sendBtn.disabled = false;
-  sendBtn.style.opacity = '1';
+  updateSendButton(); // ensure stop icon shows
   state.abortController = new AbortController();
 
   try {
