@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (with Markdown, Status, Stop Icon, Actions)
+// AGRIDEEPAI – Full Frontend (with all fixes)
 // ============================================================
 
 // --- Logging ---
@@ -156,7 +156,6 @@ function loadLocalConversations() {
 }
 
 function saveLocalConversations() {
-  // Save versions into messages
   state.messages.forEach(msg => {
     if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
       const vData = state.messageVersions[msg.id];
@@ -276,7 +275,7 @@ function renderChatList() {
   window.refreshIcons();
 }
 
-// --- Render messages (with Markdown, status, actions) ---
+// --- Render messages ---
 function renderMessages() {
   messageList.innerHTML = '';
   if (!state.messages.length) {
@@ -291,7 +290,6 @@ function renderMessages() {
     const row = document.createElement('div');
     row.className = `message-row ${msg.role}`;
 
-    // Message bubble
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
@@ -312,7 +310,6 @@ function renderMessages() {
         'width:100%;padding:0.4rem;border-radius:var(--radius-sm);background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:0.95rem;';
       const btnGroup = document.createElement('div');
       btnGroup.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.3rem;';
-      // Cancel
       const cancelBtn = document.createElement('button');
       cancelBtn.textContent = 'Cancel';
       cancelBtn.style.cssText =
@@ -321,7 +318,6 @@ function renderMessages() {
         state.editingMessageId = null;
         renderMessages();
       });
-      // Send
       const sendEditBtn = document.createElement('button');
       sendEditBtn.textContent = 'Send';
       sendEditBtn.className = 'btn-primary';
@@ -329,21 +325,16 @@ function renderMessages() {
       sendEditBtn.addEventListener('click', async () => {
         const newContent = textarea.value.trim();
         if (!newContent) return;
-        // Update user message content
         msg.content = newContent;
-        // Remove all messages after this one
         const idx = state.messages.indexOf(msg);
         state.messages = state.messages.slice(0, idx + 1);
-        // Clear editing
         state.editingMessageId = null;
-        // Save
         const chat = state.chats.find(c => c.id === state.activeChatId);
         if (chat) {
           chat.messages = state.messages;
           if (!state.currentUser) saveLocalConversations();
         }
         renderMessages();
-        // Generate new AI response
         await sendEditedUserMessage();
       });
       btnGroup.appendChild(cancelBtn);
@@ -357,10 +348,8 @@ function renderMessages() {
       const contentDiv = document.createElement('div');
       contentDiv.className = 'message-content';
       if (msg.role === 'assistant') {
-        // Render Markdown
         contentDiv.innerHTML = marked.parse(msg.content || '');
       } else {
-        // Plain text for user
         contentDiv.textContent = msg.content;
       }
       msgDiv.appendChild(contentDiv);
@@ -390,7 +379,7 @@ function renderMessages() {
         if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
       }
 
-      // Version controls for assistant messages
+      // Version controls
       if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
         const vData = state.messageVersions[msg.id];
         if (vData.versions.length > 1) {
@@ -446,7 +435,6 @@ function renderMessages() {
       const actionsRow = document.createElement('div');
       actionsRow.className = 'message-actions-row';
 
-      // Copy
       const copyBtn = document.createElement('button');
       copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
       copyBtn.title = 'Copy';
@@ -455,7 +443,6 @@ function renderMessages() {
       actionsRow.appendChild(copyBtn);
 
       if (msg.role === 'user') {
-        // Edit
         const editBtn = document.createElement('button');
         editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
         editBtn.title = 'Edit';
@@ -465,7 +452,6 @@ function renderMessages() {
       }
 
       if (msg.role === 'assistant') {
-        // Like
         const likeBtn = document.createElement('button');
         const isLiked = state.likedMessages.has(msg.id);
         likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
@@ -475,7 +461,6 @@ function renderMessages() {
         likeBtn.addEventListener('click', () => toggleLike(msg));
         actionsRow.appendChild(likeBtn);
 
-        // Dislike
         const dislikeBtn = document.createElement('button');
         const isDisliked = state.dislikedMessages.has(msg.id);
         dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
@@ -485,7 +470,6 @@ function renderMessages() {
         dislikeBtn.addEventListener('click', () => toggleDislike(msg));
         actionsRow.appendChild(dislikeBtn);
 
-        // Regenerate
         const regenBtn = document.createElement('button');
         regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
         regenBtn.title = 'Regenerate';
@@ -493,7 +477,6 @@ function renderMessages() {
         regenBtn.addEventListener('click', () => regenerateMessage(index));
         actionsRow.appendChild(regenBtn);
 
-        // Share
         const shareBtn = document.createElement('button');
         shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
         shareBtn.title = 'Share';
@@ -502,12 +485,10 @@ function renderMessages() {
         actionsRow.appendChild(shareBtn);
       }
 
-      // Append actions row after bubble
       row.appendChild(msgDiv);
       row.appendChild(actionsRow);
       messageList.appendChild(row);
     } else {
-      // Editing: no actions row
       row.appendChild(msgDiv);
       messageList.appendChild(row);
     }
@@ -603,7 +584,6 @@ async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) return;
 
-  // Assistant placeholder
   const assistantMsg = {
     id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
     role: 'assistant',
@@ -616,7 +596,6 @@ async function sendEditedUserMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  // Show status
   showStatus('Thinking...');
 
   state.isGenerating = true;
@@ -680,7 +659,6 @@ async function sendEditedUserMessage() {
       }
     }
 
-    // Finalize version
     const last = state.messages[state.messages.length - 1];
     if (last && last.role === 'assistant') {
       if (!state.messageVersions[last.id]) {
@@ -723,7 +701,7 @@ async function sendEditedUserMessage() {
   }
 }
 
-// --- Regenerate (adds new version) ---
+// --- Regenerate ---
 async function regenerateMessage(index) {
   const msg = state.messages[index];
   if (!msg || msg.role !== 'assistant') return;
@@ -902,6 +880,7 @@ async function createChat(title = 'New Chat') {
   }
 }
 
+// --- Select, delete, rename, pin ---
 async function selectChat(id) {
   log(`Selecting chat ${id}`, 'debug');
   state.activeChatId = id;
@@ -1052,17 +1031,22 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// --- New Chat (no empty creation) ---
+// --- New Chat (creates a new chat immediately) ---
 function handleNewChat() {
-  log('New Chat clicked – clearing view without creating chat', 'info');
-  state.activeChatId = null;
-  state.messages = [];
-  state.editingMessageId = null;
-  state.messageVersions = {};
-  renderMessages();
-  renderChatList();
-  messageInput.focus();
-  if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
+  log('New Chat clicked – creating a new chat', 'info');
+  // Create a new chat with title "New Chat"
+  createChat('New Chat').then(chat => {
+    if (chat) {
+      state.activeChatId = chat.id;
+      state.messages = [];
+      state.editingMessageId = null;
+      state.messageVersions = {};
+      renderMessages();
+      renderChatList();
+      messageInput.focus();
+      if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
+    }
+  });
 }
 
 // --- Composer ---
@@ -1076,20 +1060,23 @@ function resizeComposer() {
 
 function updateSendButton() {
   const hasContent = messageInput.value.trim().length > 0 || state.attachments.length > 0;
+  const sendIcon = sendBtn.querySelector('.send-icon');
+  const stopIcon = sendBtn.querySelector('.stop-icon');
+
   if (!state.isGenerating) {
+    // Not generating -> show send icon, hide stop
+    if (sendIcon) sendIcon.style.display = 'inline';
+    if (stopIcon) stopIcon.style.display = 'none';
     sendBtn.disabled = !hasContent;
     sendBtn.style.opacity = hasContent ? '1' : '0.35';
     sendBtn.classList.remove('generating');
-    // Show send icon
-    sendBtn.querySelector('.send-icon').style.display = 'inline';
-    sendBtn.querySelector('.stop-icon').style.display = 'none';
   } else {
+    // Generating -> show stop icon, hide send
+    if (sendIcon) sendIcon.style.display = 'none';
+    if (stopIcon) stopIcon.style.display = 'inline';
     sendBtn.disabled = false;
     sendBtn.style.opacity = '1';
     sendBtn.classList.add('generating');
-    // Show stop icon
-    sendBtn.querySelector('.send-icon').style.display = 'none';
-    sendBtn.querySelector('.stop-icon').style.display = 'inline';
   }
 }
 
@@ -1151,7 +1138,6 @@ async function sendMessage() {
   if (!hasText && !hasAttachments) return;
   if (state.isGenerating) return;
 
-  // Create chat if none
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
@@ -1169,6 +1155,13 @@ async function sendMessage() {
     if (!state.currentUser) saveLocalConversations();
     renderChatList();
     chat = newChat;
+  } else {
+    // If chat exists but has no messages, update its title
+    if (chat.messages.length === 0 && chat.title === 'New Chat') {
+      chat.title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
+      if (!state.currentUser) saveLocalConversations();
+      renderChatList();
+    }
   }
 
   // User message
@@ -1205,7 +1198,6 @@ async function sendMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  // Show status
   showStatus('Understanding your question...');
 
   state.isGenerating = true;
@@ -1285,7 +1277,6 @@ async function sendMessage() {
       }
     }
 
-    // Finalize version
     const last = state.messages[state.messages.length - 1];
     if (last && last.role === 'assistant') {
       if (!state.messageVersions[last.id]) {
@@ -1699,7 +1690,9 @@ messageInput.addEventListener('input', () => {
 
 chips.forEach((chip) => {
   chip.addEventListener('click', () => {
-    messageInput.value = chip.dataset.prompt;
+    // Send message directly
+    const prompt = chip.dataset.prompt;
+    messageInput.value = prompt;
     updateSendButton();
     sendMessage();
   });
