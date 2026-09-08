@@ -46,15 +46,15 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini ----------
+// ---------- Gemini (prioritize models with higher free quota) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// Order: gemini-1.5-flash has the highest free quota (60 req/min)
 const MODEL_CANDIDATES = [
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-  'gemini-3.7-flash',
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
+  'gemini-1.5-flash',      // Highest free quota, widely available
+  'gemini-2.0-flash',      // Newer, but may have lower quota
+  'gemini-1.5-pro',        // More capable but lower quota
+  'gemini-pro',            // Legacy fallback
 ];
 
 let activeModel = null;
@@ -85,7 +85,7 @@ const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 // ---------- Logo URL ----------
 const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// ---------- System Prompt (No Sources) ----------
+// ---------- System Prompt (no sources) ----------
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. Provide practical, accurate, actionable advice, with focus on Rwanda and African agriculture.
 
@@ -443,7 +443,7 @@ If you have any other questions about agriculture, livestock, or related topics,
       res.write(`data: ${JSON.stringify({ text })}\n\n`);
     }
 
-    // Do not send sources
+    // No sources sent
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
@@ -697,7 +697,7 @@ If you have any other questions about agriculture, livestock, or related topics,
       res.write(`data: ${JSON.stringify({ text })}\n\n`);
     }
 
-    // Do not send sources
+    // No sources
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
@@ -824,6 +824,7 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
 
 // ======================== SHARE ========================
 
+// Generate a shareable link for a conversation (authenticated)
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -844,10 +845,12 @@ app.post('/api/chat/share/:id', authenticate, async (req, res) => {
     const shareUrl = `${process.env.FRONTEND_URL}/share/${token}`;
     res.json({ url: shareUrl });
   } catch (err) {
+    log(`Share generation error: ${err.message}`, 'error');
     res.status(500).json({ error: err.message });
   }
 });
 
+// Publicly accessible share view (no authentication)
 app.get('/api/share/:token', async (req, res) => {
   try {
     const { token } = req.params;
@@ -864,6 +867,7 @@ app.get('/api/share/:token', async (req, res) => {
       .order('created_at', { ascending: true });
     res.json({ messages });
   } catch (err) {
+    log(`Share view error: ${err.message}`, 'error');
     res.status(500).json({ error: err.message });
   }
 });
