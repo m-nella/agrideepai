@@ -46,17 +46,16 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (using models from your API key) ----------
+// ---------- Gemini (use models confirmed available from API key) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Models confirmed available from your API key (from curl output)
-// Prioritize gemini-2.5-flash as it's the most stable and widely available
+// Models confirmed available from curl output (ordered by stability)
 const MODEL_CANDIDATES = [
-  'gemini-2.5-flash',      // Fast, reliable, confirmed available
-  'gemini-2.5-pro',        // More capable, confirmed available
-  'gemini-3.5-flash',      // Newer, confirmed available
-  'gemini-3.6-flash',      // Even newer, confirmed available
-  'gemini-3.7-flash',      // Latest, confirmed available
+  'gemini-3.6-flash',      // Latest, recommended by error message
+  'gemini-3.5-flash',      // Stable fallback
+  'gemini-3.7-flash',      // Newest (may work)
+  'gemini-2.5-flash',      // Older but should work
+  'gemini-2.5-pro',        // More capable
 ];
 
 let activeModel = null;
@@ -68,7 +67,6 @@ function getModel() {
     return activeModel;
   }
 
-  // Try each model in order
   for (const name of MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: name });
@@ -81,7 +79,7 @@ function getModel() {
     }
   }
 
-  // Last resort: throw a clear error
+  // Last resort
   throw new Error('No Gemini models available. Please check your API key.');
 }
 
