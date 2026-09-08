@@ -1,6 +1,12 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (UPDATED)
+// AGRIDEEPAI – FULL FRONTEND (with logging and fixes)
 // ============================================================
+
+// --- Logging helper ---
+const log = (msg, type = 'info') => {
+  const timestamp = new Date().toISOString();
+  console.log(`[FRONTEND] [${timestamp}] [${type.toUpperCase()}] ${msg}`);
+};
 
 // --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
@@ -15,7 +21,6 @@ const sendBtn = document.getElementById('sendBtn');
 const authSidebarBtn = document.getElementById('authSidebarBtn');
 const attachBtn = document.getElementById('attachBtn');
 const chips = document.querySelectorAll('.chip');
-const chatTitle = document.getElementById('chatTitle');
 const authModal = document.getElementById('authModal');
 const authModalBody = document.getElementById('authModalBody');
 const modalClose = document.querySelectorAll('.modal-close');
@@ -45,13 +50,16 @@ let state = {
 
 // --- Supabase init ---
 async function initSupabase() {
+  log('Initializing Supabase...', 'info');
   try {
     const res = await fetch('/api/config');
     const config = await res.json();
+    log('Config fetched', 'debug');
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
 
     state.supabase.auth.onAuthStateChange((event, session) => {
+      log(`Auth state changed: ${event}`, 'info');
       if (session) {
         state.currentUser = session.user;
         updateAuthUI();
@@ -73,7 +81,7 @@ async function initSupabase() {
       loadLocalConversations();
     }
   } catch (err) {
-    console.error('Supabase init error:', err);
+    log(`Supabase init error: ${err.message}`, 'error');
     loadLocalConversations();
   }
 }
@@ -110,6 +118,7 @@ async function apiFetch(endpoint, options = {}) {
 
 // --- Local storage ---
 function loadLocalConversations() {
+  log('Loading local conversations', 'debug');
   const stored = localStorage.getItem('agrideepai_local_chats');
   state.chats = stored ? JSON.parse(stored) : [];
   state.chats = state.chats.filter(c => c.messages && c.messages.length > 0);
@@ -125,12 +134,10 @@ function loadLocalConversations() {
     if (chat) {
       state.messages = chat.messages || [];
       renderMessages();
-      chatTitle.textContent = chat.title || 'New Chat';
     }
   } else {
     state.messages = [];
     renderMessages();
-    chatTitle.textContent = 'agrideepai';
   }
 }
 
@@ -143,11 +150,13 @@ function saveLocalConversations() {
   } else {
     localStorage.removeItem('agrideepai_local_current');
   }
+  log(`Saved ${validChats.length} local chats`, 'debug');
 }
 
 // --- Cloud conversations ---
 async function loadCloudConversations() {
   if (!state.currentUser) return;
+  log('Loading cloud conversations', 'info');
   try {
     const res = await apiFetch('/api/chat/conversations');
     state.chats = await res.json();
@@ -162,24 +171,22 @@ async function loadCloudConversations() {
     } else {
       state.messages = [];
       renderMessages();
-      chatTitle.textContent = 'agrideepai';
     }
   } catch (err) {
-    console.error(err);
+    log(`Load cloud conversations error: ${err.message}`, 'error');
   }
 }
 
 async function loadCloudMessages(chatId) {
   if (!state.currentUser) return;
+  log(`Loading messages for chat ${chatId}`, 'debug');
   try {
     const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
     state.messages = await res.json();
-    const chat = state.chats.find(c => c.id === chatId);
-    if (chat) chatTitle.textContent = chat.title || 'New Chat';
     renderMessages();
     renderChatList();
   } catch (err) {
-    console.error(err);
+    log(`Load cloud messages error: ${err.message}`, 'error');
   }
 }
 
@@ -437,10 +444,12 @@ function showToast(message, isError = false) {
     toast.style.transform = 'translateX(-50%) translateY(10px)';
     setTimeout(() => toast.remove(), 300);
   }, 2500);
+  log(`Toast: ${message}`, isError ? 'error' : 'info');
 }
 
 // --- Copy message ---
 async function copyMessage(msg) {
+  log('Copying message', 'debug');
   try {
     await navigator.clipboard.writeText(msg.content);
     showToast('Copied!');
@@ -479,6 +488,7 @@ function startEditing(msg) {
 
 async function saveEditedMessage(messageId, newContent) {
   if (!newContent.trim()) return;
+  log(`Saving edited message ${messageId}`, 'debug');
   try {
     if (state.currentUser) {
       await apiFetch(`/api/chat/messages/${messageId}`, {
@@ -501,6 +511,7 @@ async function saveEditedMessage(messageId, newContent) {
     renderMessages();
     showToast('Message updated. Send a new message to continue.');
   } catch (err) {
+    log(`Edit error: ${err.message}`, 'error');
     showToast('Failed to edit: ' + err.message, true);
   }
 }
@@ -511,6 +522,7 @@ async function regenerateMessage(index) {
   if (!msg || msg.role !== 'assistant') return;
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) return;
+  log(`Regenerating message at index ${index}`, 'debug');
 
   if (!state.currentUser) {
     state.messages = state.messages.slice(0, index);
@@ -568,6 +580,7 @@ async function regenerateMessage(index) {
     await loadCloudMessages(chat.id);
     await loadCloudConversations();
   } catch (err) {
+    log(`Regenerate error: ${err.message}`, 'error');
     showToast('Regenerate failed: ' + err.message, true);
   }
 }
@@ -634,6 +647,7 @@ async function sendGuestMessage(text, chat) {
     renderChatList();
   } catch (err) {
     if (err.name !== 'AbortError') {
+      log(`Guest send error: ${err.message}`, 'error');
       showToast('Error: ' + err.message, true);
       const last = state.messages[state.messages.length - 1];
       if (last && last.role === 'assistant' && last.content === '') {
@@ -672,6 +686,7 @@ async function shareChat(messageId) {
       navigator.clipboard.writeText(data.url).then(() => showToast('Link copied!'));
     };
   } catch (err) {
+    log(`Share error: ${err.message}`, 'error');
     showToast('Failed to generate share link: ' + err.message, true);
   }
 }
@@ -704,6 +719,7 @@ async function createChat(title = 'New Chat') {
       renderChatList();
       return chat;
     } catch (err) {
+      log(`Create chat error: ${err.message}`, 'error');
       showToast('Failed to create chat', true);
       return null;
     }
@@ -713,6 +729,7 @@ async function createChat(title = 'New Chat') {
 }
 
 async function selectChat(id) {
+  log(`Selecting chat ${id}`, 'debug');
   state.activeChatId = id;
   if (state.currentUser) {
     await loadCloudMessages(id);
@@ -722,7 +739,6 @@ async function selectChat(id) {
     if (chat) {
       state.messages = chat.messages || [];
       renderMessages();
-      chatTitle.textContent = chat.title || 'New Chat';
       renderChatList();
       saveLocalConversations();
     }
@@ -733,6 +749,7 @@ async function selectChat(id) {
 
 async function deleteChat(id) {
   if (!confirm('Delete this chat?')) return;
+  log(`Deleting chat ${id}`, 'info');
   if (state.currentUser) {
     try {
       await apiFetch(`/api/chat/conversations/${id}`, { method: 'DELETE' });
@@ -741,10 +758,10 @@ async function deleteChat(id) {
         state.activeChatId = null;
         state.messages = [];
         renderMessages();
-        chatTitle.textContent = 'agrideepai';
       }
       renderChatList();
     } catch (err) {
+      log(`Delete error: ${err.message}`, 'error');
       showToast('Failed to delete', true);
     }
   } else {
@@ -753,7 +770,6 @@ async function deleteChat(id) {
       state.activeChatId = null;
       state.messages = [];
       renderMessages();
-      chatTitle.textContent = 'agrideepai';
     }
     saveLocalConversations();
     renderChatList();
@@ -766,6 +782,7 @@ async function renameChat(id) {
   if (!chat) return;
   const newTitle = prompt('New title:', chat.title);
   if (!newTitle || !newTitle.trim()) return;
+  log(`Renaming chat ${id} to "${newTitle}"`, 'info');
   if (state.currentUser) {
     try {
       const res = await apiFetch(`/api/chat/conversations/${id}`, {
@@ -776,8 +793,8 @@ async function renameChat(id) {
       const idx = state.chats.findIndex(c => c.id === id);
       if (idx !== -1) state.chats[idx] = updated;
       renderChatList();
-      if (state.activeChatId === id) chatTitle.textContent = updated.title;
     } catch (err) {
+      log(`Rename error: ${err.message}`, 'error');
       showToast('Failed to rename', true);
     }
   } else {
@@ -785,7 +802,6 @@ async function renameChat(id) {
     chat.updatedAt = new Date().toISOString();
     saveLocalConversations();
     renderChatList();
-    if (state.activeChatId === id) chatTitle.textContent = chat.title;
   }
   chatMenu.classList.add('hidden');
 }
@@ -793,6 +809,7 @@ async function renameChat(id) {
 async function togglePin(id) {
   const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
+  log(`Toggling pin for chat ${id}`, 'debug');
   if (state.currentUser) {
     try {
       const res = await apiFetch(`/api/chat/conversations/${id}`, {
@@ -804,6 +821,7 @@ async function togglePin(id) {
       if (idx !== -1) state.chats[idx] = updated;
       renderChatList();
     } catch (err) {
+      log(`Pin error: ${err.message}`, 'error');
       showToast('Failed to update pin', true);
     }
   } else {
@@ -862,11 +880,11 @@ document.addEventListener('click', (e) => {
 
 // --- New Chat (no empty chat) ---
 function handleNewChat() {
+  log('New Chat clicked – clearing view without creating chat', 'info');
   state.activeChatId = null;
   state.messages = [];
   state.editingMessageId = null;
   renderMessages();
-  chatTitle.textContent = 'agrideepai';
   renderChatList();
   messageInput.focus();
   if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
@@ -921,6 +939,7 @@ async function sendMessage() {
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '');
+    log(`Creating new chat with title: "${title}"`, 'info');
     const newChat = {
       id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
       title: title || 'New conversation',
@@ -933,7 +952,6 @@ async function sendMessage() {
     state.activeChatId = newChat.id;
     if (!state.currentUser) saveLocalConversations();
     renderChatList();   // <-- critical: update sidebar
-    chatTitle.textContent = newChat.title;
     chat = newChat;
   }
 
@@ -1055,8 +1073,10 @@ async function sendMessage() {
       renderMessages();
       renderChatList();
     }
+    log('Message sent successfully', 'info');
   } catch (err) {
     if (err.name === 'AbortError') {
+      log('Generation stopped by user', 'info');
       const last = state.messages[state.messages.length - 1];
       if (last && last.role === 'assistant') {
         last.status = 'stopped';
@@ -1065,7 +1085,7 @@ async function sendMessage() {
         renderMessages();
       }
     } else {
-      console.error(err);
+      log(`Send error: ${err.message}`, 'error');
       showToast('Error: ' + err.message, true);
       const last = state.messages[state.messages.length - 1];
       if (last && last.role === 'assistant' && last.content === '') {
@@ -1087,6 +1107,7 @@ async function sendMessage() {
 
 function stopGeneration() {
   if (state.abortController) {
+    log('Stop generation requested', 'info');
     state.abortController.abort();
     state.abortController = null;
     state.isGenerating = false;
@@ -1384,6 +1405,7 @@ sidebarToggle.addEventListener('click', () => {
   const isCollapsed = sidebar.classList.contains('collapsed');
   sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = isCollapsed ? 'none' : 'inline';
   sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = isCollapsed ? 'inline' : 'none';
+  log(`Sidebar ${isCollapsed ? 'collapsed' : 'expanded'}`, 'info');
 });
 
 openSidebarBtn.addEventListener('click', () => {
