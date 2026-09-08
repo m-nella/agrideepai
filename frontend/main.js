@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Complete Frontend Application
+// AGRIDEEPAI – Full Frontend (UPDATED)
 // ============================================================
 
 // --- DOM refs ---
@@ -25,7 +25,6 @@ const shareModal = document.getElementById('shareModal');
 const shareLinkDisplay = document.getElementById('shareLinkDisplay');
 const copyShareLink = document.getElementById('copyShareLink');
 const chatMenu = document.getElementById('chatMenu');
-const topMoreBtn = document.getElementById('topMoreBtn');
 
 // --- State ---
 let state = {
@@ -41,7 +40,7 @@ let state = {
   editingContent: '',
   likedMessages: new Set(),
   dislikedMessages: new Set(),
-  contextMenuTarget: null, // chat id for three-dot menu
+  contextMenuTarget: null,
 };
 
 // --- Supabase init ---
@@ -49,9 +48,7 @@ async function initSupabase() {
   try {
     const res = await fetch('/api/config');
     const config = await res.json();
-    const { createClient } = await import(
-      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
-    );
+    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
 
     state.supabase.auth.onAuthStateChange((event, session) => {
@@ -115,7 +112,6 @@ async function apiFetch(endpoint, options = {}) {
 function loadLocalConversations() {
   const stored = localStorage.getItem('agrideepai_local_chats');
   state.chats = stored ? JSON.parse(stored) : [];
-  // Filter out empty chats
   state.chats = state.chats.filter(c => c.messages && c.messages.length > 0);
   const currentId = localStorage.getItem('agrideepai_local_current');
   if (currentId && state.chats.some(c => c.id === currentId)) {
@@ -155,7 +151,6 @@ async function loadCloudConversations() {
   try {
     const res = await apiFetch('/api/chat/conversations');
     state.chats = await res.json();
-    // Ensure no empty chats (server should not return them, but just in case)
     state.chats = state.chats.filter(c => c.messages && c.messages.length > 0);
     renderChatList();
     if (state.activeChatId) {
@@ -192,8 +187,7 @@ async function loadCloudMessages(chatId) {
 function renderChatList() {
   chatList.innerHTML = '';
   if (!state.chats.length) {
-    chatList.innerHTML =
-      '<div style="text-align:center;color:var(--text-muted);padding:1.5rem 0;font-size:0.9rem;">No chats yet</div>';
+    chatList.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:1.5rem 0;font-size:0.9rem;">No chats yet</div>';
     return;
   }
   const sorted = [...state.chats].sort((a, b) => {
@@ -207,7 +201,6 @@ function renderChatList() {
     const div = document.createElement('div');
     div.className = `chat-item${chat.id === state.activeChatId ? ' active' : ''}`;
     div.dataset.id = chat.id;
-
     const titleSpan = document.createElement('span');
     titleSpan.className = 'title';
     titleSpan.textContent = chat.title || 'New Chat';
@@ -218,11 +211,8 @@ function renderChatList() {
       titleSpan.prepend(pin);
     }
     div.appendChild(titleSpan);
-
     const actions = document.createElement('div');
     actions.className = 'actions';
-
-    // Three-dot menu
     const moreBtn = document.createElement('button');
     moreBtn.innerHTML = `<i data-lucide="more-horizontal" style="width:16px;height:16px;"></i>`;
     moreBtn.title = 'More options';
@@ -231,7 +221,6 @@ function renderChatList() {
       openChatMenu(e, chat.id);
     });
     actions.appendChild(moreBtn);
-
     div.appendChild(actions);
     div.addEventListener('click', () => selectChat(chat.id));
     chatList.appendChild(div);
@@ -253,7 +242,6 @@ function renderMessages() {
   state.messages.forEach((msg, index) => {
     const row = document.createElement('div');
     row.className = `message-row ${msg.role}`;
-
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
@@ -305,7 +293,6 @@ function renderMessages() {
       editArea.appendChild(textarea);
       editArea.appendChild(btnGroup);
       msgDiv.appendChild(editArea);
-      // Focus the textarea
       setTimeout(() => textarea.focus(), 50);
     } else {
       const contentSpan = document.createElement('span');
@@ -323,12 +310,7 @@ function renderMessages() {
           sourcesDiv.className = 'sources';
           sourcesDiv.innerHTML =
             '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
-            f.sources
-              .map(
-                s =>
-                  `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`
-              )
-              .join('') +
+            f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`).join('') +
             '</ul>';
           msgDiv.appendChild(sourcesDiv);
         } else if (f.public_url) {
@@ -362,13 +344,6 @@ function renderMessages() {
         editBtn.title = 'Edit';
         editBtn.addEventListener('click', () => startEditing(msg));
         actionsDiv.appendChild(editBtn);
-
-        // Share (user messages can be shared as well)
-        const shareBtn = document.createElement('button');
-        shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
-        shareBtn.title = 'Share';
-        shareBtn.addEventListener('click', () => shareChat(msg.id));
-        actionsDiv.appendChild(shareBtn);
       }
 
       if (msg.role === 'assistant') {
@@ -404,7 +379,7 @@ function renderMessages() {
         regenBtn.addEventListener('click', () => regenerateMessage(index));
         actionsDiv.appendChild(regenBtn);
 
-        // Share
+        // Share (assistant message can be shared)
         const shareBtn = document.createElement('button');
         shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
         shareBtn.title = 'Share';
@@ -419,7 +394,6 @@ function renderMessages() {
     messageList.appendChild(row);
   });
   window.refreshIcons();
-  // Auto-scroll if near bottom
   const container = document.getElementById('chatContainer');
   if (isNearBottom(container)) container.scrollTop = container.scrollHeight;
 }
@@ -432,7 +406,6 @@ function isNearBottom(container, threshold = 150) {
 function showToast(message, isError = false) {
   const existing = document.querySelector('.agrideep-toast');
   if (existing) existing.remove();
-
   const toast = document.createElement('div');
   toast.className = 'agrideep-toast';
   toast.textContent = message;
@@ -455,12 +428,10 @@ function showToast(message, isError = false) {
     transform: 'translateX(-50%) translateY(10px)',
   });
   document.body.appendChild(toast);
-
   requestAnimationFrame(() => {
     toast.style.opacity = '1';
     toast.style.transform = 'translateX(-50%) translateY(0)';
   });
-
   setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(-50%) translateY(10px)';
@@ -484,11 +455,10 @@ function toggleLike(msg) {
     state.likedMessages.delete(msg.id);
   } else {
     state.likedMessages.add(msg.id);
-    state.dislikedMessages.delete(msg.id); // remove dislike if present
+    state.dislikedMessages.delete(msg.id);
   }
   renderMessages();
 }
-
 function toggleDislike(msg) {
   if (state.dislikedMessages.has(msg.id)) {
     state.dislikedMessages.delete(msg.id);
@@ -516,16 +486,13 @@ async function saveEditedMessage(messageId, newContent) {
         body: JSON.stringify({ content: newContent, truncate: true }),
       });
     }
-    // Update local state
     const msg = state.messages.find(m => m.id === messageId);
     if (msg) msg.content = newContent;
-    // Remove messages after this one (truncate)
     const idx = state.messages.findIndex(m => m.id === messageId);
     if (idx !== -1) {
       state.messages = state.messages.slice(0, idx + 1);
     }
     state.editingMessageId = null;
-    // Update chat
     const chat = state.chats.find(c => c.id === state.activeChatId);
     if (chat) {
       chat.messages = state.messages;
@@ -546,14 +513,12 @@ async function regenerateMessage(index) {
   if (!chat) return;
 
   if (!state.currentUser) {
-    // Guest: truncate and re-send last user message
     state.messages = state.messages.slice(0, index);
     const lastUser = state.messages[state.messages.length - 1];
     if (lastUser && lastUser.role === 'user') {
       chat.messages = state.messages;
       if (!state.currentUser) saveLocalConversations();
       renderMessages();
-      // We need to re-send the last user message as a new request
       await sendGuestMessage(lastUser.content, chat);
     }
     return;
@@ -610,9 +575,7 @@ async function regenerateMessage(index) {
 // --- Guest send helper (for regeneration) ---
 async function sendGuestMessage(text, chat) {
   const payload = {
-    messages: state.messages
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role, content: m.content })),
+    messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
   };
 
   state.isGenerating = true;
@@ -692,7 +655,10 @@ async function sendGuestMessage(text, chat) {
 // --- Share chat (generate public link) ---
 async function shareChat(messageId) {
   const chat = state.chats.find(c => c.id === state.activeChatId);
-  if (!chat) return;
+  if (!chat) {
+    showToast('No chat to share', true);
+    return;
+  }
   if (!state.currentUser) {
     showToast('Please sign in to share chats', true);
     return;
@@ -703,9 +669,7 @@ async function shareChat(messageId) {
     shareLinkDisplay.textContent = data.url;
     shareModal.classList.remove('hidden');
     copyShareLink.onclick = () => {
-      navigator.clipboard.writeText(data.url).then(() => {
-        showToast('Link copied!');
-      });
+      navigator.clipboard.writeText(data.url).then(() => showToast('Link copied!'));
     };
   } catch (err) {
     showToast('Failed to generate share link: ' + err.message, true);
@@ -763,9 +727,7 @@ async function selectChat(id) {
       saveLocalConversations();
     }
   }
-  // Close mobile sidebar
   if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
-  // Close context menu
   chatMenu.classList.add('hidden');
 }
 
@@ -868,10 +830,9 @@ function openChatMenu(e, chatId) {
   chatMenu.style.top = top + 'px';
   chatMenu.classList.remove('hidden');
 
-  // Set button actions
   const buttons = chatMenu.querySelectorAll('button');
   buttons.forEach(btn => {
-    btn.onclick = null; // reset
+    btn.onclick = null;
     const action = btn.dataset.action;
     if (action === 'pin') {
       btn.onclick = () => togglePin(chatId);
@@ -959,7 +920,6 @@ async function sendMessage() {
 
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
-    // Create chat only now
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '');
     const newChat = {
       id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
@@ -972,7 +932,7 @@ async function sendMessage() {
     state.chats.unshift(newChat);
     state.activeChatId = newChat.id;
     if (!state.currentUser) saveLocalConversations();
-    renderChatList();
+    renderChatList();   // <-- critical: update sidebar
     chatTitle.textContent = newChat.title;
     chat = newChat;
   }
@@ -1019,7 +979,6 @@ async function sendMessage() {
   try {
     let response;
     if (state.currentUser) {
-      // Authenticated: send as form data with file
       const formData = new FormData();
       formData.append('message', text || '');
       formData.append('search', 'true');
@@ -1033,11 +992,8 @@ async function sendMessage() {
         signal: state.abortController.signal,
       });
     } else {
-      // Guest: send as JSON
       const payload = {
-        messages: state.messages
-          .filter(m => m.role !== 'system')
-          .map(m => ({ role: m.role, content: m.content })),
+        messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
       };
       response = await fetch('/api/chat/guest', {
         method: 'POST',
@@ -1090,7 +1046,6 @@ async function sendMessage() {
       }
     }
 
-    // Finalize
     if (state.currentUser) {
       await loadCloudMessages(chat.id);
       await loadCloudConversations();
@@ -1181,7 +1136,6 @@ function renderAuthForm(mode) {
   const errorDiv = document.getElementById('authError');
   const statusDiv = document.getElementById('authStatus');
 
-  // Enable submit only when email and password are filled
   const emailInput = document.getElementById('authEmail');
   const passwordInput = document.getElementById('authPassword');
   function checkFields() {
