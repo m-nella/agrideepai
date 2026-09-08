@@ -9,11 +9,11 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 
-// ---------- Brevo Email ----------
+// ---------- Brevo Email (Correct SDK Usage) ----------
 const brevo = require('@getbrevo/brevo');
 const brevoApi = new brevo.TransactionalEmailsApi();
-const brevoKey = brevoApi.authentications['apiKey'];
-brevoKey.apiKey = process.env.BREVO_API_KEY;
+// Set API key using the correct method
+brevoApi.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY || '');
 
 // ---------- Logging ----------
 const log = (msg, type = 'info') => {
@@ -50,10 +50,10 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 // ---------- Gemini (current model) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const MODEL_CANDIDATES = [
-  'gemini-2.5-flash',    // Current, fast, free
-  'gemini-2.5-pro',      // Larger context
-  'gemini-2.0-flash',    // Still available
-  'gemini-1.5-flash',    // Fallback
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
 ];
 let activeModel = null;
 
