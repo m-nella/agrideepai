@@ -46,14 +46,15 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (with environment override) ----------
+// ---------- Gemini (correct models) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Models in order of preference (use environment variable to force)
-const forcedModel = process.env.GEMINI_MODEL;
-const MODEL_CANDIDATES = forcedModel
-  ? [forcedModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro']
-  : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro'];
+// Use only models that actually exist
+const MODEL_CANDIDATES = [
+  'gemini-2.0-flash',     // Most reliable, widely available
+  'gemini-1.5-flash',     // Still available
+  'gemini-pro',           // Legacy fallback
+];
 
 let activeModel = null;
 
