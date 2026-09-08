@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (All Issues Fixed)
+// AGRIDEEPAI – Full Frontend (Fixed)
 // ============================================================
 
 // --- Logging ---
@@ -115,12 +115,11 @@ async function apiFetch(endpoint, options = {}) {
   return res;
 }
 
-// --- Local storage ---
+// --- Local storage (no filtering of empty chats) ---
 function loadLocalConversations() {
   log('Loading local conversations', 'debug');
   const stored = localStorage.getItem('agrideepai_local_chats');
   state.chats = stored ? JSON.parse(stored) : [];
-  state.chats = state.chats.filter(c => c.messages && c.messages.length > 0);
   const currentId = localStorage.getItem('agrideepai_local_current');
   if (currentId && state.chats.some(c => c.id === currentId)) {
     state.activeChatId = currentId;
@@ -142,6 +141,7 @@ function loadLocalConversations() {
 }
 
 function saveLocalConversations() {
+  // Save versions into messages
   state.messages.forEach(msg => {
     if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
       const vData = state.messageVersions[msg.id];
@@ -152,15 +152,14 @@ function saveLocalConversations() {
       }
     }
   });
-  const validChats = state.chats.filter(c => c.messages && c.messages.length > 0);
-  state.chats = validChats;
-  localStorage.setItem('agrideepai_local_chats', JSON.stringify(validChats));
-  if (state.activeChatId && validChats.some(c => c.id === state.activeChatId)) {
+  // Do NOT filter out empty chats – keep them
+  localStorage.setItem('agrideepai_local_chats', JSON.stringify(state.chats));
+  if (state.activeChatId && state.chats.some(c => c.id === state.activeChatId)) {
     localStorage.setItem('agrideepai_local_current', state.activeChatId);
   } else {
     localStorage.removeItem('agrideepai_local_current');
   }
-  log(`Saved ${validChats.length} local chats`, 'debug');
+  log(`Saved ${state.chats.length} local chats`, 'debug');
 }
 
 // --- Cloud conversations ---
@@ -169,7 +168,7 @@ async function loadCloudConversations() {
   try {
     const res = await apiFetch('/api/chat/conversations');
     state.chats = await res.json();
-    state.chats = state.chats.filter(c => c.messages && c.messages.length > 0);
+    // Do not filter – keep all chats (including empty ones)
     renderChatList();
     if (state.activeChatId) {
       const exists = state.chats.some(c => c.id === state.activeChatId);
