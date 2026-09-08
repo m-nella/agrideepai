@@ -66,11 +66,18 @@ body {
 }
 #sidebar.collapsed .brand-name { display: none; }
 #sidebar.collapsed .new-chat-btn span { display: none; }
-/* Hide footer text when collapsed, but keep icon */
+/* Hide chat list and footer text when collapsed */
+#sidebar.collapsed .chat-history { display: none; }
 #sidebar.collapsed .sidebar-footer span { display: none; }
 #sidebar.collapsed .sidebar-footer .auth-btn {
   justify-content: center;
   padding: 0.3rem;
+}
+/* When collapsed, the toggle button floats at top-center of sidebar */
+#sidebar.collapsed #sidebarToggle {
+  margin: 0;
+  position: relative;
+  top: 0;
 }
 
 .icon-button {
@@ -156,7 +163,7 @@ body {
 .sidebar-footer {
   border-top: 1px solid var(--border);
   padding: 0.6rem 1rem;
-  margin-top: auto; /* push to bottom */
+  margin-top: auto;
 }
 .auth-btn {
   background: none;
