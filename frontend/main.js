@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend Application (Complete)
+// AGRIDEEPAI – Full Frontend (with all fixes)
 // ============================================================
 
 // --- Logging helper ---
@@ -899,10 +899,18 @@ function resizeComposer() {
   messageInput.style.overflowY = sh > maxHeight ? 'auto' : 'hidden';
 }
 
+// --- Send button visibility ---
 function updateSendButton() {
-  const has = messageInput.value.trim().length > 0 || state.attachments.length > 0;
-  sendBtn.disabled = !has;
-  sendBtn.style.opacity = has ? '1' : '0.35';
+  const hasContent = messageInput.value.trim().length > 0 || state.attachments.length > 0;
+  if (!state.isGenerating) {
+    sendBtn.disabled = !hasContent;
+    sendBtn.style.opacity = hasContent ? '1' : '0.35';
+    sendBtn.classList.remove('generating');
+  } else {
+    sendBtn.disabled = false;
+    sendBtn.style.opacity = '1';
+    sendBtn.classList.add('generating');
+  }
 }
 
 function renderAttachments() {
@@ -992,6 +1000,7 @@ async function sendMessage() {
   state.isGenerating = true;
   sendBtn.classList.add('generating');
   sendBtn.disabled = false;
+  sendBtn.style.opacity = '1';
   state.abortController = new AbortController();
 
   try {
@@ -1131,7 +1140,7 @@ authModal.addEventListener('click', (e) => {
   if (e.target === authModal) closeAuthModal();
 });
 
-// ======================== UPDATED AUTH FORM WITH CONFIRMATION & STATUS ========================
+// ======================== UPDATED AUTH FORM ========================
 
 function renderAuthForm(mode) {
   const isLogin = mode === 'login';
