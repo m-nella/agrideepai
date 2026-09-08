@@ -5,10 +5,15 @@ const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
-const { Resend } = require('resend');
 const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
+
+// ---------- Brevo Email ----------
+const brevo = require('@getbrevo/brevo');
+const brevoApi = new brevo.TransactionalEmailsApi();
+const brevoKey = brevoApi.authentications['apiKey'];
+brevoKey.apiKey = process.env.BREVO_API_KEY;
 
 // ---------- Logging ----------
 const log = (msg, type = 'info') => {
@@ -20,7 +25,7 @@ const log = (msg, type = 'info') => {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ---------- Trust proxy (fixes rate limiter warning) ----------
+// ---------- Trust proxy ----------
 app.set('trust proxy', 1);
 
 // ---------- Middleware ----------
@@ -42,40 +47,30 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Resend ----------
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-// ---------- Gemini with CURRENT models ----------
+// ---------- Gemini (current model) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// Use current stable models (as of 2026)
 const MODEL_CANDIDATES = [
-  'gemini-2.5-flash',      // Current, fast, free tier
-  'gemini-2.5-pro',        // Larger context
-  'gemini-1.5-flash',      // Still available for some
-  'gemini-pro',
+  'gemini-2.5-flash',    // Current, fast, free
+  'gemini-2.5-pro',      // Larger context
+  'gemini-2.0-flash',    // Still available
+  'gemini-1.5-flash',    // Fallback
 ];
-
 let activeModel = null;
 
 function getModel() {
-  if (activeModel) {
-    log(`Using cached model: ${activeModel.model}`, 'debug');
-    return activeModel;
-  }
+  if (activeModel) return activeModel;
   for (const name of MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: name });
-      log(`✅ Successfully initialized Gemini model: ${name}`, 'info');
+      log(`✅ Using Gemini model: ${name}`, 'info');
       activeModel = model;
       return model;
     } catch (e) {
-      log(`⚠️ Model ${name} initialization failed: ${e.message}`, 'warn');
+      log(`⚠️ Model ${name} failed: ${e.message}`, 'warn');
     }
   }
-  // Last resort: try the first one (will throw a clear error)
   activeModel = genAI.getGenerativeModel({ model: MODEL_CANDIDATES[0] });
-  log(`❗ Forced model: ${MODEL_CANDIDATES[0]} (may fail)`, 'error');
+  log(`❗ Forced model: ${MODEL_CANDIDATES[0]}`, 'error');
   return activeModel;
 }
 
@@ -110,13 +105,11 @@ const upload = multer({
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    log('Auth missing token', 'warn');
     return res.status(401).json({ error: 'Unauthorized' });
   }
   const token = authHeader.split(' ')[1];
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user) {
-    log(`Auth failed: ${error?.message || 'user not found'}`, 'warn');
     return res.status(401).json({ error: 'Invalid token' });
   }
   req.user = user;
@@ -136,7 +129,6 @@ async function tavilySearch(query) {
       include_images: false,
       max_results: 5
     });
-    log(`Tavily search successful for: "${query}"`, 'debug');
     return response.data;
   } catch (err) {
     log(`Tavily error: ${err.message}`, 'error');
@@ -147,6 +139,24 @@ async function tavilySearch(query) {
 // ---------- Verification code store ----------
 function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 const verificationStore = {};
+
+// ======================== EMAIL HELPER ========================
+
+async function sendBrevoEmail(to, subject, htmlContent) {
+  try {
+    const sendSmtpEmail = new brevo.SendSmtpEmail();
+    sendSmtpEmail.subject = subject;
+    sendSmtpEmail.htmlContent = htmlContent;
+    sendSmtpEmail.sender = { name: 'AgriDeepAI', email: process.env.RESEND_FROM_EMAIL };
+    sendSmtpEmail.to = [{ email: to }];
+    await brevoApi.sendTransacEmail(sendSmtpEmail);
+    log(`Email sent to ${to}`, 'info');
+    return true;
+  } catch (err) {
+    log(`Brevo email error: ${err.message}`, 'error');
+    throw err;
+  }
+}
 
 // ======================== AUTH ROUTES ========================
 
@@ -167,14 +177,13 @@ app.post('/api/auth/signup', async (req, res) => {
     const user = data.user;
     if (!user) throw new Error('Signup failed');
     await supabase.from('profiles').insert({ id: user.id, full_name: fullName || email.split('@')[0] });
+
     const code = generateCode();
     verificationStore[user.id] = { code, expires: Date.now() + 10 * 60 * 1000 };
-    await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL,
-      to: email,
-      subject: 'Verify your AgriDeepAI account',
-      html: `<div style="text-align:center;font-family:sans-serif;"><img src="${LOGO_URL}" style="height:60px;"/><h1>Welcome!</h1><p>Your verification code: <strong>${code}</strong></p><p>Valid for 10 minutes.</p></div>`
-    });
+
+    const html = `<div style="text-align:center;font-family:sans-serif;"><img src="${LOGO_URL}" style="height:60px;"/><h1>Welcome!</h1><p>Your verification code: <strong>${code}</strong></p><p>Valid for 10 minutes.</p></div>`;
+    await sendBrevoEmail(email, 'Verify your AgriDeepAI account', html);
+
     log(`Signup successful for ${email}`, 'info');
     res.status(201).json({ message: 'User created. Verify email.', userId: user.id });
   } catch (err) {
@@ -189,7 +198,6 @@ app.post('/api/auth/verify', async (req, res) => {
     const { userId, code } = req.body;
     const stored = verificationStore[userId];
     if (!stored || stored.code !== code || Date.now() > stored.expires) {
-      log('Invalid or expired code', 'warn');
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
     await supabase.auth.admin.updateUserById(userId, { email_confirm: true });
@@ -211,12 +219,8 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     const code = generateCode();
     verificationStore[user.id] = { code, expires: Date.now() + 10 * 60 * 1000 };
-    await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL,
-      to: email,
-      subject: 'Verify your account',
-      html: `<p>Your new code: <strong>${code}</strong></p>`
-    });
+    const html = `<p>Your new code: <strong>${code}</strong></p>`;
+    await sendBrevoEmail(email, 'Verify your account', html);
     res.json({ message: 'Code resent' });
   } catch (err) {
     log(`Resend error: ${err.message}`, 'error');
