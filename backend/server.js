@@ -85,7 +85,7 @@ const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 // ---------- Logo URL ----------
 const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// ---------- Enhanced System Prompt (backticks escaped) ----------
+// ---------- System Prompt (No Sources) ----------
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. Provide practical, accurate, actionable advice, with focus on Rwanda and African agriculture.
 
@@ -93,7 +93,6 @@ You are AgriDeepAI, a professional AI assistant specialized in agriculture, live
 - Be warm, professional, and conversational.
 - For crop/livestock disease questions, ask for details (symptoms, age, weather, etc.) before giving advice.
 - Always include disclaimers for health, safety, or chemical use.
-- When you use web search, clearly indicate sources.
 
 **RESPONSE FORMATTING (MANDATORY):**
 To ensure your answers are professional and readable, you **MUST** use Markdown formatting. Structure your responses as follows:
@@ -444,11 +443,8 @@ If you have any other questions about agriculture, livestock, or related topics,
       res.write(`data: ${JSON.stringify({ text })}\n\n`);
     }
 
-    let sourcesData = null;
-    if (searchResults && searchResults.results) {
-      sourcesData = searchResults.results.slice(0, 5).map(r => ({ title: r.title, url: r.url, snippet: r.content }));
-    }
-    res.write(`data: ${JSON.stringify({ done: true, sources: sourcesData })}\n\n`);
+    // Do not send sources
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
     log('Guest chat completed', 'debug');
@@ -701,21 +697,18 @@ If you have any other questions about agriculture, livestock, or related topics,
       res.write(`data: ${JSON.stringify({ text })}\n\n`);
     }
 
-    let sourcesData = null;
-    if (searchResults && searchResults.results) {
-      sourcesData = searchResults.results.slice(0, 5).map(r => ({ title: r.title, url: r.url, snippet: r.content }));
-    }
-    res.write(`data: ${JSON.stringify({ done: true, sources: sourcesData })}\n\n`);
+    // Do not send sources
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
 
+    // Save assistant message with versioning support
     await supabase
       .from('messages')
       .insert({
         conversation_id: conversationId,
         role: 'assistant',
         content: fullResponse,
-        files: sourcesData ? [{ sources: sourcesData }] : null,
         versions: [fullResponse],
         current_version_index: 0,
       });
