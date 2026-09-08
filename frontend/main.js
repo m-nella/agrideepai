@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Fixed)
+// AGRIDEEPAI – Full Frontend (Final)
 // ============================================================
 
 // --- Logging ---
@@ -145,7 +145,6 @@ function showCustomPrompt(title, defaultValue = '') {
 // --- Clean content: remove "Sources:" section ---
 function cleanContent(content) {
   if (!content) return content;
-  // Remove any "Sources:" section (case-insensitive) and everything after until a blank line or end
   const lines = content.split('\n');
   let result = [];
   let skip = false;
@@ -619,14 +618,14 @@ function renderMessages() {
           });
           actionsRow.appendChild(regenBtn);
 
-          // Share
+          // Share (opens modal with link)
           const shareBtn = document.createElement('button');
           shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
           shareBtn.title = 'Share';
           shareBtn.className = 'icon-button-sm';
           shareBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            shareMessageOrChat(msg);
+            shareConversation();
           });
           actionsRow.appendChild(shareBtn);
         }
@@ -643,7 +642,11 @@ function renderMessages() {
 
   window.refreshIcons();
   const container = document.getElementById('chatContainer');
-  if (isNearBottom(container)) container.scrollTop = container.scrollHeight;
+  // Auto-scroll to bottom if user is near bottom or we just sent a new message
+  if (state.shouldScrollToBottom || isNearBottom(container)) {
+    container.scrollTop = container.scrollHeight;
+    state.shouldScrollToBottom = false;
+  }
 }
 
 function isNearBottom(container, threshold = 150) {
@@ -743,7 +746,8 @@ async function sendEditedUserMessage() {
   if (!state.currentUser) saveLocalConversations();
 
   state.isGenerating = true;
-  renderMessages(); // show thinking
+  state.shouldScrollToBottom = true;
+  renderMessages();
   updateSendButton();
   state.abortController = new AbortController();
 
@@ -863,7 +867,8 @@ async function regenerateMessage(index) {
   if (!state.currentUser) saveLocalConversations();
 
   state.isGenerating = true;
-  renderMessages(); // show thinking
+  state.shouldScrollToBottom = true;
+  renderMessages();
   updateSendButton();
   state.abortController = new AbortController();
 
@@ -949,39 +954,32 @@ async function regenerateMessage(index) {
   }
 }
 
-// --- Share (works without sign-in) ---
-async function shareMessageOrChat(msg) {
+// --- Share Conversation (opens modal with link) ---
+async function shareConversation() {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     showToast('No chat to share', true);
     return;
   }
 
-  // Build text version
-  const conversationText = state.messages.map(m => {
-    const role = m.role === 'user' ? 'You' : 'AgriDeepAI';
-    return `${role}: ${m.content}`;
-  }).join('\n\n');
-
-  if (navigator.share) {
-    try {
-      await navigator.share({
-        title: 'AgriDeepAI Chat',
-        text: conversationText,
-      });
-      return;
-    } catch (e) {
-      if (e.name !== 'AbortError') {
-        // fallback
-      }
-    }
+  if (!state.currentUser) {
+    showToast('Please sign in to share chats', true);
+    return;
   }
 
   try {
-    await navigator.clipboard.writeText(conversationText);
-    showToast('Chat copied to clipboard!');
-  } catch {
-    showToast('Unable to share', true);
+    const res = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
+    const data = await res.json();
+    shareLinkDisplay.textContent = data.url;
+    shareModal.classList.remove('hidden');
+    copyShareLink.onclick = () => {
+      navigator.clipboard.writeText(data.url).then(() => {
+        showToast('Link copied!');
+      });
+    };
+  } catch (err) {
+    log(`Share error: ${err.message}`, 'error');
+    showToast('Failed to generate share link: ' + err.message, true);
   }
 }
 
@@ -1123,7 +1121,7 @@ async function togglePin(id) {
       const updated = await res.json();
       const idx = state.chats.findIndex(c => c.id === id);
       if (idx !== -1) state.chats[idx] = updated;
-      renderChatList(); // re-render to update pin icon
+      renderChatList();
     } catch (err) {
       log(`Pin error: ${err.message}`, 'error');
       showToast('Failed to update pin', true);
@@ -1132,7 +1130,7 @@ async function togglePin(id) {
     chat.pinned = !chat.pinned;
     chat.updatedAt = new Date().toISOString();
     saveLocalConversations();
-    renderChatList(); // re-render to update pin icon
+    renderChatList();
   }
   chatMenu.classList.add('hidden');
 }
@@ -1160,10 +1158,7 @@ function openChatMenu(e, chatId) {
       btn.onclick = () => togglePin(chatId);
     } else if (action === 'share') {
       btn.onclick = () => {
-        const chat = state.chats.find(c => c.id === chatId);
-        if (chat) {
-          shareMessageOrChat(null);
-        }
+        shareConversation();
         chatMenu.classList.add('hidden');
       };
     } else if (action === 'rename') {
@@ -1321,8 +1316,8 @@ async function sendMessage() {
   chat.messages = state.messages;
   if (!state.currentUser) saveLocalConversations();
 
-  // Show thinking state BEFORE streaming
   state.isGenerating = true;
+  state.shouldScrollToBottom = true;
   renderMessages();
   updateSendButton();
 
@@ -1813,7 +1808,7 @@ chips.forEach((chip) => {
   });
 });
 
-// Share modal close (if used)
+// Share modal close
 document.getElementById('shareModalClose').addEventListener('click', () => {
   shareModal.classList.add('hidden');
 });
