@@ -3,11 +3,11 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
+const Groq = require('groq-sdk');
 
 // ---------- Brevo Email ----------
 const brevo = require('@getbrevo/brevo');
@@ -46,55 +46,12 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (prioritize working models) ----------
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// ---------- Groq (free, no card) ----------
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Order: newest first, with fallbacks
-const MODEL_CANDIDATES = [
-  'gemini-2.0-flash',      // Latest (as of 2026)
-  'gemini-1.5-flash',      // Still common
-  'gemini-1.5-pro',        // More capable but lower quota
-  'gemini-pro',            // Legacy fallback
-];
-
-let activeModel = null;
-let activeModelName = null;
-
-// Test a model with a simple ping
-async function testModel(model) {
-  try {
-    const result = await model.generateContent('ping');
-    const response = await result.response;
-    return response.text() !== undefined;
-  } catch {
-    return false;
-  }
-}
-
-async function getModel() {
-  if (activeModel) {
-    log(`Using cached model: ${activeModelName}`, 'debug');
-    return activeModel;
-  }
-  for (const name of MODEL_CANDIDATES) {
-    try {
-      const model = genAI.getGenerativeModel({ model: name });
-      // Try a lightweight test to ensure the model is actually usable
-      const ok = await testModel(model);
-      if (ok) {
-        log(`✅ Using Gemini model: ${name}`, 'info');
-        activeModel = model;
-        activeModelName = name;
-        return model;
-      } else {
-        log(`⚠️ Model ${name} failed test (maybe quota/access)`, 'warn');
-      }
-    } catch (e) {
-      log(`⚠️ Model ${name} failed: ${e.message}`, 'warn');
-    }
-  }
-  throw new Error('No Gemini models available. Please check your API key or try again later.');
-}
+// We'll use one of the free models – choose the one you like:
+// 'llama-3.1-70b-versatile' (most powerful), or 'llama-3.1-8b-instant' (faster, still good)
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
 
 // ---------- Tavily ----------
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
@@ -102,7 +59,7 @@ const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 // ---------- Logo URL ----------
 const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// ---------- System Prompt (no sources) ----------
+// ---------- System Prompt (unchanged) ----------
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. Provide practical, accurate, actionable advice, with focus on Rwanda and African agriculture.
 
@@ -426,9 +383,7 @@ If you have any other questions about agriculture, livestock, or related topics,
       }
     }
 
-    // Normal flow - get a working model
-    const chatModel = await getModel();
-
+    // Normal flow - use Groq
     let searchResults = null;
     if (TAVILY_API_KEY && lastUserMsg) {
       searchResults = await tavilySearch(lastUserMsg.content);
@@ -439,29 +394,40 @@ If you have any other questions about agriculture, livestock, or related topics,
       finalPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer the following question using this information where relevant:\n${finalPrompt}`;
     }
 
-    const chat = chatModel.startChat({
-      history: messages.slice(0, -1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      })),
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    // Build message history
+    const history = messages.map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content
+    }));
+    // Add system prompt at the beginning
+    const chatMessages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...history
+    ];
+
+    // Stream from Groq
+    const stream = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: chatMessages,
+      temperature: 0.7,
+      max_tokens: 2048,
+      stream: true,
     });
 
-    const result = await chat.sendMessageStream(finalPrompt);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
     let fullResponse = '';
-    for await (const chunk of result.stream) {
-      const text = chunk.text();
-      fullResponse += text;
-      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        fullResponse += content;
+        res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+      }
     }
 
-    // No sources sent
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
@@ -682,28 +648,25 @@ If you have any other questions about agriculture, livestock, or related topics,
       finalPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer:\n${finalPrompt}`;
     }
 
-    // Get a working model
-    const chatModel = await getModel();
+    // Build chat history for Groq (excluding the last user message, which we'll send as the prompt)
+    const chatHistory = aiMessages.slice(0, -1).map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content
+    }));
+    const chatMessages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...chatHistory,
+      { role: 'user', content: finalPrompt }
+    ];
 
-    const chat = chatModel.startChat({
-      history: aiMessages.slice(0, -1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      })),
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    // Stream from Groq
+    const stream = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: chatMessages,
+      temperature: 0.7,
+      max_tokens: 2048,
+      stream: true,
     });
-
-    let result;
-    if (file && file.mimetype.startsWith('image/')) {
-      const base64 = file.buffer.toString('base64');
-      result = await chat.sendMessageStream([
-        { text: finalPrompt },
-        { inlineData: { data: base64, mimeType: file.mimetype } }
-      ]);
-    } else {
-      result = await chat.sendMessageStream(finalPrompt);
-    }
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -711,13 +674,14 @@ If you have any other questions about agriculture, livestock, or related topics,
     res.flushHeaders();
 
     let fullResponse = '';
-    for await (const chunk of result.stream) {
-      const text = chunk.text();
-      fullResponse += text;
-      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        fullResponse += content;
+        res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+      }
     }
 
-    // No sources
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
@@ -769,18 +733,25 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
     if (aiMessages.length === 0 || aiMessages[aiMessages.length - 1].role !== 'user')
       return res.status(400).json({ error: 'No user message' });
 
-    // Get a working model
-    const chatModel = await getModel();
+    // Build history for Groq
+    const chatHistory = aiMessages.slice(0, -1).map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content
+    }));
+    const userPrompt = aiMessages[aiMessages.length - 1].content;
+    const chatMessages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...chatHistory,
+      { role: 'user', content: userPrompt }
+    ];
 
-    const chat = chatModel.startChat({
-      history: aiMessages.slice(0, -1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      })),
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+    const stream = await groq.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: chatMessages,
+      temperature: 0.7,
+      max_tokens: 2048,
+      stream: true,
     });
-    const result = await chat.sendMessageStream(aiMessages[aiMessages.length - 1].content);
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -788,10 +759,12 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
     res.flushHeaders();
 
     let fullResponse = '';
-    for await (const chunk of result.stream) {
-      const text = chunk.text();
-      fullResponse += text;
-      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        fullResponse += content;
+        res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+      }
     }
     res.write('data: [DONE]\n\n');
     res.end();
@@ -901,5 +874,5 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI server running on port ${PORT}`, 'info');
-  log(`📦 Using Gemini model with fallback chain`, 'info');
+  log(`🧠 Using Groq model: ${GROQ_MODEL}`, 'info');
 });
