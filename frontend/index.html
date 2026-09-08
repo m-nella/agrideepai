@@ -12,7 +12,7 @@
 <body>
   <div id="app">
     <!-- Sidebar -->
-    <aside id="sidebar" class="sidebar-expanded">
+    <aside id="sidebar">
       <div class="sidebar-header">
         <div class="brand">
           <img src="/logo.png" alt="agrideepai" class="logo-img" />
@@ -47,7 +47,7 @@
         </button>
         <span id="chatTitle">agrideepai</span>
         <div class="top-actions">
-          <button class="icon-button" aria-label="More options">
+          <button class="icon-button" aria-label="More options" id="topMoreBtn">
             <i data-lucide="more-horizontal"></i>
           </button>
         </div>
@@ -56,8 +56,8 @@
       <div id="chatContainer">
         <div id="welcomeScreen">
           <img src="/logo.png" alt="agrideepai" class="welcome-logo" />
-          <h1>How can I help with agriculture today?</h1>
-          <p>Ask about crops, livestock, soil, farming, and more.</p>
+          <h1>How can I help today?</h1>
+          <p>Ask about agriculture, livestock, and more.</p>
           <div class="suggestion-chips">
             <button class="chip" data-prompt="Diagnose crop symptoms">🌿 Diagnose crop symptoms</button>
             <button class="chip" data-prompt="Ask about livestock">🐄 Ask about livestock</button>
@@ -82,7 +82,7 @@
             </button>
           </div>
         </div>
-        <div class="footer-note">agrideepai can make a mistake. Check for reference.</div>
+        <div class="footer-note">AgriDeepAI can make a mistake. Check for reference.</div>
       </footer>
     </main>
   </div>
@@ -95,13 +95,29 @@
     </div>
   </div>
 
+  <!-- Share Modal -->
+  <div id="shareModal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" id="shareModalClose">&times;</button>
+      <h2>Share Chat</h2>
+      <p id="shareLinkDisplay" style="word-break:break-all; background:var(--surface); padding:0.5rem; border-radius:var(--radius-sm);"></p>
+      <button id="copyShareLink" class="btn-primary">Copy Link</button>
+    </div>
+  </div>
+
+  <!-- Chat Context Menu (three dots) -->
+  <div id="chatMenu" class="context-menu hidden">
+    <button data-action="pin"><i data-lucide="pin"></i> Pin</button>
+    <button data-action="share"><i data-lucide="share-2"></i> Share</button>
+    <button data-action="rename"><i data-lucide="pencil"></i> Rename</button>
+    <button data-action="delete" style="color:var(--danger);"><i data-lucide="trash-2"></i> Delete</button>
+  </div>
+
   <script src="main.js" type="module"></script>
   <script>
-    // Initialize Lucide icons after DOM load
     document.addEventListener('DOMContentLoaded', () => {
       lucide.createIcons();
     });
-    // Re-run after dynamic content updates
     window.refreshIcons = () => lucide.createIcons();
   </script>
 </body>
