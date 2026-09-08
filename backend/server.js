@@ -12,12 +12,16 @@ const crypto = require('crypto');
 // ---------- Brevo Email (Correct SDK Usage) ----------
 const brevo = require('@getbrevo/brevo');
 
-// Set global API key using the default client
+// Set API key using the correct authentication name: 'api-key' (with dash)
 const defaultClient = brevo.ApiClient.instance;
-const apiKeyAuth = defaultClient.authentications['apiKey'];
-apiKeyAuth.apiKey = process.env.BREVO_API_KEY || ''; // fallback empty string
+const apiKeyAuth = defaultClient.authentications['api-key'];
+if (apiKeyAuth) {
+  apiKeyAuth.apiKey = process.env.BREVO_API_KEY || ''; // fallback to empty string
+} else {
+  console.error('Brevo API key authentication object not found. Check SDK version.');
+  // Fallback: create a new instance and set key directly (if needed)
+}
 
-// Create API instance
 const brevoApi = new brevo.TransactionalEmailsApi();
 
 // ---------- Logging ----------
