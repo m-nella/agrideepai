@@ -9,19 +9,13 @@ const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
 
-// ---------- Brevo Email (Correct SDK Usage) ----------
+// ---------- Brevo Email ----------
 const brevo = require('@getbrevo/brevo');
-
-// Set API key using the correct authentication name: 'api-key' (with dash)
 const defaultClient = brevo.ApiClient.instance;
 const apiKeyAuth = defaultClient.authentications['api-key'];
 if (apiKeyAuth) {
-  apiKeyAuth.apiKey = process.env.BREVO_API_KEY || ''; // fallback to empty string
-} else {
-  console.error('Brevo API key authentication object not found. Check SDK version.');
-  // Fallback: create a new instance and set key directly (if needed)
+  apiKeyAuth.apiKey = process.env.BREVO_API_KEY || '';
 }
-
 const brevoApi = new brevo.TransactionalEmailsApi();
 
 // ---------- Logging ----------
@@ -33,11 +27,7 @@ const log = (msg, type = 'info') => {
 // ---------- App ----------
 const app = express();
 const PORT = process.env.PORT || 5000;
-
-// ---------- Trust proxy ----------
 app.set('trust proxy', 1);
-
-// ---------- Middleware ----------
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -56,13 +46,12 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini ----------
+// ---------- Gemini (current available models) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const MODEL_CANDIDATES = [
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
+  'gemini-3.6-flash',   // newest available to new users
   'gemini-2.0-flash',
-  'gemini-1.5-flash',
+  'gemini-pro',          // safe fallback
 ];
 let activeModel = null;
 
@@ -554,7 +543,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     res.write('data: [DONE]\n\n');
     res.end();
 
-    // Save assistant message
+    // Save assistant message with versioning support
     await supabase
       .from('messages')
       .insert({
@@ -562,6 +551,8 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         role: 'assistant',
         content: fullResponse,
         files: sourcesData ? [{ sources: sourcesData }] : null,
+        versions: [fullResponse], // initial version
+        current_version_index: 0,
       });
     await supabase
       .from('conversations')
@@ -573,103 +564,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     log(`Send message error: ${err.message}`, 'error');
     if (!res.headersSent) res.status(500).json({ error: err.message });
     else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-  }
-});
-
-app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
-  try {
-    const conversationId = req.params.id;
-    const { messageIndex } = req.body;
-    const { data: allMessages } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
-    if (messageIndex >= allMessages.length || allMessages[messageIndex].role !== 'assistant')
-      return res.status(400).json({ error: 'Invalid index' });
-
-    const idsToDelete = allMessages.slice(messageIndex).map(m => m.id);
-    if (idsToDelete.length > 0) await supabase.from('messages').delete().in('id', idsToDelete);
-
-    const { data: remaining } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
-    const aiMessages = remaining.map(m => ({ role: m.role, content: m.content }));
-    if (aiMessages.length === 0 || aiMessages[aiMessages.length - 1].role !== 'user')
-      return res.status(400).json({ error: 'No user message' });
-
-    const chatModel = getModel();
-    const chat = chatModel.startChat({
-      history: aiMessages.slice(0, -1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      })),
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
-    });
-    const result = await chat.sendMessageStream(aiMessages[aiMessages.length - 1].content);
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
-    let fullResponse = '';
-    for await (const chunk of result.stream) {
-      const text = chunk.text();
-      fullResponse += text;
-      res.write(`data: ${JSON.stringify({ text })}\n\n`);
-    }
-    res.write('data: [DONE]\n\n');
-    res.end();
-
-    await supabase
-      .from('messages')
-      .insert({ conversation_id: conversationId, role: 'assistant', content: fullResponse });
-    await supabase
-      .from('conversations')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', conversationId);
-
-    log(`Regenerated for conversation ${conversationId}`, 'debug');
-  } catch (err) {
-    log(`Regenerate error: ${err.message}`, 'error');
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-  }
-});
-
-app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { content, truncate } = req.body;
-    const { data: msg } = await supabase
-      .from('messages')
-      .select('*, conversation_id, conversations(user_id)')
-      .eq('id', id)
-      .single();
-    if (!msg || msg.conversations.user_id !== req.user.id)
-      return res.status(403).json({ error: 'Unauthorized' });
-    if (msg.role !== 'user') return res.status(400).json({ error: 'Only user messages can be edited' });
-
-    await supabase.from('messages').update({ content }).eq('id', id);
-    if (truncate) {
-      const { data: later } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('conversation_id', msg.conversation_id)
-        .gt('created_at', msg.created_at);
-      if (later.length) await supabase.from('messages').delete().in('id', later.map(m => m.id));
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', msg.conversation_id);
-    }
-    res.json({ message: 'Updated' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
 });
 
@@ -685,7 +579,6 @@ app.post('/api/chat/share/:id', authenticate, async (req, res) => {
       .eq('user_id', req.user.id)
       .single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
-
     const token = crypto.randomBytes(16).toString('hex');
     const { data, error } = await supabase
       .from('shared_links')
