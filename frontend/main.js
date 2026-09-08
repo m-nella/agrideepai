@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Fixed)
+// AGRIDEEPAI – Full Frontend (All Issues Fixed)
 // ============================================================
 
 // --- Logging ---
@@ -48,9 +48,6 @@ let state = {
   dislikedMessages: new Set(),
   contextMenuTarget: null,
 };
-
-// --- Status flag ---
-let statusTimer = null;
 
 // --- Supabase init ---
 async function initSupabase() {
@@ -123,7 +120,6 @@ function loadLocalConversations() {
   log('Loading local conversations', 'debug');
   const stored = localStorage.getItem('agrideepai_local_chats');
   state.chats = stored ? JSON.parse(stored) : [];
-  // Remove empty chats (safety)
   state.chats = state.chats.filter(c => c.messages && c.messages.length > 0);
   const currentId = localStorage.getItem('agrideepai_local_current');
   if (currentId && state.chats.some(c => c.id === currentId)) {
@@ -146,7 +142,6 @@ function loadLocalConversations() {
 }
 
 function saveLocalConversations() {
-  // Save versions into messages
   state.messages.forEach(msg => {
     if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
       const vData = state.messageVersions[msg.id];
@@ -157,7 +152,6 @@ function saveLocalConversations() {
       }
     }
   });
-  // Filter out any chats with no messages
   const validChats = state.chats.filter(c => c.messages && c.messages.length > 0);
   state.chats = validChats;
   localStorage.setItem('agrideepai_local_chats', JSON.stringify(validChats));
@@ -419,7 +413,7 @@ function renderMessages() {
       }
     }
 
-    // Action row (outside bubble)
+    // Action row (outside bubble) – always visible
     if (state.editingMessageId !== msg.id) {
       const actionsRow = document.createElement('div');
       actionsRow.className = 'message-actions-row';
@@ -1133,7 +1127,7 @@ async function sendMessage() {
     state.chats.unshift(newChat);
     state.activeChatId = newChat.id;
     if (!state.currentUser) saveLocalConversations();
-    renderChatList();
+    renderChatList(); // immediately update sidebar
     chat = newChat;
   } else {
     // If chat exists but has no messages, update title
@@ -1280,7 +1274,7 @@ async function sendMessage() {
       chat.messages = state.messages;
       saveLocalConversations();
       renderMessages();
-      renderChatList();
+      renderChatList(); // ensure sidebar updates
     }
     log('Message sent successfully', 'info');
   } catch (err) {
