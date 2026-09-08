@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Fixed)
+// AGRIDEEPAI – Full Frontend (No Empty Chats)
 // ============================================================
 
 // --- Logging ---
@@ -115,7 +115,7 @@ async function apiFetch(endpoint, options = {}) {
   return res;
 }
 
-// --- Local storage (no filtering of empty chats) ---
+// --- Local storage ---
 function loadLocalConversations() {
   log('Loading local conversations', 'debug');
   const stored = localStorage.getItem('agrideepai_local_chats');
@@ -141,7 +141,6 @@ function loadLocalConversations() {
 }
 
 function saveLocalConversations() {
-  // Save versions into messages
   state.messages.forEach(msg => {
     if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
       const vData = state.messageVersions[msg.id];
@@ -152,7 +151,6 @@ function saveLocalConversations() {
       }
     }
   });
-  // Do NOT filter out empty chats – keep them
   localStorage.setItem('agrideepai_local_chats', JSON.stringify(state.chats));
   if (state.activeChatId && state.chats.some(c => c.id === state.activeChatId)) {
     localStorage.setItem('agrideepai_local_current', state.activeChatId);
@@ -168,7 +166,6 @@ async function loadCloudConversations() {
   try {
     const res = await apiFetch('/api/chat/conversations');
     state.chats = await res.json();
-    // Do not filter – keep all chats (including empty ones)
     renderChatList();
     if (state.activeChatId) {
       const exists = state.chats.some(c => c.id === state.activeChatId);
@@ -412,7 +409,7 @@ function renderMessages() {
       }
     }
 
-    // Action row (outside bubble) – always visible
+    // Action row (outside bubble)
     if (state.editingMessageId !== msg.id) {
       const actionsRow = document.createElement('div');
       actionsRow.className = 'message-actions-row';
@@ -1018,21 +1015,17 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// --- New Chat (creates a new chat immediately) ---
+// --- New Chat (clears view, does NOT create a chat) ---
 function handleNewChat() {
-  log('New Chat clicked – creating a new chat', 'info');
-  createChat('New Chat').then(chat => {
-    if (chat) {
-      state.activeChatId = chat.id;
-      state.messages = [];
-      state.editingMessageId = null;
-      state.messageVersions = {};
-      renderMessages();
-      renderChatList();
-      messageInput.focus();
-      if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
-    }
-  });
+  log('New Chat clicked – clearing view, no chat created', 'info');
+  state.activeChatId = null;
+  state.messages = [];
+  state.editingMessageId = null;
+  state.messageVersions = {};
+  renderMessages();
+  renderChatList();
+  messageInput.focus();
+  if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
 }
 
 // --- Composer ---
@@ -1087,7 +1080,7 @@ function renderAttachments() {
   window.refreshIcons();
 }
 
-// --- Status message (only "Thinking...") ---
+// --- Status message ---
 function showStatus() {
   hideStatus();
   const statusDiv = document.createElement('div');
@@ -1110,7 +1103,7 @@ async function sendMessage() {
   if (!hasText && !hasAttachments) return;
   if (state.isGenerating) return;
 
-  // Create chat if none exists
+  // Create chat if none exists (only on first message)
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
@@ -1126,7 +1119,7 @@ async function sendMessage() {
     state.chats.unshift(newChat);
     state.activeChatId = newChat.id;
     if (!state.currentUser) saveLocalConversations();
-    renderChatList(); // immediately update sidebar
+    renderChatList();
     chat = newChat;
   } else {
     // If chat exists but has no messages, update title
@@ -1273,7 +1266,7 @@ async function sendMessage() {
       chat.messages = state.messages;
       saveLocalConversations();
       renderMessages();
-      renderChatList(); // ensure sidebar updates
+      renderChatList();
     }
     log('Message sent successfully', 'info');
   } catch (err) {
