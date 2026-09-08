@@ -348,7 +348,7 @@ function renderChatList() {
   window.refreshIcons();
 }
 
-// --- Render messages (with integrated thinking state) ---
+// --- Render messages ---
 function renderMessages() {
   messageList.innerHTML = '';
   if (!state.messages.length) {
