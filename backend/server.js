@@ -11,9 +11,14 @@ const crypto = require('crypto');
 
 // ---------- Brevo Email (Correct SDK Usage) ----------
 const brevo = require('@getbrevo/brevo');
+
+// Set global API key using the default client
+const defaultClient = brevo.ApiClient.instance;
+const apiKeyAuth = defaultClient.authentications['apiKey'];
+apiKeyAuth.apiKey = process.env.BREVO_API_KEY || ''; // fallback empty string
+
+// Create API instance
 const brevoApi = new brevo.TransactionalEmailsApi();
-// Set API key using the correct method
-brevoApi.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY || '');
 
 // ---------- Logging ----------
 const log = (msg, type = 'info') => {
@@ -47,7 +52,7 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (current model) ----------
+// ---------- Gemini ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const MODEL_CANDIDATES = [
   'gemini-2.5-flash',
