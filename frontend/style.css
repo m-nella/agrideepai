@@ -244,11 +244,15 @@ body {
   flex: 1;
   display: none;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
 }
-.message-row { display: flex; width: 100%; }
-.message-row.user { justify-content: flex-end; }
-.message-row.assistant { justify-content: flex-start; }
+.message-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+.message-row.user { align-items: flex-end; }
+.message-row.assistant { align-items: flex-start; }
 
 .message {
   max-width: min(780px, 85%);
@@ -284,14 +288,88 @@ body {
 }
 .assistant-header img { height: 18px; width: auto; }
 
-/* --- Action row below message --- */
+/* ---- Markdown Content ---- */
+.message-content {
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+.message-content h1, .message-content h2, .message-content h3,
+.message-content h4, .message-content h5, .message-content h6 {
+  margin: 0.6rem 0 0.3rem 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.message-content h1 { font-size: 1.4rem; }
+.message-content h2 { font-size: 1.2rem; }
+.message-content h3 { font-size: 1.05rem; }
+.message-content p { margin: 0.25rem 0; }
+.message-content ul, .message-content ol {
+  padding-left: 1.2rem;
+  margin: 0.2rem 0;
+}
+.message-content li { margin: 0.1rem 0; }
+.message-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.4rem 0;
+  font-size: 0.9rem;
+}
+.message-content th, .message-content td {
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.4rem;
+  text-align: left;
+}
+.message-content th { background: var(--surface-hover); }
+.message-content code {
+  background: var(--surface-hover);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.9rem;
+}
+.message-content pre {
+  background: var(--surface-hover);
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: monospace;
+  font-size: 0.9rem;
+}
+.message-content blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 0.6rem;
+  margin: 0.2rem 0;
+  color: var(--text-muted);
+}
+
+/* ---- Status Message ---- */
+.status-message {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  animation: pulse 1.2s infinite;
+}
+.status-message .spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* ---- Action row ---- */
 .message-actions-row {
   display: flex;
   gap: 0.3rem;
   margin-top: 0.2rem;
-  padding-left: 0.2rem;
   flex-wrap: wrap;
-  opacity: 0.7;
+  opacity: 0.6;
   transition: opacity 0.2s;
 }
 .message-row:hover .message-actions-row {
@@ -320,7 +398,7 @@ body {
   color: var(--danger);
 }
 
-/* --- Version controls --- */
+/* ---- Version controls ---- */
 .version-controls {
   display: flex;
   align-items: center;
@@ -342,8 +420,12 @@ body {
   background: var(--surface-hover);
   color: var(--text);
 }
+.version-controls button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
 
-/* --- Sources --- */
+/* ---- Sources ---- */
 .sources {
   margin-top: 0.4rem;
   font-size: 0.8rem;
@@ -412,7 +494,6 @@ body {
 }
 .composer-main textarea::placeholder { color: var(--text-muted); }
 
-/* ----- SEND BUTTON (full visibility) ----- */
 .send-button {
   background: var(--accent-dim);
   color: var(--text);
@@ -426,7 +507,7 @@ body {
   justify-content: center;
   min-width: 36px;
   min-height: 36px;
-  opacity: 0.35; /* low when empty */
+  opacity: 0.35;
 }
 .send-button:not(:disabled):hover {
   background: var(--accent);
@@ -441,7 +522,7 @@ body {
   background: var(--danger);
   color: #fff;
   border-color: var(--danger);
-  opacity: 1; /* full when generating */
+  opacity: 1;
 }
 .send-button.generating:hover {
   background: #e85d5d;
@@ -575,9 +656,10 @@ body {
   .brand-name { display: inline !important; }
   .new-chat-btn span { display: inline !important; }
   .auth-btn span { display: inline !important; }
-  #sidebar.collapsed { width: 280px; } /* override for mobile */
+  #sidebar.collapsed { width: 280px; }
   #sidebar.collapsed .chat-history { display: block; }
   #sidebar.collapsed .sidebar-footer span { display: inline; }
+  .message { max-width: 92%; }
 }
 @media (min-width: 769px) {
   #sidebar.collapsed .brand-name { display: none; }
