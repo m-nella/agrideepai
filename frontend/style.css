@@ -66,14 +66,12 @@ body {
 }
 #sidebar.collapsed .brand-name { display: none; }
 #sidebar.collapsed .new-chat-btn span { display: none; }
-/* Hide chat list and footer text when collapsed */
 #sidebar.collapsed .chat-history { display: none; }
 #sidebar.collapsed .sidebar-footer span { display: none; }
 #sidebar.collapsed .sidebar-footer .auth-btn {
   justify-content: center;
   padding: 0.3rem;
 }
-/* When collapsed, the toggle button floats at top-center of sidebar */
 #sidebar.collapsed #sidebarToggle {
   margin: 0;
   position: relative;
@@ -371,6 +369,7 @@ body {
 }
 .composer-main textarea::placeholder { color: var(--text-muted); }
 
+/* ----- SEND BUTTON (full visibility) ----- */
 .send-button {
   background: var(--accent-dim);
   color: var(--text);
@@ -378,18 +377,32 @@ body {
   border-radius: var(--radius-sm);
   padding: 0.3rem 0.6rem;
   cursor: pointer;
-  transition: background 0.2s, opacity 0.2s;
+  transition: background 0.2s, opacity 0.2s, border-color 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: 36px;
   min-height: 36px;
-  opacity: 0.35;
+  opacity: 0.35; /* low when empty */
 }
-.send-button:not(:disabled):hover { background: var(--accent); color: #fff; }
-.send-button:disabled { cursor: default; opacity: 0.2; }
-.send-button.generating { background: var(--danger); color: #fff; border-color: var(--danger); opacity: 1; }
-.send-button.generating:hover { background: #e85d5d; }
+.send-button:not(:disabled):hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.send-button:disabled {
+  cursor: default;
+  opacity: 0.2;
+}
+.send-button.generating {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+  opacity: 1; /* full when generating */
+}
+.send-button.generating:hover {
+  background: #e85d5d;
+}
 
 .footer-note {
   text-align: center;
