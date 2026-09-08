@@ -46,40 +46,43 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (use the most reliable available model) ----------
+// ---------- Gemini (using models from your API key) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Models ordered by most likely to work for new users
-// gemini-2.0-flash-exp is currently the most reliable free model
+// Models confirmed available from your API key (from curl output)
+// Prioritize gemini-2.5-flash as it's the most stable and widely available
 const MODEL_CANDIDATES = [
-  'gemini-2.0-flash-exp',   // Most reliable for new users
-  'gemini-3.1-pro-preview', // Newest preview
-  'gemini-2.0-flash',       // Stable
-  'gemini-1.5-flash',       // Older but may work
-  'gemini-pro',             // Legacy fallback
+  'gemini-2.5-flash',      // Fast, reliable, confirmed available
+  'gemini-2.5-pro',        // More capable, confirmed available
+  'gemini-3.5-flash',      // Newer, confirmed available
+  'gemini-3.6-flash',      // Even newer, confirmed available
+  'gemini-3.7-flash',      // Latest, confirmed available
 ];
 
 let activeModel = null;
+let activeModelName = null;
 
 function getModel() {
   if (activeModel) {
-    log(`Using cached model: ${activeModel.model}`, 'debug');
+    log(`Using cached model: ${activeModelName}`, 'debug');
     return activeModel;
   }
+
+  // Try each model in order
   for (const name of MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: name });
       log(`✅ Using Gemini model: ${name}`, 'info');
       activeModel = model;
+      activeModelName = name;
       return model;
     } catch (e) {
       log(`⚠️ Model ${name} failed: ${e.message}`, 'warn');
     }
   }
-  // Last resort: try the first one again (will throw a clear error)
-  activeModel = genAI.getGenerativeModel({ model: MODEL_CANDIDATES[0] });
-  log(`❗ Forced model: ${MODEL_CANDIDATES[0]} (may fail)`, 'error');
-  return activeModel;
+
+  // Last resort: throw a clear error
+  throw new Error('No Gemini models available. Please check your API key.');
 }
 
 // ---------- Tavily ----------
