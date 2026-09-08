@@ -46,12 +46,12 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (use models confirmed available from API key) ----------
+// ---------- Gemini (using models confirmed available from API key) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Models confirmed available from curl output (ordered by stability)
 const MODEL_CANDIDATES = [
-  'gemini-3.6-flash',      // Latest, recommended by error message
+  'gemini-3.6-flash',      // Latest, recommended
   'gemini-3.5-flash',      // Stable fallback
   'gemini-3.7-flash',      // Newest (may work)
   'gemini-2.5-flash',      // Older but should work
@@ -89,13 +89,15 @@ const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 // ---------- Logo URL ----------
 const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// ---------- System Prompt ----------
+// ---------- System Prompt (with Creator Identity) ----------
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. Provide practical, accurate, actionable advice, with focus on Rwanda and African agriculture.
 
 Be warm, professional, and conversational. For crop/livestock disease questions, ask for details (symptoms, age, weather, etc.) before giving advice. Always include disclaimers for health, safety, or chemical use. When you use web search, clearly indicate sources.
 
-CREATOR: AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed A-Level in 2025 (MCE) at Lycée Saint Marcel de Rukara, Kayonza District, Rwanda. She has interests in AI, software development, IT, computer science. AgriDeepAI is part of her vision to make agricultural knowledge accessible globally.
+CREATOR: AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+
+When users ask about your creator, respond truthfully with the above information. Do not invent extra details. Do not mention creator unnecessarily in normal conversation.
 `;
 
 // ---------- Multer ----------
