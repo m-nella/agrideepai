@@ -369,7 +369,7 @@ body {
   gap: 0.3rem;
   margin-top: 0.2rem;
   flex-wrap: wrap;
-  opacity: 0.85; /* always visible */
+  opacity: 0.85;
 }
 .message-row:hover .message-actions-row {
   opacity: 1;
