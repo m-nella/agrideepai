@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (All Fixes)
+// AGRIDEEPAI – Full Frontend (Fixed)
 // ============================================================
 
 // --- Logging ---
@@ -140,6 +140,29 @@ function showCustomPrompt(title, defaultValue = '') {
       }
     });
   });
+}
+
+// --- Clean content: remove "Sources:" section ---
+function cleanContent(content) {
+  if (!content) return content;
+  // Remove any "Sources:" section (case-insensitive) and everything after until a blank line or end
+  const lines = content.split('\n');
+  let result = [];
+  let skip = false;
+  for (const line of lines) {
+    if (/^sources:/i.test(line.trim())) {
+      skip = true;
+      continue;
+    }
+    if (skip && line.trim() === '') {
+      skip = false;
+      continue;
+    }
+    if (!skip) {
+      result.push(line);
+    }
+  }
+  return result.join('\n').trim();
 }
 
 // --- Supabase init ---
@@ -365,7 +388,7 @@ function renderMessages() {
     const row = document.createElement('div');
     row.className = `message-row ${msg.role}`;
 
-    // Assistant header (outside bubble) – only for assistant messages
+    // Assistant header (outside bubble)
     if (msg.role === 'assistant') {
       const header = document.createElement('div');
       header.className = 'assistant-header-row';
@@ -435,11 +458,12 @@ function renderMessages() {
           `;
           msgDiv.appendChild(thinkingDiv);
         } else if (msg.content) {
+          // Clean content (remove sources)
+          const cleaned = cleanContent(msg.content);
           const contentDiv = document.createElement('div');
           contentDiv.className = 'message-content';
-          // Remove horizontal rules (<hr>) from rendered HTML
-          let html = marked.parse(msg.content || '');
-          // Strip <hr> tags (horizontal lines)
+          let html = marked.parse(cleaned || '');
+          // Remove <hr> tags
           html = html.replace(/<hr\s*\/?>/g, '');
           contentDiv.innerHTML = html;
           msgDiv.appendChild(contentDiv);
@@ -595,7 +619,7 @@ function renderMessages() {
           });
           actionsRow.appendChild(regenBtn);
 
-          // Share (works without sign-in)
+          // Share
           const shareBtn = document.createElement('button');
           shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
           shareBtn.title = 'Share';
@@ -717,9 +741,9 @@ async function sendEditedUserMessage() {
   state.messages.push(assistantMsg);
   chat.messages = state.messages;
   if (!state.currentUser) saveLocalConversations();
-  renderMessages();
 
   state.isGenerating = true;
+  renderMessages(); // show thinking
   updateSendButton();
   state.abortController = new AbortController();
 
@@ -758,15 +782,6 @@ async function sendEditedUserMessage() {
               const last = state.messages[state.messages.length - 1];
               if (last && last.role === 'assistant') {
                 last.content = full;
-                chat.messages = state.messages;
-                if (!state.currentUser) saveLocalConversations();
-                renderMessages();
-              }
-            } else if (parsed.sources) {
-              const last = state.messages[state.messages.length - 1];
-              if (last && last.role === 'assistant') {
-                if (!last.files) last.files = [];
-                last.files.push({ sources: parsed.sources });
                 chat.messages = state.messages;
                 if (!state.currentUser) saveLocalConversations();
                 renderMessages();
@@ -846,9 +861,9 @@ async function regenerateMessage(index) {
   msg.content = '';
   chat.messages = state.messages;
   if (!state.currentUser) saveLocalConversations();
-  renderMessages();
 
   state.isGenerating = true;
+  renderMessages(); // show thinking
   updateSendButton();
   state.abortController = new AbortController();
 
@@ -936,22 +951,18 @@ async function regenerateMessage(index) {
 
 // --- Share (works without sign-in) ---
 async function shareMessageOrChat(msg) {
-  // If it's an assistant message, share that content.
-  // For user messages, we could share too, but we'll share the entire conversation for simplicity.
-  // We'll copy the conversation content to clipboard.
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     showToast('No chat to share', true);
     return;
   }
 
-  // Build a text version of the conversation
+  // Build text version
   const conversationText = state.messages.map(m => {
     const role = m.role === 'user' ? 'You' : 'AgriDeepAI';
     return `${role}: ${m.content}`;
   }).join('\n\n');
 
-  // Use native share if available
   if (navigator.share) {
     try {
       await navigator.share({
@@ -961,12 +972,11 @@ async function shareMessageOrChat(msg) {
       return;
     } catch (e) {
       if (e.name !== 'AbortError') {
-        // Fallback to clipboard
+        // fallback
       }
     }
   }
 
-  // Fallback: copy to clipboard
   try {
     await navigator.clipboard.writeText(conversationText);
     showToast('Chat copied to clipboard!');
@@ -1310,10 +1320,12 @@ async function sendMessage() {
   state.messages.push(assistantMsg);
   chat.messages = state.messages;
   if (!state.currentUser) saveLocalConversations();
-  renderMessages();
 
+  // Show thinking state BEFORE streaming
   state.isGenerating = true;
-  updateSendButton(); // ensure stop icon shows
+  renderMessages();
+  updateSendButton();
+
   state.abortController = new AbortController();
 
   try {
@@ -1367,15 +1379,6 @@ async function sendMessage() {
               const last = state.messages[state.messages.length - 1];
               if (last && last.role === 'assistant') {
                 last.content = full;
-                chat.messages = state.messages;
-                if (!state.currentUser) saveLocalConversations();
-                renderMessages();
-              }
-            } else if (parsed.sources) {
-              const last = state.messages[state.messages.length - 1];
-              if (last && last.role === 'assistant') {
-                if (!last.files) last.files = [];
-                last.files.push({ sources: parsed.sources });
                 chat.messages = state.messages;
                 if (!state.currentUser) saveLocalConversations();
                 renderMessages();
