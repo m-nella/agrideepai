@@ -284,23 +284,66 @@ body {
 }
 .assistant-header img { height: 18px; width: auto; }
 
-.message-actions {
+/* --- Action row below message --- */
+.message-actions-row {
   display: flex;
   gap: 0.3rem;
-  margin-top: 0.4rem;
+  margin-top: 0.2rem;
+  padding-left: 0.2rem;
   flex-wrap: wrap;
+  opacity: 0.7;
+  transition: opacity 0.2s;
 }
-.message-actions button {
+.message-row:hover .message-actions-row {
+  opacity: 1;
+}
+.message-actions-row .icon-button-sm {
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 0.1rem 0.3rem;
+  padding: 0.1rem 0.2rem;
   border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: background 0.15s, color 0.15s;
 }
-.message-actions button:hover { background: var(--surface-hover); color: var(--text); }
+.message-actions-row .icon-button-sm:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.message-actions-row .icon-button-sm.liked {
+  color: var(--accent);
+}
+.message-actions-row .icon-button-sm.disliked {
+  color: var(--danger);
+}
 
+/* --- Version controls --- */
+.version-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.version-controls button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0.1rem;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.version-controls button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* --- Sources --- */
 .sources {
   margin-top: 0.4rem;
   font-size: 0.8rem;
