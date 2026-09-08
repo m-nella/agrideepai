@@ -40,13 +40,13 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 // ---------- Resend ----------
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ---------- Gemini with robust fallback and logging ----------
+// ---------- Gemini with LOGGING and robust fallback ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Order: most reliable first (gemini-pro is widely available)
+// Use the most stable free model: gemini-1.5-flash (available to all)
 const MODEL_CANDIDATES = [
-  'gemini-pro',
   'gemini-1.5-flash',
+  'gemini-pro',
   'gemini-1.0-pro'
 ];
 
@@ -60,7 +60,6 @@ function getModel() {
   for (const name of MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: name });
-      // Test with a small prompt to confirm it works (optional)
       log(`✅ Successfully initialized Gemini model: ${name}`, 'info');
       activeModel = model;
       return model;
@@ -68,7 +67,7 @@ function getModel() {
       log(`⚠️ Model ${name} initialization failed: ${e.message}`, 'warn');
     }
   }
-  // Last resort: try the first one again (will throw)
+  // Last resort
   activeModel = genAI.getGenerativeModel({ model: MODEL_CANDIDATES[0] });
   log(`❗ Forced model: ${MODEL_CANDIDATES[0]} (may fail)`, 'error');
   return activeModel;
@@ -150,7 +149,6 @@ app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    // validate password strength
     if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
     }
@@ -435,7 +433,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     const { message } = req.body;
     const file = req.file;
 
-    // Verify ownership
     const { data: conv } = await supabase
       .from('conversations')
       .select('id')
@@ -561,7 +558,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
 });
 
 app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
-  // Similar to above, with fallback
   try {
     const conversationId = req.params.id;
     const { messageIndex } = req.body;
@@ -672,7 +668,6 @@ app.post('/api/chat/share/:id', authenticate, async (req, res) => {
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
     const token = crypto.randomBytes(16).toString('hex');
-    // Insert into shared_links table
     const { data, error } = await supabase
       .from('shared_links')
       .insert({ conversation_id: id, token })
@@ -713,5 +708,5 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI server running on port ${PORT}`, 'info');
-  log(`📦 Using Gemini model (fallback chain)`, 'info');
+  log(`📦 Using Gemini model with fallback chain`, 'info');
 });
