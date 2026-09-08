@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (with all fixes)
+// AGRIDEEPAI – Full Frontend (Fixed)
 // ============================================================
 
 // --- Logging ---
@@ -49,17 +49,8 @@ let state = {
   contextMenuTarget: null,
 };
 
-// --- Status messages rotation ---
-const statusMessages = [
-  'Understanding your question...',
-  'Analyzing the details...',
-  'Thinking...',
-  'Looking for the best answer...',
-  'Organizing the information...',
-  'Preparing a clear response...',
-  'Almost ready...',
-];
-let statusInterval = null;
+// --- Status flag ---
+let statusTimer = null;
 
 // --- Supabase init ---
 async function initSupabase() {
@@ -67,12 +58,10 @@ async function initSupabase() {
   try {
     const res = await fetch('/api/config');
     const config = await res.json();
-    log('Config fetched', 'debug');
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
 
     state.supabase.auth.onAuthStateChange((event, session) => {
-      log(`Auth state changed: ${event}`, 'info');
       if (session) {
         state.currentUser = session.user;
         updateAuthUI();
@@ -134,6 +123,7 @@ function loadLocalConversations() {
   log('Loading local conversations', 'debug');
   const stored = localStorage.getItem('agrideepai_local_chats');
   state.chats = stored ? JSON.parse(stored) : [];
+  // Remove empty chats (safety)
   state.chats = state.chats.filter(c => c.messages && c.messages.length > 0);
   const currentId = localStorage.getItem('agrideepai_local_current');
   if (currentId && state.chats.some(c => c.id === currentId)) {
@@ -156,6 +146,7 @@ function loadLocalConversations() {
 }
 
 function saveLocalConversations() {
+  // Save versions into messages
   state.messages.forEach(msg => {
     if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
       const vData = state.messageVersions[msg.id];
@@ -166,6 +157,7 @@ function saveLocalConversations() {
       }
     }
   });
+  // Filter out any chats with no messages
   const validChats = state.chats.filter(c => c.messages && c.messages.length > 0);
   state.chats = validChats;
   localStorage.setItem('agrideepai_local_chats', JSON.stringify(validChats));
@@ -180,7 +172,6 @@ function saveLocalConversations() {
 // --- Cloud conversations ---
 async function loadCloudConversations() {
   if (!state.currentUser) return;
-  log('Loading cloud conversations', 'info');
   try {
     const res = await apiFetch('/api/chat/conversations');
     state.chats = await res.json();
@@ -203,7 +194,6 @@ async function loadCloudConversations() {
 
 async function loadCloudMessages(chatId) {
   if (!state.currentUser) return;
-  log(`Loading messages for chat ${chatId}`, 'debug');
   try {
     const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
     state.messages = await res.json();
@@ -344,7 +334,6 @@ function renderMessages() {
       msgDiv.appendChild(editArea);
       setTimeout(() => textarea.focus(), 50);
     } else {
-      // Normal display
       const contentDiv = document.createElement('div');
       contentDiv.className = 'message-content';
       if (msg.role === 'assistant') {
@@ -428,7 +417,7 @@ function renderMessages() {
           window.refreshIcons();
         }
       }
-    } // end not editing
+    }
 
     // Action row (outside bubble)
     if (state.editingMessageId !== msg.id) {
@@ -596,7 +585,7 @@ async function sendEditedUserMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  showStatus('Thinking...');
+  showStatus();
 
   state.isGenerating = true;
   sendBtn.classList.add('generating');
@@ -677,6 +666,11 @@ async function sendEditedUserMessage() {
     if (state.currentUser) {
       await loadCloudMessages(chat.id);
       await loadCloudConversations();
+    } else {
+      chat.messages = state.messages;
+      saveLocalConversations();
+      renderMessages();
+      renderChatList();
     }
 
   } catch (err) {
@@ -726,7 +720,7 @@ async function regenerateMessage(index) {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  showStatus('Regenerating...');
+  showStatus();
 
   state.isGenerating = true;
   sendBtn.classList.add('generating');
@@ -1034,7 +1028,6 @@ document.addEventListener('click', (e) => {
 // --- New Chat (creates a new chat immediately) ---
 function handleNewChat() {
   log('New Chat clicked – creating a new chat', 'info');
-  // Create a new chat with title "New Chat"
   createChat('New Chat').then(chat => {
     if (chat) {
       state.activeChatId = chat.id;
@@ -1064,14 +1057,12 @@ function updateSendButton() {
   const stopIcon = sendBtn.querySelector('.stop-icon');
 
   if (!state.isGenerating) {
-    // Not generating -> show send icon, hide stop
     if (sendIcon) sendIcon.style.display = 'inline';
     if (stopIcon) stopIcon.style.display = 'none';
     sendBtn.disabled = !hasContent;
     sendBtn.style.opacity = hasContent ? '1' : '0.35';
     sendBtn.classList.remove('generating');
   } else {
-    // Generating -> show stop icon, hide send
     if (sendIcon) sendIcon.style.display = 'none';
     if (stopIcon) stopIcon.style.display = 'inline';
     sendBtn.disabled = false;
@@ -1103,29 +1094,17 @@ function renderAttachments() {
   window.refreshIcons();
 }
 
-// --- Status message helpers ---
-function showStatus(initial = 'Understanding your question...') {
+// --- Status message (only "Thinking...") ---
+function showStatus() {
   hideStatus();
   const statusDiv = document.createElement('div');
   statusDiv.className = 'status-message';
   statusDiv.id = 'statusMessage';
-  statusDiv.innerHTML = `<div class="spinner"></div><span>${initial}</span>`;
+  statusDiv.innerHTML = `<div class="spinner"></div><span>Thinking...</span>`;
   messageList.appendChild(statusDiv);
-  let idx = statusMessages.indexOf(initial);
-  if (idx === -1) idx = 0;
-  let currentIdx = idx;
-  statusInterval = setInterval(() => {
-    currentIdx = (currentIdx + 1) % statusMessages.length;
-    const span = statusDiv.querySelector('span');
-    if (span) span.textContent = statusMessages[currentIdx];
-  }, 2000);
 }
 
 function hideStatus() {
-  if (statusInterval) {
-    clearInterval(statusInterval);
-    statusInterval = null;
-  }
   const el = document.getElementById('statusMessage');
   if (el) el.remove();
 }
@@ -1138,6 +1117,7 @@ async function sendMessage() {
   if (!hasText && !hasAttachments) return;
   if (state.isGenerating) return;
 
+  // Create chat if none exists
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
@@ -1156,9 +1136,9 @@ async function sendMessage() {
     renderChatList();
     chat = newChat;
   } else {
-    // If chat exists but has no messages, update its title
+    // If chat exists but has no messages, update title
     if (chat.messages.length === 0 && chat.title === 'New Chat') {
-      chat.title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
+      chat.title = text.substring(0, 42) + (text.length > 42 ? '…' : '');
       if (!state.currentUser) saveLocalConversations();
       renderChatList();
     }
@@ -1177,6 +1157,7 @@ async function sendMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
+  // Clear input
   messageInput.value = '';
   const atts = [...state.attachments];
   state.attachments = [];
@@ -1198,7 +1179,7 @@ async function sendMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  showStatus('Understanding your question...');
+  showStatus();
 
   state.isGenerating = true;
   sendBtn.classList.add('generating');
@@ -1690,7 +1671,6 @@ messageInput.addEventListener('input', () => {
 
 chips.forEach((chip) => {
   chip.addEventListener('click', () => {
-    // Send message directly
     const prompt = chip.dataset.prompt;
     messageInput.value = prompt;
     updateSendButton();
