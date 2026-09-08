@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (No Empty Chats)
+// AGRIDEEPAI – Full Frontend (Fixed)
 // ============================================================
 
 // --- Logging ---
@@ -1015,17 +1015,30 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// --- New Chat (clears view, does NOT create a chat) ---
+// --- New Chat (creates chat only if no empty chat exists) ---
 function handleNewChat() {
-  log('New Chat clicked – clearing view, no chat created', 'info');
-  state.activeChatId = null;
-  state.messages = [];
-  state.editingMessageId = null;
-  state.messageVersions = {};
-  renderMessages();
-  renderChatList();
-  messageInput.focus();
-  if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
+  log('New Chat clicked', 'info');
+  // Find if there is already an empty chat (no messages)
+  const emptyChat = state.chats.find(chat => chat.messages.length === 0);
+  if (emptyChat) {
+    // Select the existing empty chat
+    selectChat(emptyChat.id);
+    log('Selected existing empty chat', 'debug');
+    return;
+  }
+  // Otherwise create a new chat
+  createChat('New Chat').then(chat => {
+    if (chat) {
+      state.activeChatId = chat.id;
+      state.messages = [];
+      state.editingMessageId = null;
+      state.messageVersions = {};
+      renderMessages();
+      renderChatList();
+      messageInput.focus();
+      if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
+    }
+  });
 }
 
 // --- Composer ---
@@ -1043,12 +1056,14 @@ function updateSendButton() {
   const stopIcon = sendBtn.querySelector('.stop-icon');
 
   if (!state.isGenerating) {
+    // Not generating – show send icon
     if (sendIcon) sendIcon.style.display = 'inline';
     if (stopIcon) stopIcon.style.display = 'none';
     sendBtn.disabled = !hasContent;
     sendBtn.style.opacity = hasContent ? '1' : '0.35';
     sendBtn.classList.remove('generating');
   } else {
+    // Generating – show stop icon (square)
     if (sendIcon) sendIcon.style.display = 'none';
     if (stopIcon) stopIcon.style.display = 'inline';
     sendBtn.disabled = false;
