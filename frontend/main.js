@@ -1,8 +1,8 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (with versioning & edit fixes)
+// AGRIDEEPAI – Full Frontend (with Markdown, Status, Stop Icon, Actions)
 // ============================================================
 
-// --- Logging helper ---
+// --- Logging ---
 const log = (msg, type = 'info') => {
   const timestamp = new Date().toISOString();
   console.log(`[FRONTEND] [${timestamp}] [${type.toUpperCase()}] ${msg}`);
@@ -43,11 +43,23 @@ let state = {
   attachments: [],
   editingMessageId: null,
   editingValue: '',
-  messageVersions: {}, // key: message.id, value: { versions: [], currentIndex: 0 }
+  messageVersions: {},
   likedMessages: new Set(),
   dislikedMessages: new Set(),
   contextMenuTarget: null,
 };
+
+// --- Status messages rotation ---
+const statusMessages = [
+  'Understanding your question...',
+  'Analyzing the details...',
+  'Thinking...',
+  'Looking for the best answer...',
+  'Organizing the information...',
+  'Preparing a clear response...',
+  'Almost ready...',
+];
+let statusInterval = null;
 
 // --- Supabase init ---
 async function initSupabase() {
@@ -134,20 +146,7 @@ function loadLocalConversations() {
     const chat = state.chats.find(c => c.id === state.activeChatId);
     if (chat) {
       state.messages = chat.messages || [];
-      // Rebuild messageVersions
-      state.messageVersions = {};
-      state.messages.forEach(msg => {
-        if (msg.role === 'assistant' && msg.versions && msg.versions.length > 0) {
-          state.messageVersions[msg.id] = {
-            versions: msg.versions,
-            currentIndex: msg.currentVersionIndex || 0
-          };
-          // Ensure displayed content matches current version
-          if (msg.versions.length > 0) {
-            msg.content = msg.versions[msg.currentVersionIndex || 0] || '';
-          }
-        }
-      });
+      rebuildVersions();
       renderMessages();
     }
   } else {
@@ -157,7 +156,7 @@ function loadLocalConversations() {
 }
 
 function saveLocalConversations() {
-  // Save versions back into messages before storing
+  // Save versions into messages
   state.messages.forEach(msg => {
     if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
       const vData = state.messageVersions[msg.id];
@@ -209,24 +208,27 @@ async function loadCloudMessages(chatId) {
   try {
     const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
     state.messages = await res.json();
-    // Rebuild messageVersions
-    state.messageVersions = {};
-    state.messages.forEach(msg => {
-      if (msg.role === 'assistant' && msg.versions && msg.versions.length > 0) {
-        state.messageVersions[msg.id] = {
-          versions: msg.versions,
-          currentIndex: msg.currentVersionIndex || 0
-        };
-        if (msg.versions.length > 0) {
-          msg.content = msg.versions[msg.currentVersionIndex || 0] || '';
-        }
-      }
-    });
+    rebuildVersions();
     renderMessages();
     renderChatList();
   } catch (err) {
     log(`Load cloud messages error: ${err.message}`, 'error');
   }
+}
+
+function rebuildVersions() {
+  state.messageVersions = {};
+  state.messages.forEach(msg => {
+    if (msg.role === 'assistant' && msg.versions && msg.versions.length > 0) {
+      state.messageVersions[msg.id] = {
+        versions: msg.versions,
+        currentIndex: msg.currentVersionIndex || 0
+      };
+      if (msg.versions.length > 0) {
+        msg.content = msg.versions[msg.currentVersionIndex || 0] || '';
+      }
+    }
+  });
 }
 
 // --- Render chat list ---
@@ -274,7 +276,7 @@ function renderChatList() {
   window.refreshIcons();
 }
 
-// --- Render messages ---
+// --- Render messages (with Markdown, status, actions) ---
 function renderMessages() {
   messageList.innerHTML = '';
   if (!state.messages.length) {
@@ -288,7 +290,8 @@ function renderMessages() {
   state.messages.forEach((msg, index) => {
     const row = document.createElement('div');
     row.className = `message-row ${msg.role}`;
-    // Container for message content (bubble)
+
+    // Message bubble
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
@@ -309,7 +312,7 @@ function renderMessages() {
         'width:100%;padding:0.4rem;border-radius:var(--radius-sm);background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:0.95rem;';
       const btnGroup = document.createElement('div');
       btnGroup.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.3rem;';
-      // Cancel button
+      // Cancel
       const cancelBtn = document.createElement('button');
       cancelBtn.textContent = 'Cancel';
       cancelBtn.style.cssText =
@@ -318,7 +321,7 @@ function renderMessages() {
         state.editingMessageId = null;
         renderMessages();
       });
-      // Send button (instead of Save)
+      // Send
       const sendEditBtn = document.createElement('button');
       sendEditBtn.textContent = 'Send';
       sendEditBtn.className = 'btn-primary';
@@ -328,20 +331,19 @@ function renderMessages() {
         if (!newContent) return;
         // Update user message content
         msg.content = newContent;
-        // Remove any assistant messages after this one
+        // Remove all messages after this one
         const idx = state.messages.indexOf(msg);
         state.messages = state.messages.slice(0, idx + 1);
-        // Clear editing state
+        // Clear editing
         state.editingMessageId = null;
-        // Update chat and save
+        // Save
         const chat = state.chats.find(c => c.id === state.activeChatId);
         if (chat) {
           chat.messages = state.messages;
           if (!state.currentUser) saveLocalConversations();
         }
         renderMessages();
-        // Now trigger a new AI response (send a new message with the edited content)
-        // We'll call a helper function that uses the current conversation history.
+        // Generate new AI response
         await sendEditedUserMessage();
       });
       btnGroup.appendChild(cancelBtn);
@@ -351,62 +353,19 @@ function renderMessages() {
       msgDiv.appendChild(editArea);
       setTimeout(() => textarea.focus(), 50);
     } else {
-      // Display content (for assistant, this is the current version)
-      const contentSpan = document.createElement('span');
-      contentSpan.textContent = msg.content;
-      msgDiv.appendChild(contentSpan);
-
-      // Version controls for assistant messages
-      if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
-        const vData = state.messageVersions[msg.id];
-        if (vData.versions.length > 1) {
-          const versionControls = document.createElement('div');
-          versionControls.style.cssText = 'display:flex;align-items:center;gap:0.5rem;margin-top:0.3rem;font-size:0.8rem;color:var(--text-muted);';
-          const prevBtn = document.createElement('button');
-          prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
-          prevBtn.title = 'Previous version';
-          prevBtn.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-muted);padding:0.1rem;';
-          prevBtn.addEventListener('click', () => {
-            if (vData.currentIndex > 0) {
-              vData.currentIndex--;
-              msg.content = vData.versions[vData.currentIndex];
-              const chat = state.chats.find(c => c.id === state.activeChatId);
-              if (chat) {
-                chat.messages = state.messages;
-                if (!state.currentUser) saveLocalConversations();
-              }
-              renderMessages();
-            }
-          });
-          versionControls.appendChild(prevBtn);
-
-          const versionLabel = document.createElement('span');
-          versionLabel.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
-          versionControls.appendChild(versionLabel);
-
-          const nextBtn = document.createElement('button');
-          nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
-          nextBtn.title = 'Next version';
-          nextBtn.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-muted);padding:0.1rem;';
-          nextBtn.addEventListener('click', () => {
-            if (vData.currentIndex < vData.versions.length - 1) {
-              vData.currentIndex++;
-              msg.content = vData.versions[vData.currentIndex];
-              const chat = state.chats.find(c => c.id === state.activeChatId);
-              if (chat) {
-                chat.messages = state.messages;
-                if (!state.currentUser) saveLocalConversations();
-              }
-              renderMessages();
-            }
-          });
-          versionControls.appendChild(nextBtn);
-          msgDiv.appendChild(versionControls);
-          window.refreshIcons();
-        }
+      // Normal display
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'message-content';
+      if (msg.role === 'assistant') {
+        // Render Markdown
+        contentDiv.innerHTML = marked.parse(msg.content || '');
+      } else {
+        // Plain text for user
+        contentDiv.textContent = msg.content;
       }
+      msgDiv.appendChild(contentDiv);
 
-      // Sources / files
+      // Sources
       if (msg.files && msg.files.length > 0) {
         const fileDiv = document.createElement('div');
         fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
@@ -430,15 +389,64 @@ function renderMessages() {
         });
         if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
       }
+
+      // Version controls for assistant messages
+      if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
+        const vData = state.messageVersions[msg.id];
+        if (vData.versions.length > 1) {
+          const versionControls = document.createElement('div');
+          versionControls.className = 'version-controls';
+          const prevBtn = document.createElement('button');
+          prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
+          prevBtn.title = 'Previous version';
+          prevBtn.disabled = vData.currentIndex === 0;
+          prevBtn.addEventListener('click', () => {
+            if (vData.currentIndex > 0) {
+              vData.currentIndex--;
+              msg.content = vData.versions[vData.currentIndex];
+              const chat = state.chats.find(c => c.id === state.activeChatId);
+              if (chat) {
+                chat.messages = state.messages;
+                if (!state.currentUser) saveLocalConversations();
+              }
+              renderMessages();
+            }
+          });
+          versionControls.appendChild(prevBtn);
+
+          const label = document.createElement('span');
+          label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
+          versionControls.appendChild(label);
+
+          const nextBtn = document.createElement('button');
+          nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
+          nextBtn.title = 'Next version';
+          nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
+          nextBtn.addEventListener('click', () => {
+            if (vData.currentIndex < vData.versions.length - 1) {
+              vData.currentIndex++;
+              msg.content = vData.versions[vData.currentIndex];
+              const chat = state.chats.find(c => c.id === state.activeChatId);
+              if (chat) {
+                chat.messages = state.messages;
+                if (!state.currentUser) saveLocalConversations();
+              }
+              renderMessages();
+            }
+          });
+          versionControls.appendChild(nextBtn);
+          msgDiv.appendChild(versionControls);
+          window.refreshIcons();
+        }
+      }
     } // end not editing
 
-    // Actions row – placed OUTSIDE the bubble, below it
+    // Action row (outside bubble)
     if (state.editingMessageId !== msg.id) {
       const actionsRow = document.createElement('div');
       actionsRow.className = 'message-actions-row';
-      actionsRow.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.2rem;flex-wrap:wrap;';
 
-      // Copy action (common)
+      // Copy
       const copyBtn = document.createElement('button');
       copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
       copyBtn.title = 'Copy';
@@ -477,7 +485,7 @@ function renderMessages() {
         dislikeBtn.addEventListener('click', () => toggleDislike(msg));
         actionsRow.appendChild(dislikeBtn);
 
-        // Regenerate – adds a new version
+        // Regenerate
         const regenBtn = document.createElement('button');
         regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
         regenBtn.title = 'Regenerate';
@@ -494,16 +502,17 @@ function renderMessages() {
         actionsRow.appendChild(shareBtn);
       }
 
-      // Append actions row after the message bubble (outside)
+      // Append actions row after bubble
       row.appendChild(msgDiv);
       row.appendChild(actionsRow);
       messageList.appendChild(row);
     } else {
-      // If editing, just append the msgDiv (buttons are inside)
+      // Editing: no actions row
       row.appendChild(msgDiv);
       messageList.appendChild(row);
     }
   });
+
   window.refreshIcons();
   const container = document.getElementById('chatContainer');
   if (isNearBottom(container)) container.scrollTop = container.scrollHeight;
@@ -513,7 +522,7 @@ function isNearBottom(container, threshold = 150) {
   return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
 }
 
-// --- Toast notification ---
+// --- Toast ---
 function showToast(message, isError = false) {
   const existing = document.querySelector('.agrideep-toast');
   if (existing) existing.remove();
@@ -551,9 +560,8 @@ function showToast(message, isError = false) {
   log(`Toast: ${message}`, isError ? 'error' : 'info');
 }
 
-// --- Copy message ---
+// --- Copy ---
 async function copyMessage(msg) {
-  log('Copying message', 'debug');
   try {
     await navigator.clipboard.writeText(msg.content);
     showToast('Copied!');
@@ -582,7 +590,7 @@ function toggleDislike(msg) {
   renderMessages();
 }
 
-// --- Edit message - start editing ---
+// --- Start editing ---
 function startEditing(msg) {
   if (msg.role !== 'user') return;
   state.editingMessageId = msg.id;
@@ -595,7 +603,7 @@ async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) return;
 
-  // Create assistant placeholder
+  // Assistant placeholder
   const assistantMsg = {
     id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
     role: 'assistant',
@@ -608,6 +616,9 @@ async function sendEditedUserMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
+  // Show status
+  showStatus('Thinking...');
+
   state.isGenerating = true;
   sendBtn.classList.add('generating');
   sendBtn.disabled = false;
@@ -615,11 +626,10 @@ async function sendEditedUserMessage() {
   state.abortController = new AbortController();
 
   try {
-    let response;
     const payload = {
       messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
     };
-    response = await fetch('/api/chat/guest', {
+    const response = await fetch('/api/chat/guest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -631,6 +641,7 @@ async function sendEditedUserMessage() {
       throw new Error(err.error || 'AI request failed');
     }
 
+    hideStatus();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
@@ -669,14 +680,13 @@ async function sendEditedUserMessage() {
       }
     }
 
-    // Finalize versioning
+    // Finalize version
     const last = state.messages[state.messages.length - 1];
     if (last && last.role === 'assistant') {
       if (!state.messageVersions[last.id]) {
         state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
       }
       const vData = state.messageVersions[last.id];
-      // Avoid duplicate
       if (vData.versions.length === 0 || vData.versions[vData.versions.length - 1] !== last.content) {
         vData.versions.push(last.content);
         vData.currentIndex = vData.versions.length - 1;
@@ -709,10 +719,11 @@ async function sendEditedUserMessage() {
     sendBtn.disabled = false;
     state.abortController = null;
     updateSendButton();
+    hideStatus();
   }
 }
 
-// --- Regenerate (adds a new version) ---
+// --- Regenerate (adds new version) ---
 async function regenerateMessage(index) {
   const msg = state.messages[index];
   if (!msg || msg.role !== 'assistant') return;
@@ -737,6 +748,8 @@ async function regenerateMessage(index) {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
+  showStatus('Regenerating...');
+
   state.isGenerating = true;
   sendBtn.classList.add('generating');
   sendBtn.disabled = false;
@@ -759,6 +772,7 @@ async function regenerateMessage(index) {
       throw new Error(err.error || 'AI request failed');
     }
 
+    hideStatus();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
@@ -822,10 +836,11 @@ async function regenerateMessage(index) {
     sendBtn.disabled = false;
     state.abortController = null;
     updateSendButton();
+    hideStatus();
   }
 }
 
-// --- Share chat ---
+// --- Share ---
 async function shareChat(messageId) {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
@@ -897,6 +912,7 @@ async function selectChat(id) {
     const chat = state.chats.find(c => c.id === id);
     if (chat) {
       state.messages = chat.messages || [];
+      rebuildVersions();
       renderMessages();
       renderChatList();
       saveLocalConversations();
@@ -1030,14 +1046,13 @@ function openChatMenu(e, chatId) {
   window.refreshIcons();
 }
 
-// Close context menu on outside click
 document.addEventListener('click', (e) => {
   if (!chatMenu.contains(e.target) && !e.target.closest('.chat-item .actions')) {
     chatMenu.classList.add('hidden');
   }
 });
 
-// --- New Chat ---
+// --- New Chat (no empty creation) ---
 function handleNewChat() {
   log('New Chat clicked – clearing view without creating chat', 'info');
   state.activeChatId = null;
@@ -1050,7 +1065,7 @@ function handleNewChat() {
   if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
 }
 
-// --- Composer helpers ---
+// --- Composer ---
 function resizeComposer() {
   messageInput.style.height = '0px';
   const maxHeight = 120;
@@ -1065,10 +1080,16 @@ function updateSendButton() {
     sendBtn.disabled = !hasContent;
     sendBtn.style.opacity = hasContent ? '1' : '0.35';
     sendBtn.classList.remove('generating');
+    // Show send icon
+    sendBtn.querySelector('.send-icon').style.display = 'inline';
+    sendBtn.querySelector('.stop-icon').style.display = 'none';
   } else {
     sendBtn.disabled = false;
     sendBtn.style.opacity = '1';
     sendBtn.classList.add('generating');
+    // Show stop icon
+    sendBtn.querySelector('.send-icon').style.display = 'none';
+    sendBtn.querySelector('.stop-icon').style.display = 'inline';
   }
 }
 
@@ -1095,6 +1116,33 @@ function renderAttachments() {
   window.refreshIcons();
 }
 
+// --- Status message helpers ---
+function showStatus(initial = 'Understanding your question...') {
+  hideStatus();
+  const statusDiv = document.createElement('div');
+  statusDiv.className = 'status-message';
+  statusDiv.id = 'statusMessage';
+  statusDiv.innerHTML = `<div class="spinner"></div><span>${initial}</span>`;
+  messageList.appendChild(statusDiv);
+  let idx = statusMessages.indexOf(initial);
+  if (idx === -1) idx = 0;
+  let currentIdx = idx;
+  statusInterval = setInterval(() => {
+    currentIdx = (currentIdx + 1) % statusMessages.length;
+    const span = statusDiv.querySelector('span');
+    if (span) span.textContent = statusMessages[currentIdx];
+  }, 2000);
+}
+
+function hideStatus() {
+  if (statusInterval) {
+    clearInterval(statusInterval);
+    statusInterval = null;
+  }
+  const el = document.getElementById('statusMessage');
+  if (el) el.remove();
+}
+
 // --- Send message (main) ---
 async function sendMessage() {
   const text = messageInput.value.trim();
@@ -1103,13 +1151,14 @@ async function sendMessage() {
   if (!hasText && !hasAttachments) return;
   if (state.isGenerating) return;
 
+  // Create chat if none
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
-    const title = text.substring(0, 42) + (text.length > 42 ? '…' : '');
+    const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
     log(`Creating new chat with title: "${title}"`, 'info');
     const newChat = {
       id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-      title: title || 'New conversation',
+      title,
       messages: [],
       pinned: false,
       updatedAt: new Date().toISOString(),
@@ -1156,6 +1205,9 @@ async function sendMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
+  // Show status
+  showStatus('Understanding your question...');
+
   state.isGenerating = true;
   sendBtn.classList.add('generating');
   sendBtn.disabled = false;
@@ -1194,6 +1246,7 @@ async function sendMessage() {
       throw new Error(err.error || 'AI request failed');
     }
 
+    hideStatus();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
@@ -1232,7 +1285,7 @@ async function sendMessage() {
       }
     }
 
-    // Finalize versioning for the new assistant message
+    // Finalize version
     const last = state.messages[state.messages.length - 1];
     if (last && last.role === 'assistant') {
       if (!state.messageVersions[last.id]) {
@@ -1286,6 +1339,7 @@ async function sendMessage() {
     messageInput.disabled = false;
     state.abortController = null;
     updateSendButton();
+    hideStatus();
   }
 }
 
@@ -1299,6 +1353,7 @@ function stopGeneration() {
     sendBtn.disabled = false;
     messageInput.disabled = false;
     updateSendButton();
+    hideStatus();
   }
 }
 
