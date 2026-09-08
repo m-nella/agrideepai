@@ -319,8 +319,55 @@ app.post('/api/chat/guest', async (req, res) => {
       return res.status(400).json({ error: 'Messages required' });
     }
 
-    const chatModel = getModel();
+    // Detect creator questions
     const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+    if (lastUserMsg) {
+      const question = lastUserMsg.content.toLowerCase();
+      if (
+        question.includes('who made you') ||
+        question.includes('who built you') ||
+        question.includes('who created you') ||
+        question.includes('who is your creator') ||
+        question.includes('who is your developer') ||
+        question.includes('who is behind') ||
+        question.includes('who founded') ||
+        question.includes('who develops') ||
+        question.includes('who is the creator of') ||
+        question.includes('who is the developer of') ||
+        question.includes('who made this') ||
+        question.includes('who built this') ||
+        question.includes('who created this')
+      ) {
+        // Return hardcoded creator response
+        const creatorResponse = `
+AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+
+If you have any other questions about agriculture, livestock, or related topics, feel free to ask!
+        `.trim();
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+
+        // Simulate streaming of the response
+        const words = creatorResponse.split(' ');
+        for (let i = 0; i < words.length; i++) {
+          const chunk = (i === 0 ? words[i] : ' ' + words[i]);
+          res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+          // Small delay to simulate streaming (optional)
+          await new Promise(r => setTimeout(r, 20));
+        }
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        log('Guest chat completed (creator question)', 'info');
+        return;
+      }
+    }
+
+    // Normal flow
+    const chatModel = getModel();
     let searchResults = null;
     if (TAVILY_API_KEY && lastUserMsg) {
       searchResults = await tavilySearch(lastUserMsg.content);
@@ -462,6 +509,78 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
+    // Detect creator question
+    if (message) {
+      const question = message.toLowerCase();
+      if (
+        question.includes('who made you') ||
+        question.includes('who built you') ||
+        question.includes('who created you') ||
+        question.includes('who is your creator') ||
+        question.includes('who is your developer') ||
+        question.includes('who is behind') ||
+        question.includes('who founded') ||
+        question.includes('who develops') ||
+        question.includes('who is the creator of') ||
+        question.includes('who is the developer of') ||
+        question.includes('who made this') ||
+        question.includes('who built this') ||
+        question.includes('who created this')
+      ) {
+        // Save user message
+        const userMsgData = {
+          conversation_id: conversationId,
+          role: 'user',
+          content: message || '',
+        };
+        if (file) {
+          // handle file metadata (optional, but we can skip for creator question)
+        }
+        await supabase.from('messages').insert(userMsgData);
+
+        // Return hardcoded creator response
+        const creatorResponse = `
+AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+
+If you have any other questions about agriculture, livestock, or related topics, feel free to ask!
+        `.trim();
+
+        // Save assistant message
+        await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: creatorResponse,
+            versions: [creatorResponse],
+            current_version_index: 0,
+          });
+        await supabase
+          .from('conversations')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', conversationId);
+
+        // Stream the response
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+
+        const words = creatorResponse.split(' ');
+        for (let i = 0; i < words.length; i++) {
+          const chunk = (i === 0 ? words[i] : ' ' + words[i]);
+          res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+          await new Promise(r => setTimeout(r, 20));
+        }
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        log('Authenticated chat completed (creator question)', 'info');
+        return;
+      }
+    }
+
+    // Normal flow (same as guest but with file handling)
     // Save user message
     let fileMetadata = null;
     if (file) {
