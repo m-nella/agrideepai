@@ -20,6 +20,9 @@ const log = (msg, type = 'info') => {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// ---------- Trust proxy (fixes rate limiter warning) ----------
+app.set('trust proxy', 1);
+
 // ---------- Middleware ----------
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json({ limit: '10mb' }));
@@ -29,7 +32,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: 'Too many requests, please try again later.'
+  message: 'Too many requests, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
@@ -40,14 +45,15 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 // ---------- Resend ----------
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ---------- Gemini with LOGGING and robust fallback ----------
+// ---------- Gemini with CURRENT models ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Use the most stable free model: gemini-1.5-flash (available to all)
+// Use CURRENT models (Gemini 1.5 is RETIRED as of Sept 2025)
+// https://ai.google.dev/gemini-api/docs/models
 const MODEL_CANDIDATES = [
-  'gemini-1.5-flash',
-  'gemini-pro',
-  'gemini-1.0-pro'
+  'gemini-2.0-flash',      // Current, fast, free tier
+  'gemini-2.0-flash-lite', // Lightweight current model
+  'gemini-1.5-pro',        // May still work for some accounts
 ];
 
 let activeModel = null;
@@ -67,7 +73,7 @@ function getModel() {
       log(`⚠️ Model ${name} initialization failed: ${e.message}`, 'warn');
     }
   }
-  // Last resort
+  // Last resort: try the first one (will throw a clear error)
   activeModel = genAI.getGenerativeModel({ model: MODEL_CANDIDATES[0] });
   log(`❗ Forced model: ${MODEL_CANDIDATES[0]} (may fail)`, 'error');
   return activeModel;
