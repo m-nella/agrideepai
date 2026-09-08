@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Fixed Send/Stop, Pin/Unpin)
+// AGRIDEEPAI – Full Frontend (All Fixes)
 // ============================================================
 
 // --- Logging ---
@@ -365,15 +365,16 @@ function renderMessages() {
     const row = document.createElement('div');
     row.className = `message-row ${msg.role}`;
 
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `message ${msg.role}`;
-
+    // Assistant header (outside bubble) – only for assistant messages
     if (msg.role === 'assistant') {
       const header = document.createElement('div');
-      header.className = 'assistant-header';
-      header.innerHTML = '<img src="/logo.png" alt="agrideepai" /> agrideepai';
-      msgDiv.appendChild(header);
+      header.className = 'assistant-header-row';
+      header.innerHTML = '<img src="/logo.png" alt="agrideepai" class="assistant-avatar" /> <span class="assistant-name">agrideepai</span>';
+      row.appendChild(header);
     }
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${msg.role}`;
 
     // Editing state for user messages
     if (state.editingMessageId === msg.id && msg.role === 'user') {
@@ -436,7 +437,11 @@ function renderMessages() {
         } else if (msg.content) {
           const contentDiv = document.createElement('div');
           contentDiv.className = 'message-content';
-          contentDiv.innerHTML = marked.parse(msg.content || '');
+          // Remove horizontal rules (<hr>) from rendered HTML
+          let html = marked.parse(msg.content || '');
+          // Strip <hr> tags (horizontal lines)
+          html = html.replace(/<hr\s*\/?>/g, '');
+          contentDiv.innerHTML = html;
           msgDiv.appendChild(contentDiv);
 
           if (msg.files && msg.files.length > 0) {
@@ -513,6 +518,7 @@ function renderMessages() {
           }
         }
       } else {
+        // User message content
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
         contentDiv.textContent = msg.content;
@@ -527,53 +533,77 @@ function renderMessages() {
         const actionsRow = document.createElement('div');
         actionsRow.className = 'message-actions-row';
 
+        // Copy
         const copyBtn = document.createElement('button');
         copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
         copyBtn.title = 'Copy';
         copyBtn.className = 'icon-button-sm';
-        copyBtn.addEventListener('click', () => copyMessage(msg));
+        copyBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          copyMessage(msg);
+        });
         actionsRow.appendChild(copyBtn);
 
         if (msg.role === 'user') {
+          // Edit
           const editBtn = document.createElement('button');
           editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
           editBtn.title = 'Edit';
           editBtn.className = 'icon-button-sm';
-          editBtn.addEventListener('click', () => startEditing(msg));
+          editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startEditing(msg);
+          });
           actionsRow.appendChild(editBtn);
         }
 
         if (msg.role === 'assistant') {
+          // Like
           const likeBtn = document.createElement('button');
           const isLiked = state.likedMessages.has(msg.id);
           likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
           likeBtn.title = isLiked ? 'Liked' : 'Like';
           if (isLiked) likeBtn.classList.add('liked');
           likeBtn.className = 'icon-button-sm';
-          likeBtn.addEventListener('click', () => toggleLike(msg));
+          likeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleLike(msg);
+          });
           actionsRow.appendChild(likeBtn);
 
+          // Dislike
           const dislikeBtn = document.createElement('button');
           const isDisliked = state.dislikedMessages.has(msg.id);
           dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
           dislikeBtn.title = isDisliked ? 'Disliked' : 'Dislike';
           if (isDisliked) dislikeBtn.classList.add('disliked');
           dislikeBtn.className = 'icon-button-sm';
-          dislikeBtn.addEventListener('click', () => toggleDislike(msg));
+          dislikeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDislike(msg);
+          });
           actionsRow.appendChild(dislikeBtn);
 
+          // Regenerate
           const regenBtn = document.createElement('button');
           regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
           regenBtn.title = 'Regenerate';
           regenBtn.className = 'icon-button-sm';
-          regenBtn.addEventListener('click', () => regenerateMessage(index));
+          regenBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            regenerateMessage(index);
+          });
           actionsRow.appendChild(regenBtn);
 
+          // Share (works without sign-in)
           const shareBtn = document.createElement('button');
           shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
           shareBtn.title = 'Share';
           shareBtn.className = 'icon-button-sm';
-          shareBtn.addEventListener('click', () => shareChat(msg.id));
+          shareBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            shareMessageOrChat(msg);
+          });
           actionsRow.appendChild(shareBtn);
         }
 
@@ -690,9 +720,7 @@ async function sendEditedUserMessage() {
   renderMessages();
 
   state.isGenerating = true;
-  sendBtn.classList.add('generating');
-  sendBtn.disabled = false;
-  sendBtn.style.opacity = '1';
+  updateSendButton();
   state.abortController = new AbortController();
 
   try {
@@ -821,9 +849,7 @@ async function regenerateMessage(index) {
   renderMessages();
 
   state.isGenerating = true;
-  sendBtn.classList.add('generating');
-  sendBtn.disabled = false;
-  sendBtn.style.opacity = '1';
+  updateSendButton();
   state.abortController = new AbortController();
 
   try {
@@ -908,28 +934,44 @@ async function regenerateMessage(index) {
   }
 }
 
-// --- Share ---
-async function shareChat(messageId) {
+// --- Share (works without sign-in) ---
+async function shareMessageOrChat(msg) {
+  // If it's an assistant message, share that content.
+  // For user messages, we could share too, but we'll share the entire conversation for simplicity.
+  // We'll copy the conversation content to clipboard.
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     showToast('No chat to share', true);
     return;
   }
-  if (!state.currentUser) {
-    showToast('Please sign in to share chats', true);
-    return;
+
+  // Build a text version of the conversation
+  const conversationText = state.messages.map(m => {
+    const role = m.role === 'user' ? 'You' : 'AgriDeepAI';
+    return `${role}: ${m.content}`;
+  }).join('\n\n');
+
+  // Use native share if available
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'AgriDeepAI Chat',
+        text: conversationText,
+      });
+      return;
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        // Fallback to clipboard
+      }
+    }
   }
+
+  // Fallback: copy to clipboard
   try {
-    const res = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
-    const data = await res.json();
-    shareLinkDisplay.textContent = data.url;
-    shareModal.classList.remove('hidden');
-    copyShareLink.onclick = () => {
-      navigator.clipboard.writeText(data.url).then(() => showToast('Link copied!'));
-    };
-  } catch (err) {
-    log(`Share error: ${err.message}`, 'error');
-    showToast('Failed to generate share link: ' + err.message, true);
+    await navigator.clipboard.writeText(conversationText);
+    showToast('Chat copied to clipboard!');
+  } catch {
+    showToast('Unable to share', true);
   }
 }
 
@@ -1110,7 +1152,7 @@ function openChatMenu(e, chatId) {
       btn.onclick = () => {
         const chat = state.chats.find(c => c.id === chatId);
         if (chat) {
-          shareChat(chat.id);
+          shareMessageOrChat(null);
         }
         chatMenu.classList.add('hidden');
       };
@@ -1768,7 +1810,7 @@ chips.forEach((chip) => {
   });
 });
 
-// Share modal close
+// Share modal close (if used)
 document.getElementById('shareModalClose').addEventListener('click', () => {
   shareModal.classList.add('hidden');
 });
