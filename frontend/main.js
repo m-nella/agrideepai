@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (with all fixes)
+// AGRIDEEPAI – Full Frontend (with versioning & edit fixes)
 // ============================================================
 
 // --- Logging helper ---
@@ -42,7 +42,8 @@ let state = {
   currentUser: null,
   attachments: [],
   editingMessageId: null,
-  editingContent: '',
+  editingValue: '',
+  messageVersions: {}, // key: message.id, value: { versions: [], currentIndex: 0 }
   likedMessages: new Set(),
   dislikedMessages: new Set(),
   contextMenuTarget: null,
@@ -133,6 +134,20 @@ function loadLocalConversations() {
     const chat = state.chats.find(c => c.id === state.activeChatId);
     if (chat) {
       state.messages = chat.messages || [];
+      // Rebuild messageVersions
+      state.messageVersions = {};
+      state.messages.forEach(msg => {
+        if (msg.role === 'assistant' && msg.versions && msg.versions.length > 0) {
+          state.messageVersions[msg.id] = {
+            versions: msg.versions,
+            currentIndex: msg.currentVersionIndex || 0
+          };
+          // Ensure displayed content matches current version
+          if (msg.versions.length > 0) {
+            msg.content = msg.versions[msg.currentVersionIndex || 0] || '';
+          }
+        }
+      });
       renderMessages();
     }
   } else {
@@ -142,6 +157,17 @@ function loadLocalConversations() {
 }
 
 function saveLocalConversations() {
+  // Save versions back into messages before storing
+  state.messages.forEach(msg => {
+    if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
+      const vData = state.messageVersions[msg.id];
+      msg.versions = vData.versions;
+      msg.currentVersionIndex = vData.currentIndex;
+      if (vData.versions.length > 0) {
+        msg.content = vData.versions[vData.currentIndex] || '';
+      }
+    }
+  });
   const validChats = state.chats.filter(c => c.messages && c.messages.length > 0);
   state.chats = validChats;
   localStorage.setItem('agrideepai_local_chats', JSON.stringify(validChats));
@@ -183,6 +209,19 @@ async function loadCloudMessages(chatId) {
   try {
     const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
     state.messages = await res.json();
+    // Rebuild messageVersions
+    state.messageVersions = {};
+    state.messages.forEach(msg => {
+      if (msg.role === 'assistant' && msg.versions && msg.versions.length > 0) {
+        state.messageVersions[msg.id] = {
+          versions: msg.versions,
+          currentIndex: msg.currentVersionIndex || 0
+        };
+        if (msg.versions.length > 0) {
+          msg.content = msg.versions[msg.currentVersionIndex || 0] || '';
+        }
+      }
+    });
     renderMessages();
     renderChatList();
   } catch (err) {
@@ -249,6 +288,7 @@ function renderMessages() {
   state.messages.forEach((msg, index) => {
     const row = document.createElement('div');
     row.className = `message-row ${msg.role}`;
+    // Container for message content (bubble)
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
@@ -264,15 +304,12 @@ function renderMessages() {
       const editArea = document.createElement('div');
       editArea.style.cssText = 'width:100%;';
       const textarea = document.createElement('textarea');
-      textarea.value = state.editingContent;
+      textarea.value = state.editingValue;
       textarea.style.cssText =
         'width:100%;padding:0.4rem;border-radius:var(--radius-sm);background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:0.95rem;';
       const btnGroup = document.createElement('div');
       btnGroup.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.3rem;';
-      const saveBtn = document.createElement('button');
-      saveBtn.textContent = 'Save';
-      saveBtn.className = 'btn-primary';
-      saveBtn.style.cssText = 'padding:0.2rem 0.8rem;width:auto;';
+      // Cancel button
       const cancelBtn = document.createElement('button');
       cancelBtn.textContent = 'Cancel';
       cancelBtn.style.cssText =
@@ -281,94 +318,154 @@ function renderMessages() {
         state.editingMessageId = null;
         renderMessages();
       });
-      saveBtn.addEventListener('click', async () => {
+      // Send button (instead of Save)
+      const sendEditBtn = document.createElement('button');
+      sendEditBtn.textContent = 'Send';
+      sendEditBtn.className = 'btn-primary';
+      sendEditBtn.style.cssText = 'padding:0.2rem 0.8rem;width:auto;';
+      sendEditBtn.addEventListener('click', async () => {
         const newContent = textarea.value.trim();
         if (!newContent) return;
-        await saveEditedMessage(msg.id, newContent);
-      });
-      textarea.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          saveBtn.click();
+        // Update user message content
+        msg.content = newContent;
+        // Remove any assistant messages after this one
+        const idx = state.messages.indexOf(msg);
+        state.messages = state.messages.slice(0, idx + 1);
+        // Clear editing state
+        state.editingMessageId = null;
+        // Update chat and save
+        const chat = state.chats.find(c => c.id === state.activeChatId);
+        if (chat) {
+          chat.messages = state.messages;
+          if (!state.currentUser) saveLocalConversations();
         }
-        if (e.key === 'Escape') {
-          cancelBtn.click();
-        }
+        renderMessages();
+        // Now trigger a new AI response (send a new message with the edited content)
+        // We'll call a helper function that uses the current conversation history.
+        await sendEditedUserMessage();
       });
-      btnGroup.appendChild(saveBtn);
       btnGroup.appendChild(cancelBtn);
+      btnGroup.appendChild(sendEditBtn);
       editArea.appendChild(textarea);
       editArea.appendChild(btnGroup);
       msgDiv.appendChild(editArea);
       setTimeout(() => textarea.focus(), 50);
     } else {
+      // Display content (for assistant, this is the current version)
       const contentSpan = document.createElement('span');
       contentSpan.textContent = msg.content;
       msgDiv.appendChild(contentSpan);
-    }
 
-    // Sources / files
-    if (msg.files && msg.files.length > 0) {
-      const fileDiv = document.createElement('div');
-      fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
-      msg.files.forEach(f => {
-        if (f.sources) {
-          const sourcesDiv = document.createElement('div');
-          sourcesDiv.className = 'sources';
-          sourcesDiv.innerHTML =
-            '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
-            f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`).join('') +
-            '</ul>';
-          msgDiv.appendChild(sourcesDiv);
-        } else if (f.public_url) {
-          const link = document.createElement('a');
-          link.href = f.public_url;
-          link.target = '_blank';
-          link.textContent = '📎 ' + (f.filename || 'File');
-          fileDiv.appendChild(link);
-          fileDiv.appendChild(document.createTextNode(' '));
+      // Version controls for assistant messages
+      if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
+        const vData = state.messageVersions[msg.id];
+        if (vData.versions.length > 1) {
+          const versionControls = document.createElement('div');
+          versionControls.style.cssText = 'display:flex;align-items:center;gap:0.5rem;margin-top:0.3rem;font-size:0.8rem;color:var(--text-muted);';
+          const prevBtn = document.createElement('button');
+          prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
+          prevBtn.title = 'Previous version';
+          prevBtn.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-muted);padding:0.1rem;';
+          prevBtn.addEventListener('click', () => {
+            if (vData.currentIndex > 0) {
+              vData.currentIndex--;
+              msg.content = vData.versions[vData.currentIndex];
+              const chat = state.chats.find(c => c.id === state.activeChatId);
+              if (chat) {
+                chat.messages = state.messages;
+                if (!state.currentUser) saveLocalConversations();
+              }
+              renderMessages();
+            }
+          });
+          versionControls.appendChild(prevBtn);
+
+          const versionLabel = document.createElement('span');
+          versionLabel.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
+          versionControls.appendChild(versionLabel);
+
+          const nextBtn = document.createElement('button');
+          nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
+          nextBtn.title = 'Next version';
+          nextBtn.style.cssText = 'background:none;border:none;cursor:pointer;color:var(--text-muted);padding:0.1rem;';
+          nextBtn.addEventListener('click', () => {
+            if (vData.currentIndex < vData.versions.length - 1) {
+              vData.currentIndex++;
+              msg.content = vData.versions[vData.currentIndex];
+              const chat = state.chats.find(c => c.id === state.activeChatId);
+              if (chat) {
+                chat.messages = state.messages;
+                if (!state.currentUser) saveLocalConversations();
+              }
+              renderMessages();
+            }
+          });
+          versionControls.appendChild(nextBtn);
+          msgDiv.appendChild(versionControls);
+          window.refreshIcons();
         }
-      });
-      if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
-    }
+      }
 
-    // Actions (only if not editing)
+      // Sources / files
+      if (msg.files && msg.files.length > 0) {
+        const fileDiv = document.createElement('div');
+        fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
+        msg.files.forEach(f => {
+          if (f.sources) {
+            const sourcesDiv = document.createElement('div');
+            sourcesDiv.className = 'sources';
+            sourcesDiv.innerHTML =
+              '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
+              f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`).join('') +
+              '</ul>';
+            msgDiv.appendChild(sourcesDiv);
+          } else if (f.public_url) {
+            const link = document.createElement('a');
+            link.href = f.public_url;
+            link.target = '_blank';
+            link.textContent = '📎 ' + (f.filename || 'File');
+            fileDiv.appendChild(link);
+            fileDiv.appendChild(document.createTextNode(' '));
+          }
+        });
+        if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
+      }
+    } // end not editing
+
+    // Actions row – placed OUTSIDE the bubble, below it
     if (state.editingMessageId !== msg.id) {
-      const actionsDiv = document.createElement('div');
-      actionsDiv.className = 'message-actions';
+      const actionsRow = document.createElement('div');
+      actionsRow.className = 'message-actions-row';
+      actionsRow.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.2rem;flex-wrap:wrap;';
+
+      // Copy action (common)
+      const copyBtn = document.createElement('button');
+      copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
+      copyBtn.title = 'Copy';
+      copyBtn.className = 'icon-button-sm';
+      copyBtn.addEventListener('click', () => copyMessage(msg));
+      actionsRow.appendChild(copyBtn);
 
       if (msg.role === 'user') {
-        // Copy
-        const copyBtn = document.createElement('button');
-        copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
-        copyBtn.title = 'Copy';
-        copyBtn.addEventListener('click', () => copyMessage(msg));
-        actionsDiv.appendChild(copyBtn);
-
         // Edit
         const editBtn = document.createElement('button');
         editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
         editBtn.title = 'Edit';
+        editBtn.className = 'icon-button-sm';
         editBtn.addEventListener('click', () => startEditing(msg));
-        actionsDiv.appendChild(editBtn);
+        actionsRow.appendChild(editBtn);
       }
 
       if (msg.role === 'assistant') {
-        // Copy
-        const copyBtn = document.createElement('button');
-        copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
-        copyBtn.title = 'Copy';
-        copyBtn.addEventListener('click', () => copyMessage(msg));
-        actionsDiv.appendChild(copyBtn);
-
         // Like
         const likeBtn = document.createElement('button');
         const isLiked = state.likedMessages.has(msg.id);
         likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
         likeBtn.title = isLiked ? 'Liked' : 'Like';
         if (isLiked) likeBtn.classList.add('liked');
+        likeBtn.className = 'icon-button-sm';
         likeBtn.addEventListener('click', () => toggleLike(msg));
-        actionsDiv.appendChild(likeBtn);
+        actionsRow.appendChild(likeBtn);
 
         // Dislike
         const dislikeBtn = document.createElement('button');
@@ -376,29 +473,36 @@ function renderMessages() {
         dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
         dislikeBtn.title = isDisliked ? 'Disliked' : 'Dislike';
         if (isDisliked) dislikeBtn.classList.add('disliked');
+        dislikeBtn.className = 'icon-button-sm';
         dislikeBtn.addEventListener('click', () => toggleDislike(msg));
-        actionsDiv.appendChild(dislikeBtn);
+        actionsRow.appendChild(dislikeBtn);
 
-        // Regenerate
+        // Regenerate – adds a new version
         const regenBtn = document.createElement('button');
         regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
         regenBtn.title = 'Regenerate';
+        regenBtn.className = 'icon-button-sm';
         regenBtn.addEventListener('click', () => regenerateMessage(index));
-        actionsDiv.appendChild(regenBtn);
+        actionsRow.appendChild(regenBtn);
 
-        // Share (assistant message can be shared)
+        // Share
         const shareBtn = document.createElement('button');
         shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
         shareBtn.title = 'Share';
+        shareBtn.className = 'icon-button-sm';
         shareBtn.addEventListener('click', () => shareChat(msg.id));
-        actionsDiv.appendChild(shareBtn);
+        actionsRow.appendChild(shareBtn);
       }
 
-      msgDiv.appendChild(actionsDiv);
+      // Append actions row after the message bubble (outside)
+      row.appendChild(msgDiv);
+      row.appendChild(actionsRow);
+      messageList.appendChild(row);
+    } else {
+      // If editing, just append the msgDiv (buttons are inside)
+      row.appendChild(msgDiv);
+      messageList.appendChild(row);
     }
-
-    row.appendChild(msgDiv);
-    messageList.appendChild(row);
   });
   window.refreshIcons();
   const container = document.getElementById('chatContainer');
@@ -478,146 +582,58 @@ function toggleDislike(msg) {
   renderMessages();
 }
 
-// --- Edit message ---
+// --- Edit message - start editing ---
 function startEditing(msg) {
   if (msg.role !== 'user') return;
   state.editingMessageId = msg.id;
-  state.editingContent = msg.content;
+  state.editingValue = msg.content;
   renderMessages();
 }
 
-async function saveEditedMessage(messageId, newContent) {
-  if (!newContent.trim()) return;
-  log(`Saving edited message ${messageId}`, 'debug');
-  try {
-    if (state.currentUser) {
-      await apiFetch(`/api/chat/messages/${messageId}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content: newContent, truncate: true }),
-      });
-    }
-    const msg = state.messages.find(m => m.id === messageId);
-    if (msg) msg.content = newContent;
-    const idx = state.messages.findIndex(m => m.id === messageId);
-    if (idx !== -1) {
-      state.messages = state.messages.slice(0, idx + 1);
-    }
-    state.editingMessageId = null;
-    const chat = state.chats.find(c => c.id === state.activeChatId);
-    if (chat) {
-      chat.messages = state.messages;
-      if (!state.currentUser) saveLocalConversations();
-    }
-    renderMessages();
-    showToast('Message updated. Send a new message to continue.');
-  } catch (err) {
-    log(`Edit error: ${err.message}`, 'error');
-    showToast('Failed to edit: ' + err.message, true);
-  }
-}
-
-// --- Regenerate ---
-async function regenerateMessage(index) {
-  const msg = state.messages[index];
-  if (!msg || msg.role !== 'assistant') return;
+// --- Send after editing ---
+async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) return;
-  log(`Regenerating message at index ${index}`, 'debug');
 
-  if (!state.currentUser) {
-    state.messages = state.messages.slice(0, index);
-    const lastUser = state.messages[state.messages.length - 1];
-    if (lastUser && lastUser.role === 'user') {
-      chat.messages = state.messages;
-      if (!state.currentUser) saveLocalConversations();
-      renderMessages();
-      await sendGuestMessage(lastUser.content, chat);
-    }
-    return;
-  }
-
-  try {
-    const res = await apiFetch(`/api/chat/conversations/${chat.id}/regenerate`, {
-      method: 'POST',
-      body: JSON.stringify({ messageIndex: index }),
-    });
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    state.messages = state.messages.slice(0, index);
-    const newAssistant = {
-      id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-      role: 'assistant',
-      content: '',
-      files: [],
-      created_at: new Date().toISOString(),
-    };
-    state.messages.push(newAssistant);
-    renderMessages();
-    let full = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.text) {
-              full += parsed.text;
-              const last = state.messages[state.messages.length - 1];
-              if (last && last.role === 'assistant') {
-                last.content = full;
-                renderMessages();
-              }
-            }
-          } catch (e) {}
-        }
-      }
-    }
-    await loadCloudMessages(chat.id);
-    await loadCloudConversations();
-  } catch (err) {
-    log(`Regenerate error: ${err.message}`, 'error');
-    showToast('Regenerate failed: ' + err.message, true);
-  }
-}
-
-// --- Guest send helper (for regeneration) ---
-async function sendGuestMessage(text, chat) {
-  const payload = {
-    messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
+  // Create assistant placeholder
+  const assistantMsg = {
+    id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+    role: 'assistant',
+    content: '',
+    files: [],
+    created_at: new Date().toISOString(),
   };
+  state.messages.push(assistantMsg);
+  chat.messages = state.messages;
+  if (!state.currentUser) saveLocalConversations();
+  renderMessages();
 
   state.isGenerating = true;
   sendBtn.classList.add('generating');
   sendBtn.disabled = false;
+  sendBtn.style.opacity = '1';
   state.abortController = new AbortController();
 
   try {
-    const response = await fetch('/api/chat/guest', {
+    let response;
+    const payload = {
+      messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
+    };
+    response = await fetch('/api/chat/guest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: state.abortController.signal,
     });
-    if (!response.ok) throw new Error('AI request failed');
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'AI request failed');
+    }
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
-    const newAssistant = {
-      id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-      role: 'assistant',
-      content: '',
-      files: [],
-      created_at: new Date().toISOString(),
-    };
-    state.messages.push(newAssistant);
-    chat.messages = state.messages;
-    if (!state.currentUser) saveLocalConversations();
-    renderMessages();
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -634,6 +650,17 @@ async function sendGuestMessage(text, chat) {
               const last = state.messages[state.messages.length - 1];
               if (last && last.role === 'assistant') {
                 last.content = full;
+                chat.messages = state.messages;
+                if (!state.currentUser) saveLocalConversations();
+                renderMessages();
+              }
+            } else if (parsed.sources) {
+              const last = state.messages[state.messages.length - 1];
+              if (last && last.role === 'assistant') {
+                if (!last.files) last.files = [];
+                last.files.push({ sources: parsed.sources });
+                chat.messages = state.messages;
+                if (!state.currentUser) saveLocalConversations();
                 renderMessages();
               }
             }
@@ -641,13 +668,32 @@ async function sendGuestMessage(text, chat) {
         }
       }
     }
-    chat.messages = state.messages;
-    if (!state.currentUser) saveLocalConversations();
-    renderMessages();
-    renderChatList();
+
+    // Finalize versioning
+    const last = state.messages[state.messages.length - 1];
+    if (last && last.role === 'assistant') {
+      if (!state.messageVersions[last.id]) {
+        state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
+      }
+      const vData = state.messageVersions[last.id];
+      // Avoid duplicate
+      if (vData.versions.length === 0 || vData.versions[vData.versions.length - 1] !== last.content) {
+        vData.versions.push(last.content);
+        vData.currentIndex = vData.versions.length - 1;
+      }
+      chat.messages = state.messages;
+      if (!state.currentUser) saveLocalConversations();
+      renderMessages();
+    }
+
+    if (state.currentUser) {
+      await loadCloudMessages(chat.id);
+      await loadCloudConversations();
+    }
+
   } catch (err) {
     if (err.name !== 'AbortError') {
-      log(`Guest send error: ${err.message}`, 'error');
+      log(`Send edited error: ${err.message}`, 'error');
       showToast('Error: ' + err.message, true);
       const last = state.messages[state.messages.length - 1];
       if (last && last.role === 'assistant' && last.content === '') {
@@ -666,7 +712,120 @@ async function sendGuestMessage(text, chat) {
   }
 }
 
-// --- Share chat (generate public link) ---
+// --- Regenerate (adds a new version) ---
+async function regenerateMessage(index) {
+  const msg = state.messages[index];
+  if (!msg || msg.role !== 'assistant') return;
+  const chat = state.chats.find(c => c.id === state.activeChatId);
+  if (!chat) return;
+  log(`Regenerating message at index ${index}`, 'debug');
+
+  const contextMessages = state.messages.slice(0, index);
+  if (contextMessages.length === 0 || contextMessages[contextMessages.length - 1].role !== 'user') {
+    showToast('Cannot regenerate: no user message before this response', true);
+    return;
+  }
+
+  if (!state.messageVersions[msg.id]) {
+    state.messageVersions[msg.id] = { versions: [], currentIndex: 0 };
+  }
+  const vData = state.messageVersions[msg.id];
+  vData.versions.push('');
+  vData.currentIndex = vData.versions.length - 1;
+  msg.content = '';
+  chat.messages = state.messages;
+  if (!state.currentUser) saveLocalConversations();
+  renderMessages();
+
+  state.isGenerating = true;
+  sendBtn.classList.add('generating');
+  sendBtn.disabled = false;
+  sendBtn.style.opacity = '1';
+  state.abortController = new AbortController();
+
+  try {
+    const payload = {
+      messages: contextMessages.map(m => ({ role: m.role, content: m.content })),
+    };
+    const response = await fetch('/api/chat/guest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: state.abortController.signal,
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'AI request failed');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') break;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.text) {
+              full += parsed.text;
+              vData.versions[vData.versions.length - 1] = full;
+              msg.content = full;
+              chat.messages = state.messages;
+              if (!state.currentUser) saveLocalConversations();
+              renderMessages();
+            }
+          } catch (e) {}
+        }
+      }
+    }
+
+    if (vData.versions.length > 0) {
+      vData.versions[vData.versions.length - 1] = full;
+      msg.content = full;
+      chat.messages = state.messages;
+      if (!state.currentUser) saveLocalConversations();
+      renderMessages();
+    }
+
+    if (state.currentUser) {
+      await loadCloudMessages(chat.id);
+      await loadCloudConversations();
+    }
+
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      log(`Regenerate error: ${err.message}`, 'error');
+      showToast('Regenerate failed: ' + err.message, true);
+      if (vData.versions.length > 0 && vData.versions[vData.versions.length - 1] === '') {
+        vData.versions.pop();
+        if (vData.versions.length > 0) {
+          vData.currentIndex = vData.versions.length - 1;
+          msg.content = vData.versions[vData.currentIndex];
+        } else {
+          msg.content = '';
+        }
+        chat.messages = state.messages;
+        if (!state.currentUser) saveLocalConversations();
+        renderMessages();
+      }
+    }
+  } finally {
+    state.isGenerating = false;
+    sendBtn.classList.remove('generating');
+    sendBtn.disabled = false;
+    state.abortController = null;
+    updateSendButton();
+  }
+}
+
+// --- Share chat ---
 async function shareChat(messageId) {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
@@ -833,7 +992,7 @@ async function togglePin(id) {
   chatMenu.classList.add('hidden');
 }
 
-// --- Context menu for chat items ---
+// --- Context menu ---
 function openChatMenu(e, chatId) {
   e.preventDefault();
   state.contextMenuTarget = chatId;
@@ -878,12 +1037,13 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// --- New Chat (no empty chat) ---
+// --- New Chat ---
 function handleNewChat() {
   log('New Chat clicked – clearing view without creating chat', 'info');
   state.activeChatId = null;
   state.messages = [];
   state.editingMessageId = null;
+  state.messageVersions = {};
   renderMessages();
   renderChatList();
   messageInput.focus();
@@ -899,7 +1059,6 @@ function resizeComposer() {
   messageInput.style.overflowY = sh > maxHeight ? 'auto' : 'hidden';
 }
 
-// --- Send button visibility ---
 function updateSendButton() {
   const hasContent = messageInput.value.trim().length > 0 || state.attachments.length > 0;
   if (!state.isGenerating) {
@@ -936,7 +1095,7 @@ function renderAttachments() {
   window.refreshIcons();
 }
 
-// --- Send message (chat created on first message) ---
+// --- Send message (main) ---
 async function sendMessage() {
   const text = messageInput.value.trim();
   const hasText = text.length > 0;
@@ -959,7 +1118,7 @@ async function sendMessage() {
     state.chats.unshift(newChat);
     state.activeChatId = newChat.id;
     if (!state.currentUser) saveLocalConversations();
-    renderChatList();   // <-- critical: update sidebar
+    renderChatList();
     chat = newChat;
   }
 
@@ -1073,6 +1232,22 @@ async function sendMessage() {
       }
     }
 
+    // Finalize versioning for the new assistant message
+    const last = state.messages[state.messages.length - 1];
+    if (last && last.role === 'assistant') {
+      if (!state.messageVersions[last.id]) {
+        state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
+      }
+      const vData = state.messageVersions[last.id];
+      if (vData.versions.length === 0 || vData.versions[vData.versions.length - 1] !== last.content) {
+        vData.versions.push(last.content);
+        vData.currentIndex = vData.versions.length - 1;
+      }
+      chat.messages = state.messages;
+      if (!state.currentUser) saveLocalConversations();
+      renderMessages();
+    }
+
     if (state.currentUser) {
       await loadCloudMessages(chat.id);
       await loadCloudConversations();
@@ -1139,8 +1314,6 @@ modalClose.forEach(btn => btn.addEventListener('click', closeAuthModal));
 authModal.addEventListener('click', (e) => {
   if (e.target === authModal) closeAuthModal();
 });
-
-// ======================== UPDATED AUTH FORM ========================
 
 function renderAuthForm(mode) {
   const isLogin = mode === 'login';
@@ -1438,7 +1611,6 @@ openSidebarBtn.addEventListener('click', () => {
   sidebar.classList.toggle('mobile-open');
 });
 
-// Close sidebar on backdrop click (mobile)
 document.addEventListener('click', (e) => {
   if (window.innerWidth < 768) {
     const isOpen = sidebar.classList.contains('mobile-open');
