@@ -46,16 +46,15 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (using models confirmed available from API key) ----------
+// ---------- Gemini ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Models confirmed available from curl output (ordered by stability)
 const MODEL_CANDIDATES = [
-  'gemini-3.6-flash',      // Latest, recommended
-  'gemini-3.5-flash',      // Stable fallback
-  'gemini-3.7-flash',      // Newest (may work)
-  'gemini-2.5-flash',      // Older but should work
-  'gemini-2.5-pro',        // More capable
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.7-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
 ];
 
 let activeModel = null;
@@ -66,7 +65,6 @@ function getModel() {
     log(`Using cached model: ${activeModelName}`, 'debug');
     return activeModel;
   }
-
   for (const name of MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: name });
@@ -78,8 +76,6 @@ function getModel() {
       log(`⚠️ Model ${name} failed: ${e.message}`, 'warn');
     }
   }
-
-  // Last resort
   throw new Error('No Gemini models available. Please check your API key.');
 }
 
@@ -89,13 +85,60 @@ const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 // ---------- Logo URL ----------
 const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// ---------- System Prompt (with Creator Identity) ----------
+// ---------- Enhanced System Prompt with Formatting Instructions ----------
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. Provide practical, accurate, actionable advice, with focus on Rwanda and African agriculture.
 
-Be warm, professional, and conversational. For crop/livestock disease questions, ask for details (symptoms, age, weather, etc.) before giving advice. Always include disclaimers for health, safety, or chemical use. When you use web search, clearly indicate sources.
+**BEHAVIOR:**
+- Be warm, professional, and conversational.
+- For crop/livestock disease questions, ask for details (symptoms, age, weather, etc.) before giving advice.
+- Always include disclaimers for health, safety, or chemical use.
+- When you use web search, clearly indicate sources.
 
-CREATOR: AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+**RESPONSE FORMATTING (MANDATORY):**
+To ensure your answers are professional and readable, you **MUST** use Markdown formatting. Structure your responses as follows:
+
+1. **Start with a clear heading** – use \`#\` for the main title if the answer is long, or \`##\` for subheadings.
+2. **Use bullet points** (\`-\` or \`*\`) for lists.
+3. **Use numbered lists** (\`1.`, \`2.`, etc.) for steps or sequential items.
+4. **Use tables** (Markdown table syntax) to compare or present structured data.
+5. **Use bold** (\`**bold**\`) for emphasis and *italic* (\`*italic*\`) for less emphasis.
+6. **Separate sections** with blank lines.
+7. **Keep paragraphs short** – one idea per paragraph.
+
+**EXAMPLE STRUCTURE FOR A LONG ANSWER:**
+\`\`\`
+# Main Heading
+
+Short introduction paragraph.
+
+## Important Points
+
+- Point one with explanation.
+- Point two with explanation.
+- Point three with explanation.
+
+## Steps
+
+1. First step.
+2. Second step.
+3. Third step.
+
+## Recommendation
+
+Final clear advice.
+
+| Factor | Impact | Action |
+|--------|--------|--------|
+| Soil pH | Affects nutrient uptake | Test and adjust |
+| Water | Critical for growth | Irrigate properly |
+
+\`\`\`
+
+For short answers, a simple heading and a few bullet points are sufficient. Always use formatting to improve clarity.
+
+**CREATOR IDENTITY:**
+AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
 
 When users ask about your creator, respond truthfully with the above information. Do not invent extra details. Do not mention creator unnecessarily in normal conversation.
 `;
@@ -319,28 +362,31 @@ app.post('/api/chat/guest', async (req, res) => {
       return res.status(400).json({ error: 'Messages required' });
     }
 
-    // Detect creator questions
+    // Creator question detection
     const lastUserMsg = messages.filter(m => m.role === 'user').pop();
     if (lastUserMsg) {
       const question = lastUserMsg.content.toLowerCase();
-      if (
-        question.includes('who made you') ||
-        question.includes('who built you') ||
-        question.includes('who created you') ||
-        question.includes('who is your creator') ||
-        question.includes('who is your developer') ||
-        question.includes('who is behind') ||
-        question.includes('who founded') ||
-        question.includes('who develops') ||
-        question.includes('who is the creator of') ||
-        question.includes('who is the developer of') ||
-        question.includes('who made this') ||
-        question.includes('who built this') ||
-        question.includes('who created this')
-      ) {
-        // Return hardcoded creator response
+      const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
+      if (creatorKeywords.some(keyword => question.includes(keyword))) {
         const creatorResponse = `
-AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+# AgriDeepAI Creator
+
+AgriDeepAI was created and developed by **Ornella Mutuyimana**, a Rwandan female technology enthusiast and developer.
+
+## About the Creator
+
+- **Name:** Ornella Mutuyimana
+- **Country:** Rwanda
+- **Education:** A-Level secondary education (2025)
+- **Combination:** Mathematics, Computer Science and Economics (MCE)
+- **School:** Lycée Saint Marcel de Rukara, Kayonza District, Eastern Province, Rwanda
+- **Interests:** Artificial Intelligence, Software Development, Information Technology, Computer Science, and Modern Digital Technologies
+
+## Vision
+
+AgriDeepAI is part of Ornella's vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+
+---
 
 If you have any other questions about agriculture, livestock, or related topics, feel free to ask!
         `.trim();
@@ -350,12 +396,10 @@ If you have any other questions about agriculture, livestock, or related topics,
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
 
-        // Simulate streaming of the response
         const words = creatorResponse.split(' ');
         for (let i = 0; i < words.length; i++) {
           const chunk = (i === 0 ? words[i] : ' ' + words[i]);
           res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
-          // Small delay to simulate streaming (optional)
           await new Promise(r => setTimeout(r, 20));
         }
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
@@ -509,43 +553,37 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Detect creator question
+    // Creator question detection
     if (message) {
       const question = message.toLowerCase();
-      if (
-        question.includes('who made you') ||
-        question.includes('who built you') ||
-        question.includes('who created you') ||
-        question.includes('who is your creator') ||
-        question.includes('who is your developer') ||
-        question.includes('who is behind') ||
-        question.includes('who founded') ||
-        question.includes('who develops') ||
-        question.includes('who is the creator of') ||
-        question.includes('who is the developer of') ||
-        question.includes('who made this') ||
-        question.includes('who built this') ||
-        question.includes('who created this')
-      ) {
+      const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
+      if (creatorKeywords.some(keyword => question.includes(keyword))) {
         // Save user message
-        const userMsgData = {
-          conversation_id: conversationId,
-          role: 'user',
-          content: message || '',
-        };
-        if (file) {
-          // handle file metadata (optional, but we can skip for creator question)
-        }
-        await supabase.from('messages').insert(userMsgData);
+        await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message || '' });
 
-        // Return hardcoded creator response
         const creatorResponse = `
-AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+# AgriDeepAI Creator
+
+AgriDeepAI was created and developed by **Ornella Mutuyimana**, a Rwandan female technology enthusiast and developer.
+
+## About the Creator
+
+- **Name:** Ornella Mutuyimana
+- **Country:** Rwanda
+- **Education:** A-Level secondary education (2025)
+- **Combination:** Mathematics, Computer Science and Economics (MCE)
+- **School:** Lycée Saint Marcel de Rukara, Kayonza District, Eastern Province, Rwanda
+- **Interests:** Artificial Intelligence, Software Development, Information Technology, Computer Science, and Modern Digital Technologies
+
+## Vision
+
+AgriDeepAI is part of Ornella's vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+
+---
 
 If you have any other questions about agriculture, livestock, or related topics, feel free to ask!
         `.trim();
 
-        // Save assistant message
         await supabase
           .from('messages')
           .insert({
@@ -560,7 +598,6 @@ If you have any other questions about agriculture, livestock, or related topics,
           .update({ updated_at: new Date().toISOString() })
           .eq('id', conversationId);
 
-        // Stream the response
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
@@ -580,8 +617,7 @@ If you have any other questions about agriculture, livestock, or related topics,
       }
     }
 
-    // Normal flow (same as guest but with file handling)
-    // Save user message
+    // Normal flow
     let fileMetadata = null;
     if (file) {
       const fileExt = file.originalname.split('.').pop();
@@ -615,7 +651,6 @@ If you have any other questions about agriculture, livestock, or related topics,
     if (fileMetadata) messageData.files = [fileMetadata];
     await supabase.from('messages').insert(messageData);
 
-    // Fetch history
     const { data: history } = await supabase
       .from('messages')
       .select('*')
@@ -623,7 +658,6 @@ If you have any other questions about agriculture, livestock, or related topics,
       .order('created_at', { ascending: true });
     const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
 
-    // Search
     let searchResults = null;
     if (TAVILY_API_KEY) {
       searchResults = await tavilySearch(message || 'agriculture update');
@@ -675,7 +709,6 @@ If you have any other questions about agriculture, livestock, or related topics,
     res.write('data: [DONE]\n\n');
     res.end();
 
-    // Save assistant message with versioning support
     await supabase
       .from('messages')
       .insert({
@@ -683,7 +716,7 @@ If you have any other questions about agriculture, livestock, or related topics,
         role: 'assistant',
         content: fullResponse,
         files: sourcesData ? [{ sources: sourcesData }] : null,
-        versions: [fullResponse], // initial version
+        versions: [fullResponse],
         current_version_index: 0,
       });
     await supabase
