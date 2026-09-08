@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Fixed)
+// AGRIDEEPAI – Full Frontend (Fixed Thinking & Actions)
 // ============================================================
 
 // --- Logging ---
@@ -255,7 +255,7 @@ function renderChatList() {
   window.refreshIcons();
 }
 
-// --- Render messages ---
+// --- Render messages (with integrated thinking state) ---
 function renderMessages() {
   messageList.innerHTML = '';
   if (!state.messages.length) {
@@ -265,6 +265,8 @@ function renderMessages() {
   }
   welcomeScreen.style.display = 'none';
   messageList.style.display = 'flex';
+
+  const lastIndex = state.messages.length - 1;
 
   state.messages.forEach((msg, index) => {
     const row = document.createElement('div');
@@ -324,152 +326,182 @@ function renderMessages() {
       msgDiv.appendChild(editArea);
       setTimeout(() => textarea.focus(), 50);
     } else {
-      const contentDiv = document.createElement('div');
-      contentDiv.className = 'message-content';
+      // --- Assistant message with integrated thinking ---
       if (msg.role === 'assistant') {
-        contentDiv.innerHTML = marked.parse(msg.content || '');
-      } else {
-        contentDiv.textContent = msg.content;
-      }
-      msgDiv.appendChild(contentDiv);
+        // Determine if we should show thinking state
+        const isLastMessage = (index === lastIndex);
+        const isThinking = isLastMessage && state.isGenerating && msg.content === '';
 
-      // Sources
-      if (msg.files && msg.files.length > 0) {
-        const fileDiv = document.createElement('div');
-        fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
-        msg.files.forEach(f => {
-          if (f.sources) {
-            const sourcesDiv = document.createElement('div');
-            sourcesDiv.className = 'sources';
-            sourcesDiv.innerHTML =
-              '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
-              f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`).join('') +
-              '</ul>';
-            msgDiv.appendChild(sourcesDiv);
-          } else if (f.public_url) {
-            const link = document.createElement('a');
-            link.href = f.public_url;
-            link.target = '_blank';
-            link.textContent = '📎 ' + (f.filename || 'File');
-            fileDiv.appendChild(link);
-            fileDiv.appendChild(document.createTextNode(' '));
+        if (isThinking) {
+          // Show thinking placeholder with spinner
+          const thinkingDiv = document.createElement('div');
+          thinkingDiv.className = 'thinking-indicator';
+          thinkingDiv.style.cssText = 'display:flex;align-items:center;gap:0.5rem;color:var(--text-muted);padding:0.2rem 0;';
+          thinkingDiv.innerHTML = `
+            <div class="spinner" style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+            <span>Thinking...</span>
+          `;
+          msgDiv.appendChild(thinkingDiv);
+          // No content, no actions
+        } else if (msg.content) {
+          // Show content
+          const contentDiv = document.createElement('div');
+          contentDiv.className = 'message-content';
+          contentDiv.innerHTML = marked.parse(msg.content || '');
+          msgDiv.appendChild(contentDiv);
+
+          // Sources (if any)
+          if (msg.files && msg.files.length > 0) {
+            const fileDiv = document.createElement('div');
+            fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
+            msg.files.forEach(f => {
+              if (f.sources) {
+                const sourcesDiv = document.createElement('div');
+                sourcesDiv.className = 'sources';
+                sourcesDiv.innerHTML =
+                  '<strong>Sources:</strong><ul style="list-style:none;padding-left:0.5rem;margin:0.2rem 0;">' +
+                  f.sources.map(s => `<li style="margin:0.1rem 0;"><a href="${s.url}" target="_blank">${s.title || s.url}</a></li>`).join('') +
+                  '</ul>';
+                msgDiv.appendChild(sourcesDiv);
+              } else if (f.public_url) {
+                const link = document.createElement('a');
+                link.href = f.public_url;
+                link.target = '_blank';
+                link.textContent = '📎 ' + (f.filename || 'File');
+                fileDiv.appendChild(link);
+                fileDiv.appendChild(document.createTextNode(' '));
+              }
+            });
+            if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
           }
-        });
-        if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
-      }
 
-      // Version controls
-      if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
-        const vData = state.messageVersions[msg.id];
-        if (vData.versions.length > 1) {
-          const versionControls = document.createElement('div');
-          versionControls.className = 'version-controls';
-          const prevBtn = document.createElement('button');
-          prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
-          prevBtn.title = 'Previous version';
-          prevBtn.disabled = vData.currentIndex === 0;
-          prevBtn.addEventListener('click', () => {
-            if (vData.currentIndex > 0) {
-              vData.currentIndex--;
-              msg.content = vData.versions[vData.currentIndex];
-              const chat = state.chats.find(c => c.id === state.activeChatId);
-              if (chat) {
-                chat.messages = state.messages;
-                if (!state.currentUser) saveLocalConversations();
-              }
-              renderMessages();
+          // Version controls
+          if (state.messageVersions[msg.id]) {
+            const vData = state.messageVersions[msg.id];
+            if (vData.versions.length > 1) {
+              const versionControls = document.createElement('div');
+              versionControls.className = 'version-controls';
+              const prevBtn = document.createElement('button');
+              prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
+              prevBtn.title = 'Previous version';
+              prevBtn.disabled = vData.currentIndex === 0;
+              prevBtn.addEventListener('click', () => {
+                if (vData.currentIndex > 0) {
+                  vData.currentIndex--;
+                  msg.content = vData.versions[vData.currentIndex];
+                  const chat = state.chats.find(c => c.id === state.activeChatId);
+                  if (chat) {
+                    chat.messages = state.messages;
+                    if (!state.currentUser) saveLocalConversations();
+                  }
+                  renderMessages();
+                }
+              });
+              versionControls.appendChild(prevBtn);
+
+              const label = document.createElement('span');
+              label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
+              versionControls.appendChild(label);
+
+              const nextBtn = document.createElement('button');
+              nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
+              nextBtn.title = 'Next version';
+              nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
+              nextBtn.addEventListener('click', () => {
+                if (vData.currentIndex < vData.versions.length - 1) {
+                  vData.currentIndex++;
+                  msg.content = vData.versions[vData.currentIndex];
+                  const chat = state.chats.find(c => c.id === state.activeChatId);
+                  if (chat) {
+                    chat.messages = state.messages;
+                    if (!state.currentUser) saveLocalConversations();
+                  }
+                  renderMessages();
+                }
+              });
+              versionControls.appendChild(nextBtn);
+              msgDiv.appendChild(versionControls);
+              window.refreshIcons();
             }
-          });
-          versionControls.appendChild(prevBtn);
-
-          const label = document.createElement('span');
-          label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
-          versionControls.appendChild(label);
-
-          const nextBtn = document.createElement('button');
-          nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
-          nextBtn.title = 'Next version';
-          nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
-          nextBtn.addEventListener('click', () => {
-            if (vData.currentIndex < vData.versions.length - 1) {
-              vData.currentIndex++;
-              msg.content = vData.versions[vData.currentIndex];
-              const chat = state.chats.find(c => c.id === state.activeChatId);
-              if (chat) {
-                chat.messages = state.messages;
-                if (!state.currentUser) saveLocalConversations();
-              }
-              renderMessages();
-            }
-          });
-          versionControls.appendChild(nextBtn);
-          msgDiv.appendChild(versionControls);
-          window.refreshIcons();
+          }
         }
-      }
-    }
-
-    // Action row (outside bubble)
-    if (state.editingMessageId !== msg.id) {
-      const actionsRow = document.createElement('div');
-      actionsRow.className = 'message-actions-row';
-
-      const copyBtn = document.createElement('button');
-      copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
-      copyBtn.title = 'Copy';
-      copyBtn.className = 'icon-button-sm';
-      copyBtn.addEventListener('click', () => copyMessage(msg));
-      actionsRow.appendChild(copyBtn);
-
-      if (msg.role === 'user') {
-        const editBtn = document.createElement('button');
-        editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
-        editBtn.title = 'Edit';
-        editBtn.className = 'icon-button-sm';
-        editBtn.addEventListener('click', () => startEditing(msg));
-        actionsRow.appendChild(editBtn);
+        // If content is empty and not thinking, show nothing (should not happen)
+      } else {
+        // User message content
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        contentDiv.textContent = msg.content;
+        msgDiv.appendChild(contentDiv);
       }
 
-      if (msg.role === 'assistant') {
-        const likeBtn = document.createElement('button');
-        const isLiked = state.likedMessages.has(msg.id);
-        likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
-        likeBtn.title = isLiked ? 'Liked' : 'Like';
-        if (isLiked) likeBtn.classList.add('liked');
-        likeBtn.className = 'icon-button-sm';
-        likeBtn.addEventListener('click', () => toggleLike(msg));
-        actionsRow.appendChild(likeBtn);
+      // --- Actions Row (only for completed assistant messages and user messages, not while thinking) ---
+      // For assistant: show actions only if content is non-empty and we are not thinking
+      // For user: always show actions (unless editing)
+      const showActions = (msg.role === 'user') ||
+                          (msg.role === 'assistant' && msg.content && !(state.isGenerating && index === lastIndex && msg.content === ''));
 
-        const dislikeBtn = document.createElement('button');
-        const isDisliked = state.dislikedMessages.has(msg.id);
-        dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
-        dislikeBtn.title = isDisliked ? 'Disliked' : 'Dislike';
-        if (isDisliked) dislikeBtn.classList.add('disliked');
-        dislikeBtn.className = 'icon-button-sm';
-        dislikeBtn.addEventListener('click', () => toggleDislike(msg));
-        actionsRow.appendChild(dislikeBtn);
+      if (state.editingMessageId !== msg.id && showActions) {
+        const actionsRow = document.createElement('div');
+        actionsRow.className = 'message-actions-row';
 
-        const regenBtn = document.createElement('button');
-        regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
-        regenBtn.title = 'Regenerate';
-        regenBtn.className = 'icon-button-sm';
-        regenBtn.addEventListener('click', () => regenerateMessage(index));
-        actionsRow.appendChild(regenBtn);
+        const copyBtn = document.createElement('button');
+        copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
+        copyBtn.title = 'Copy';
+        copyBtn.className = 'icon-button-sm';
+        copyBtn.addEventListener('click', () => copyMessage(msg));
+        actionsRow.appendChild(copyBtn);
 
-        const shareBtn = document.createElement('button');
-        shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
-        shareBtn.title = 'Share';
-        shareBtn.className = 'icon-button-sm';
-        shareBtn.addEventListener('click', () => shareChat(msg.id));
-        actionsRow.appendChild(shareBtn);
+        if (msg.role === 'user') {
+          const editBtn = document.createElement('button');
+          editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
+          editBtn.title = 'Edit';
+          editBtn.className = 'icon-button-sm';
+          editBtn.addEventListener('click', () => startEditing(msg));
+          actionsRow.appendChild(editBtn);
+        }
+
+        if (msg.role === 'assistant') {
+          const likeBtn = document.createElement('button');
+          const isLiked = state.likedMessages.has(msg.id);
+          likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
+          likeBtn.title = isLiked ? 'Liked' : 'Like';
+          if (isLiked) likeBtn.classList.add('liked');
+          likeBtn.className = 'icon-button-sm';
+          likeBtn.addEventListener('click', () => toggleLike(msg));
+          actionsRow.appendChild(likeBtn);
+
+          const dislikeBtn = document.createElement('button');
+          const isDisliked = state.dislikedMessages.has(msg.id);
+          dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
+          dislikeBtn.title = isDisliked ? 'Disliked' : 'Dislike';
+          if (isDisliked) dislikeBtn.classList.add('disliked');
+          dislikeBtn.className = 'icon-button-sm';
+          dislikeBtn.addEventListener('click', () => toggleDislike(msg));
+          actionsRow.appendChild(dislikeBtn);
+
+          const regenBtn = document.createElement('button');
+          regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
+          regenBtn.title = 'Regenerate';
+          regenBtn.className = 'icon-button-sm';
+          regenBtn.addEventListener('click', () => regenerateMessage(index));
+          actionsRow.appendChild(regenBtn);
+
+          const shareBtn = document.createElement('button');
+          shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
+          shareBtn.title = 'Share';
+          shareBtn.className = 'icon-button-sm';
+          shareBtn.addEventListener('click', () => shareChat(msg.id));
+          actionsRow.appendChild(shareBtn);
+        }
+
+        row.appendChild(msgDiv);
+        row.appendChild(actionsRow);
+        messageList.appendChild(row);
+      } else {
+        // No actions row (thinking or editing)
+        row.appendChild(msgDiv);
+        messageList.appendChild(row);
       }
-
-      row.appendChild(msgDiv);
-      row.appendChild(actionsRow);
-      messageList.appendChild(row);
-    } else {
-      row.appendChild(msgDiv);
-      messageList.appendChild(row);
     }
   });
 
@@ -575,8 +607,6 @@ async function sendEditedUserMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  showStatus();
-
   state.isGenerating = true;
   sendBtn.classList.add('generating');
   sendBtn.disabled = false;
@@ -599,7 +629,6 @@ async function sendEditedUserMessage() {
       throw new Error(err.error || 'AI request failed');
     }
 
-    hideStatus();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
@@ -638,6 +667,7 @@ async function sendEditedUserMessage() {
       }
     }
 
+    // Finalize version
     const last = state.messages[state.messages.length - 1];
     if (last && last.role === 'assistant') {
       if (!state.messageVersions[last.id]) {
@@ -681,7 +711,6 @@ async function sendEditedUserMessage() {
     sendBtn.disabled = false;
     state.abortController = null;
     updateSendButton();
-    hideStatus();
   }
 }
 
@@ -710,8 +739,6 @@ async function regenerateMessage(index) {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  showStatus();
-
   state.isGenerating = true;
   sendBtn.classList.add('generating');
   sendBtn.disabled = false;
@@ -734,7 +761,6 @@ async function regenerateMessage(index) {
       throw new Error(err.error || 'AI request failed');
     }
 
-    hideStatus();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
@@ -798,7 +824,6 @@ async function regenerateMessage(index) {
     sendBtn.disabled = false;
     state.abortController = null;
     updateSendButton();
-    hideStatus();
   }
 }
 
@@ -1018,15 +1043,12 @@ document.addEventListener('click', (e) => {
 // --- New Chat (creates chat only if no empty chat exists) ---
 function handleNewChat() {
   log('New Chat clicked', 'info');
-  // Find if there is already an empty chat (no messages)
   const emptyChat = state.chats.find(chat => chat.messages.length === 0);
   if (emptyChat) {
-    // Select the existing empty chat
     selectChat(emptyChat.id);
     log('Selected existing empty chat', 'debug');
     return;
   }
-  // Otherwise create a new chat
   createChat('New Chat').then(chat => {
     if (chat) {
       state.activeChatId = chat.id;
@@ -1056,14 +1078,12 @@ function updateSendButton() {
   const stopIcon = sendBtn.querySelector('.stop-icon');
 
   if (!state.isGenerating) {
-    // Not generating – show send icon
     if (sendIcon) sendIcon.style.display = 'inline';
     if (stopIcon) stopIcon.style.display = 'none';
     sendBtn.disabled = !hasContent;
     sendBtn.style.opacity = hasContent ? '1' : '0.35';
     sendBtn.classList.remove('generating');
   } else {
-    // Generating – show stop icon (square)
     if (sendIcon) sendIcon.style.display = 'none';
     if (stopIcon) stopIcon.style.display = 'inline';
     sendBtn.disabled = false;
@@ -1095,21 +1115,6 @@ function renderAttachments() {
   window.refreshIcons();
 }
 
-// --- Status message ---
-function showStatus() {
-  hideStatus();
-  const statusDiv = document.createElement('div');
-  statusDiv.className = 'status-message';
-  statusDiv.id = 'statusMessage';
-  statusDiv.innerHTML = `<div class="spinner"></div><span>Thinking...</span>`;
-  messageList.appendChild(statusDiv);
-}
-
-function hideStatus() {
-  const el = document.getElementById('statusMessage');
-  if (el) el.remove();
-}
-
 // --- Send message (main) ---
 async function sendMessage() {
   const text = messageInput.value.trim();
@@ -1118,7 +1123,7 @@ async function sendMessage() {
   if (!hasText && !hasAttachments) return;
   if (state.isGenerating) return;
 
-  // Create chat if none exists (only on first message)
+  // Create chat if none exists
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
@@ -1137,7 +1142,6 @@ async function sendMessage() {
     renderChatList();
     chat = newChat;
   } else {
-    // If chat exists but has no messages, update title
     if (chat.messages.length === 0 && chat.title === 'New Chat') {
       chat.title = text.substring(0, 42) + (text.length > 42 ? '…' : '');
       if (!state.currentUser) saveLocalConversations();
@@ -1180,8 +1184,6 @@ async function sendMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  showStatus();
-
   state.isGenerating = true;
   sendBtn.classList.add('generating');
   sendBtn.disabled = false;
@@ -1220,7 +1222,6 @@ async function sendMessage() {
       throw new Error(err.error || 'AI request failed');
     }
 
-    hideStatus();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let full = '';
@@ -1312,7 +1313,6 @@ async function sendMessage() {
     messageInput.disabled = false;
     state.abortController = null;
     updateSendButton();
-    hideStatus();
   }
 }
 
@@ -1326,7 +1326,6 @@ function stopGeneration() {
     sendBtn.disabled = false;
     messageInput.disabled = false;
     updateSendButton();
-    hideStatus();
   }
 }
 
