@@ -508,7 +508,7 @@ body {
   justify-content: center;
   min-width: 36px;
   min-height: 36px;
-  opacity: 0.35; /* low when empty */
+  opacity: 0.35;
 }
 .send-button:not(:disabled):hover {
   background: var(--accent);
@@ -523,7 +523,7 @@ body {
   background: var(--danger);
   color: #fff;
   border-color: var(--danger);
-  opacity: 1; /* full during generation */
+  opacity: 1;
 }
 .send-button.generating:hover {
   background: #e85d5d;
