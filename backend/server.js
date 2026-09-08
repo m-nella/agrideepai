@@ -48,12 +48,12 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // ---------- Gemini with CURRENT models ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Use CURRENT models (Gemini 1.5 is RETIRED as of Sept 2025)
-// https://ai.google.dev/gemini-api/docs/models
+// Use current stable models (as of 2026)
 const MODEL_CANDIDATES = [
-  'gemini-2.0-flash',      // Current, fast, free tier
-  'gemini-2.0-flash-lite', // Lightweight current model
-  'gemini-1.5-pro',        // May still work for some accounts
+  'gemini-2.5-flash',      // Current, fast, free tier
+  'gemini-2.5-pro',        // Larger context
+  'gemini-1.5-flash',      // Still available for some
+  'gemini-pro',
 ];
 
 let activeModel = null;
