@@ -46,13 +46,13 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (prioritize models with higher free quota) ----------
+// ---------- Gemini (prioritize working models) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Order: gemini-1.5-flash has the highest free quota (60 req/min)
+// Order: newest first, with fallbacks
 const MODEL_CANDIDATES = [
-  'gemini-1.5-flash',      // Highest free quota, widely available
-  'gemini-2.0-flash',      // Newer, but may have lower quota
+  'gemini-2.0-flash',      // Latest (as of 2026)
+  'gemini-1.5-flash',      // Still common
   'gemini-1.5-pro',        // More capable but lower quota
   'gemini-pro',            // Legacy fallback
 ];
@@ -60,7 +60,18 @@ const MODEL_CANDIDATES = [
 let activeModel = null;
 let activeModelName = null;
 
-function getModel() {
+// Test a model with a simple ping
+async function testModel(model) {
+  try {
+    const result = await model.generateContent('ping');
+    const response = await result.response;
+    return response.text() !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+async function getModel() {
   if (activeModel) {
     log(`Using cached model: ${activeModelName}`, 'debug');
     return activeModel;
@@ -68,15 +79,21 @@ function getModel() {
   for (const name of MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: name });
-      log(`✅ Using Gemini model: ${name}`, 'info');
-      activeModel = model;
-      activeModelName = name;
-      return model;
+      // Try a lightweight test to ensure the model is actually usable
+      const ok = await testModel(model);
+      if (ok) {
+        log(`✅ Using Gemini model: ${name}`, 'info');
+        activeModel = model;
+        activeModelName = name;
+        return model;
+      } else {
+        log(`⚠️ Model ${name} failed test (maybe quota/access)`, 'warn');
+      }
     } catch (e) {
       log(`⚠️ Model ${name} failed: ${e.message}`, 'warn');
     }
   }
-  throw new Error('No Gemini models available. Please check your API key.');
+  throw new Error('No Gemini models available. Please check your API key or try again later.');
 }
 
 // ---------- Tavily ----------
@@ -409,8 +426,9 @@ If you have any other questions about agriculture, livestock, or related topics,
       }
     }
 
-    // Normal flow
-    const chatModel = getModel();
+    // Normal flow - get a working model
+    const chatModel = await getModel();
+
     let searchResults = null;
     if (TAVILY_API_KEY && lastUserMsg) {
       searchResults = await tavilySearch(lastUserMsg.content);
@@ -664,7 +682,9 @@ If you have any other questions about agriculture, livestock, or related topics,
       finalPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer:\n${finalPrompt}`;
     }
 
-    const chatModel = getModel();
+    // Get a working model
+    const chatModel = await getModel();
+
     const chat = chatModel.startChat({
       history: aiMessages.slice(0, -1).map(m => ({
         role: m.role === 'user' ? 'user' : 'model',
@@ -749,7 +769,9 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
     if (aiMessages.length === 0 || aiMessages[aiMessages.length - 1].role !== 'user')
       return res.status(400).json({ error: 'No user message' });
 
-    const chatModel = getModel();
+    // Get a working model
+    const chatModel = await getModel();
+
     const chat = chatModel.startChat({
       history: aiMessages.slice(0, -1).map(m => ({
         role: m.role === 'user' ? 'user' : 'model',
