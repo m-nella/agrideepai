@@ -46,14 +46,17 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (correct, widely available models) ----------
+// ---------- Gemini (try all possible current models) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Models in order of reliability (1.5-flash is most widely available)
+// Broad list of model candidates (ordered by likelihood of availability)
 const MODEL_CANDIDATES = [
-  'gemini-1.5-flash',    // Fast, free, widely available
-  'gemini-1.5-pro',      // More capable
-  'gemini-2.0-flash',    // Newer (may work)
+  'gemini-2.5-pro',      // Latest, may be available
+  'gemini-2.5-flash',    // Latest flash
+  'gemini-2.0-flash',    // Still widely used
+  'gemini-1.5-pro',      // Older but stable
+  'gemini-1.5-flash',    // Older flash
+  'gemini-1.0-pro',      // Very old, but sometimes available
 ];
 
 let activeModel = null;
