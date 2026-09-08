@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Fixed Thinking & Actions)
+// AGRIDEEPAI – Full Frontend (with custom modals)
 // ============================================================
 
 // --- Logging ---
@@ -48,6 +48,99 @@ let state = {
   dislikedMessages: new Set(),
   contextMenuTarget: null,
 };
+
+// --- Custom Modal helpers ---
+function showCustomModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel') {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'customModal';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <button class="modal-close" id="customModalClose">&times;</button>
+        <h2>${title}</h2>
+        <p style="margin: 1rem 0; color: var(--text-muted);">${message}</p>
+        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+          <button class="btn-primary" id="customModalConfirm" style="flex:1;">${confirmText}</button>
+          <button class="btn-primary" id="customModalCancel" style="flex:1; background: transparent; border: 1px solid var(--border); color: var(--text);">${cancelText}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    const closeModal = () => {
+      modal.remove();
+      resolve(false);
+    };
+
+    modal.querySelector('#customModalClose').addEventListener('click', closeModal);
+    modal.querySelector('#customModalCancel').addEventListener('click', closeModal);
+    modal.querySelector('#customModalConfirm').addEventListener('click', () => {
+      modal.remove();
+      resolve(true);
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+        resolve(false);
+      }
+    });
+  });
+}
+
+function showCustomPrompt(title, defaultValue = '') {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.id = 'customPromptModal';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <button class="modal-close" id="customPromptClose">&times;</button>
+        <h2>${title}</h2>
+        <input type="text" id="customPromptInput" value="${defaultValue}" style="width:100%; margin-top: 0.5rem;" />
+        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+          <button class="btn-primary" id="customPromptConfirm" style="flex:1;">Save</button>
+          <button class="btn-primary" id="customPromptCancel" style="flex:1; background: transparent; border: 1px solid var(--border); color: var(--text);">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    const input = modal.querySelector('#customPromptInput');
+    input.focus();
+    input.select();
+
+    const closeModal = () => {
+      modal.remove();
+      resolve(null);
+    };
+
+    modal.querySelector('#customPromptClose').addEventListener('click', closeModal);
+    modal.querySelector('#customPromptCancel').addEventListener('click', closeModal);
+    modal.querySelector('#customPromptConfirm').addEventListener('click', () => {
+      const val = input.value.trim();
+      modal.remove();
+      resolve(val || null);
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+        resolve(null);
+      }
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = input.value.trim();
+        modal.remove();
+        resolve(val || null);
+      }
+      if (e.key === 'Escape') {
+        modal.remove();
+        resolve(null);
+      }
+    });
+  });
+}
 
 // --- Supabase init ---
 async function initSupabase() {
@@ -328,12 +421,10 @@ function renderMessages() {
     } else {
       // --- Assistant message with integrated thinking ---
       if (msg.role === 'assistant') {
-        // Determine if we should show thinking state
         const isLastMessage = (index === lastIndex);
         const isThinking = isLastMessage && state.isGenerating && msg.content === '';
 
         if (isThinking) {
-          // Show thinking placeholder with spinner
           const thinkingDiv = document.createElement('div');
           thinkingDiv.className = 'thinking-indicator';
           thinkingDiv.style.cssText = 'display:flex;align-items:center;gap:0.5rem;color:var(--text-muted);padding:0.2rem 0;';
@@ -342,15 +433,12 @@ function renderMessages() {
             <span>Thinking...</span>
           `;
           msgDiv.appendChild(thinkingDiv);
-          // No content, no actions
         } else if (msg.content) {
-          // Show content
           const contentDiv = document.createElement('div');
           contentDiv.className = 'message-content';
           contentDiv.innerHTML = marked.parse(msg.content || '');
           msgDiv.appendChild(contentDiv);
 
-          // Sources (if any)
           if (msg.files && msg.files.length > 0) {
             const fileDiv = document.createElement('div');
             fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
@@ -375,7 +463,6 @@ function renderMessages() {
             if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
           }
 
-          // Version controls
           if (state.messageVersions[msg.id]) {
             const vData = state.messageVersions[msg.id];
             if (vData.versions.length > 1) {
@@ -425,18 +512,14 @@ function renderMessages() {
             }
           }
         }
-        // If content is empty and not thinking, show nothing (should not happen)
       } else {
-        // User message content
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
         contentDiv.textContent = msg.content;
         msgDiv.appendChild(contentDiv);
       }
 
-      // --- Actions Row (only for completed assistant messages and user messages, not while thinking) ---
-      // For assistant: show actions only if content is non-empty and we are not thinking
-      // For user: always show actions (unless editing)
+      // --- Actions Row (only after response complete) ---
       const showActions = (msg.role === 'user') ||
                           (msg.role === 'assistant' && msg.content && !(state.isGenerating && index === lastIndex && msg.content === ''));
 
@@ -498,7 +581,6 @@ function renderMessages() {
         row.appendChild(actionsRow);
         messageList.appendChild(row);
       } else {
-        // No actions row (thinking or editing)
         row.appendChild(msgDiv);
         messageList.appendChild(row);
       }
@@ -667,7 +749,6 @@ async function sendEditedUserMessage() {
       }
     }
 
-    // Finalize version
     const last = state.messages[state.messages.length - 1];
     if (last && last.role === 'assistant') {
       if (!state.messageVersions[last.id]) {
@@ -911,7 +992,14 @@ async function selectChat(id) {
 }
 
 async function deleteChat(id) {
-  if (!confirm('Delete this chat?')) return;
+  const confirmed = await showCustomModal(
+    'Delete Chat',
+    'Are you sure you want to delete this chat? This action cannot be undone.',
+    'Delete',
+    'Cancel'
+  );
+  if (!confirmed) return;
+
   log(`Deleting chat ${id}`, 'info');
   if (state.currentUser) {
     try {
@@ -943,8 +1031,9 @@ async function deleteChat(id) {
 async function renameChat(id) {
   const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
-  const newTitle = prompt('New title:', chat.title);
+  const newTitle = await showCustomPrompt('Rename Chat', chat.title);
   if (!newTitle || !newTitle.trim()) return;
+
   log(`Renaming chat ${id} to "${newTitle}"`, 'info');
   if (state.currentUser) {
     try {
@@ -1123,7 +1212,6 @@ async function sendMessage() {
   if (!hasText && !hasAttachments) return;
   if (state.isGenerating) return;
 
-  // Create chat if none exists
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
@@ -1149,7 +1237,6 @@ async function sendMessage() {
     }
   }
 
-  // User message
   const userMsg = {
     id: 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
     role: 'user',
@@ -1162,7 +1249,6 @@ async function sendMessage() {
   if (!state.currentUser) saveLocalConversations();
   renderMessages();
 
-  // Clear input
   messageInput.value = '';
   const atts = [...state.attachments];
   state.attachments = [];
@@ -1171,7 +1257,6 @@ async function sendMessage() {
   updateSendButton();
   messageInput.disabled = true;
 
-  // Assistant placeholder
   const assistantMsg = {
     id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
     role: 'assistant',
@@ -1580,8 +1665,14 @@ function openSettingsModal() {
   });
 
   modal.querySelector('#deleteAccountBtn').addEventListener('click', async () => {
-    if (!confirm('Permanently delete your account? This cannot be undone!')) return;
-    if (!confirm('All your conversations and data will be lost. Continue?')) return;
+    const confirmed = await showCustomModal(
+      'Delete Account',
+      'Are you sure you want to permanently delete your account? This action cannot be undone and all your data will be lost.',
+      'Delete Account',
+      'Cancel'
+    );
+    if (!confirmed) return;
+
     errorDiv.style.display = 'none';
     statusDiv.textContent = 'Deleting account...';
     statusDiv.style.display = 'block';
