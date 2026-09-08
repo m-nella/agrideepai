@@ -46,18 +46,22 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Gemini (reliable models first) ----------
+// ---------- Gemini (with environment override) ----------
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const MODEL_CANDIDATES = [
-  'gemini-pro',          // most reliable, widely available
-  'gemini-1.5-pro',
-  'gemini-1.5-flash',
-  'gemini-2.0-flash',
-];
+
+// Models in order of preference (use environment variable to force)
+const forcedModel = process.env.GEMINI_MODEL;
+const MODEL_CANDIDATES = forcedModel
+  ? [forcedModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro']
+  : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro'];
+
 let activeModel = null;
 
 function getModel() {
-  if (activeModel) return activeModel;
+  if (activeModel) {
+    log(`Using cached model: ${activeModel.model}`, 'debug');
+    return activeModel;
+  }
   for (const name of MODEL_CANDIDATES) {
     try {
       const model = genAI.getGenerativeModel({ model: name });
@@ -68,6 +72,7 @@ function getModel() {
       log(`⚠️ Model ${name} failed: ${e.message}`, 'warn');
     }
   }
+  // Last resort: try the first one again (will throw a clear error)
   activeModel = genAI.getGenerativeModel({ model: MODEL_CANDIDATES[0] });
   log(`❗ Forced model: ${MODEL_CANDIDATES[0]} (may fail)`, 'error');
   return activeModel;
