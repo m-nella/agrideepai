@@ -798,3 +798,32 @@ body {
   object-fit: cover;
   border-radius: 4px;
 }
+/* (Your existing CSS) ... then at the end add: */
+
+/* 2FA QR code container */
+.twofa-setup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.twofa-setup img.qr-code {
+  width: 200px;
+  height: 200px;
+  border-radius: 8px;
+  background: white;
+  padding: 8px;
+}
+.twofa-setup input {
+  width: 100%;
+  max-width: 200px;
+  text-align: center;
+  letter-spacing: 4px;
+}
+
+.attachment-chip img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+}
