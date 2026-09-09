@@ -506,7 +506,7 @@ body {
 }
 .composer-main textarea::placeholder { color: var(--text-muted); }
 
-/* Send button - green when enabled */
+/* Send button - full green when enabled */
 .send-button {
   background: var(--accent);
   color: #fff;
