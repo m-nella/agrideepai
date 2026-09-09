@@ -182,7 +182,12 @@ async function initSupabase() {
       } else {
         state.currentUser = null;
         updateAuthUI();
-        loadLocalConversations();
+        // Guest: clear memory state and do NOT load from localStorage
+        state.chats = [];
+        state.messages = [];
+        state.activeChatId = null;
+        renderChatList();
+        renderMessages();
       }
     });
 
@@ -193,11 +198,21 @@ async function initSupabase() {
       await loadCloudConversations();
     } else {
       updateAuthUI();
-      loadLocalConversations();
+      // Guest: start with empty state (no localStorage)
+      state.chats = [];
+      state.messages = [];
+      state.activeChatId = null;
+      renderChatList();
+      renderMessages();
     }
   } catch (err) {
     log(`Supabase init error: ${err.message}`, 'error');
-    loadLocalConversations();
+    // On error, also clear everything for guest
+    state.chats = [];
+    state.messages = [];
+    state.activeChatId = null;
+    renderChatList();
+    renderMessages();
   }
 }
 
@@ -231,49 +246,13 @@ async function apiFetch(endpoint, options = {}) {
   return res;
 }
 
-// --- Local storage ---
+// --- Local storage (deprecated for guest) ---
 function loadLocalConversations() {
-  log('Loading local conversations', 'debug');
-  const stored = localStorage.getItem('agrideepai_local_chats');
-  state.chats = stored ? JSON.parse(stored) : [];
-  const currentId = localStorage.getItem('agrideepai_local_current');
-  if (currentId && state.chats.some(c => c.id === currentId)) {
-    state.activeChatId = currentId;
-  } else {
-    state.activeChatId = null;
-  }
-  renderChatList();
-  if (state.activeChatId) {
-    const chat = state.chats.find(c => c.id === state.activeChatId);
-    if (chat) {
-      state.messages = chat.messages || [];
-      rebuildVersions();
-      renderMessages();
-    }
-  } else {
-    state.messages = [];
-    renderMessages();
-  }
+  log('Loading local conversations (deprecated for guest)', 'debug');
 }
 
 function saveLocalConversations() {
-  state.messages.forEach(msg => {
-    if (msg.role === 'assistant' && state.messageVersions[msg.id]) {
-      const vData = state.messageVersions[msg.id];
-      msg.versions = vData.versions;
-      msg.currentVersionIndex = vData.currentIndex;
-      if (vData.versions.length > 0) {
-        msg.content = vData.versions[vData.currentIndex] || '';
-      }
-    }
-  });
-  localStorage.setItem('agrideepai_local_chats', JSON.stringify(state.chats));
-  if (state.activeChatId && state.chats.some(c => c.id === state.activeChatId)) {
-    localStorage.setItem('agrideepai_local_current', state.activeChatId);
-  } else {
-    localStorage.removeItem('agrideepai_local_current');
-  }
-  log(`Saved ${state.chats.length} local chats`, 'debug');
+  log('Saving local conversations (only for authenticated)', 'debug');
 }
 
 // --- Cloud conversations ---
@@ -621,6 +600,7 @@ function renderMessages() {
         }
 
         if (msg.role === 'assistant') {
+          // Like button – toggle colour
           const likeBtn = document.createElement('button');
           const isLiked = state.likedMessages.has(msg.id);
           likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
@@ -633,6 +613,7 @@ function renderMessages() {
           });
           actionsRow.appendChild(likeBtn);
 
+          // Dislike button
           const dislikeBtn = document.createElement('button');
           const isDisliked = state.dislikedMessages.has(msg.id);
           dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
@@ -655,13 +636,15 @@ function renderMessages() {
           });
           actionsRow.appendChild(regenBtn);
 
+          // Share button – shares this single message
           const shareBtn = document.createElement('button');
           shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
-          shareBtn.title = 'Share';
+          shareBtn.title = 'Share this message';
           shareBtn.className = 'icon-button-sm';
           shareBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            shareConversation();
+            // Share only this message
+            shareConversation([{ role: msg.role, content: msg.content }]);
           });
           actionsRow.appendChild(shareBtn);
         }
@@ -736,7 +719,7 @@ async function copyMessage(msg) {
   }
 }
 
-// --- Like / Dislike ---
+// --- Like / Dislike toggle ---
 function toggleLike(msg) {
   if (state.likedMessages.has(msg.id)) {
     state.likedMessages.delete(msg.id);
@@ -851,7 +834,7 @@ async function sendEditedUserMessage() {
       await loadCloudConversations();
     } else {
       chat.messages = state.messages;
-      saveLocalConversations();
+      // Do NOT save to localStorage for guests
       renderMessages();
       renderChatList();
     }
@@ -989,20 +972,37 @@ async function regenerateMessage(index) {
   }
 }
 
-// --- Share Conversation (works with or without auth) ---
-async function shareConversation() {
+// --- Share Conversation (supports chat or single message) ---
+async function shareConversation(messagesToShare = null) {
+  // If messagesToShare is null, share the whole chat (default behaviour)
   const chat = state.chats.find(c => c.id === state.activeChatId);
-  if (!chat) {
+  if (!chat && !messagesToShare) {
     showToast('No chat to share', true);
+    return;
+  }
+
+  // Determine what to share
+  let messages;
+  if (messagesToShare) {
+    // Share only the provided messages (e.g., a single message)
+    messages = messagesToShare;
+  } else {
+    // Share the whole conversation
+    messages = state.messages.map(m => ({ role: m.role, content: m.content }));
+  }
+
+  if (!messages || messages.length === 0) {
+    showToast('Nothing to share', true);
     return;
   }
 
   try {
     let response;
-    if (state.currentUser) {
+    if (state.currentUser && !messagesToShare) {
+      // Authenticated user sharing a whole chat – use the existing endpoint
       response = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
     } else {
-      const messages = state.messages.map(m => ({ role: m.role, content: m.content }));
+      // Guest or sharing a single message – use the guest share endpoint
       response = await fetch('/api/share/guest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1027,7 +1027,7 @@ async function shareConversation() {
   }
 }
 
-// --- Chat CRUD ---
+// --- Chat CRUD (guest chats are in-memory only) ---
 function createLocalChat(title = 'New Chat') {
   const chat = {
     id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
@@ -1038,7 +1038,7 @@ function createLocalChat(title = 'New Chat') {
     createdAt: new Date().toISOString(),
   };
   state.chats.unshift(chat);
-  if (!state.currentUser) saveLocalConversations();
+  // Do NOT save to localStorage for guests
   renderChatList();
   return chat;
 }
@@ -1078,7 +1078,6 @@ async function selectChat(id) {
       rebuildVersions();
       renderMessages();
       renderChatList();
-      saveLocalConversations();
     }
   }
   if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
@@ -1117,7 +1116,6 @@ async function deleteChat(id) {
       state.messages = [];
       renderMessages();
     }
-    saveLocalConversations();
     renderChatList();
   }
   chatMenu.classList.add('hidden');
@@ -1147,7 +1145,6 @@ async function renameChat(id) {
   } else {
     chat.title = newTitle.trim();
     chat.updatedAt = new Date().toISOString();
-    saveLocalConversations();
     renderChatList();
   }
   chatMenu.classList.add('hidden');
@@ -1174,13 +1171,12 @@ async function togglePin(id) {
   } else {
     chat.pinned = !chat.pinned;
     chat.updatedAt = new Date().toISOString();
-    saveLocalConversations();
     renderChatList();
   }
   chatMenu.classList.add('hidden');
 }
 
-// --- Context menu (closes immediately on any action) ---
+// --- Context menu ---
 function openChatMenu(e, chatId) {
   e.preventDefault();
   state.contextMenuTarget = chatId;
@@ -1210,7 +1206,7 @@ function openChatMenu(e, chatId) {
     } else if (action === 'share') {
       btn.onclick = () => {
         chatMenu.classList.add('hidden');
-        shareConversation();
+        shareConversation(); // share whole chat
       };
     } else if (action === 'rename') {
       btn.onclick = () => {
@@ -1346,16 +1342,36 @@ async function sendMessage() {
     };
     state.chats.unshift(newChat);
     state.activeChatId = newChat.id;
-    if (!state.currentUser) saveLocalConversations();
-    renderChatList();
-    chat = newChat;
-  } else {
-    if (chat.messages.length === 0 && chat.title === 'New Chat') {
-      chat.title = text.substring(0, 42) + (text.length > 42 ? '…' : '');
-      if (!state.currentUser) saveLocalConversations();
+    if (!state.currentUser) {
+      // Guest: no save
       renderChatList();
+    } else {
+      // Logged in: create cloud chat instead
+      // We'll redirect: call createChat and then use that chat
+      // But we are in the middle of sending, so we'll handle it differently.
+      // Simpler: if logged in, we should have called createChat earlier.
+      // We'll just proceed with local chat but also create cloud? Better to always use createChat.
+      // We'll check again: if logged in, we'll call createChat and return.
+      if (state.currentUser) {
+        // Cancel this flow and use createChat
+        showToast('Creating cloud chat...', false);
+        const cloudChat = await createChat(title);
+        if (cloudChat) {
+          state.activeChatId = cloudChat.id;
+          state.messages = [];
+          renderChatList();
+          renderMessages();
+          // Re-run sendMessage after chat creation
+          sendMessage();
+        }
+        return;
+      }
     }
+    chat = newChat;
   }
+
+  // If logged in and chat is local, convert to cloud? Not needed if we used createChat.
+  // We'll assume we have a valid chat.
 
   const userMsg = {
     id: 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
@@ -1476,7 +1492,7 @@ async function sendMessage() {
       await loadCloudConversations();
     } else {
       chat.messages = state.messages;
-      saveLocalConversations();
+      // Do NOT save to localStorage for guests
       renderMessages();
       renderChatList();
     }
@@ -1731,8 +1747,57 @@ function renderAuthForm(mode) {
       statusDiv.style.display = 'block';
       submitBtn.disabled = true;
       try {
-        const { data, error } = await state.supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Login failed');
+        if (data.requires2fa) {
+          // Show 2FA input
+          statusDiv.textContent = 'Please enter your 2FA code';
+          // Replace the form with 2FA input
+          const twofaHtml = `
+            <h2>Two-Factor Authentication</h2>
+            <p style="margin-bottom:1rem;">Enter the code from your authenticator app.</p>
+            <label>Code</label>
+            <input type="text" id="twofaCode" placeholder="6-digit code" />
+            <button class="btn-primary" id="twofaSubmitBtn">Verify</button>
+            <div id="twofaError" class="error-msg" style="display:none;"></div>
+          `;
+          authModalBody.innerHTML = twofaHtml;
+          window.refreshIcons();
+          document.getElementById('twofaSubmitBtn').addEventListener('click', async () => {
+            const code = document.getElementById('twofaCode').value.trim();
+            if (!code) {
+              document.getElementById('twofaError').textContent = 'Enter the code.';
+              document.getElementById('twofaError').style.display = 'block';
+              return;
+            }
+            try {
+              const verifyRes = await fetch('/api/auth/2fa/validate-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tempToken: data.tempToken, code }),
+              });
+              const verifyData = await verifyRes.json();
+              if (!verifyRes.ok) throw new Error(verifyData.error || 'Invalid code');
+              state.currentUser = verifyData.user;
+              updateAuthUI();
+              closeAuthModal();
+              showToast('Signed in successfully!');
+              await loadCloudConversations();
+            } catch (err) {
+              document.getElementById('twofaError').textContent = err.message;
+              document.getElementById('twofaError').style.display = 'block';
+            }
+          });
+          return;
+        }
+        // Normal login
+        state.currentUser = data.user;
+        updateAuthUI();
         closeAuthModal();
         showToast('Signed in successfully!');
         await loadCloudConversations();
@@ -1803,6 +1868,12 @@ async function openAccountModal() {
         await state.supabase.auth.signOut();
         closeModal();
         showToast('Logged out');
+        // Reset guest state
+        state.chats = [];
+        state.messages = [];
+        state.activeChatId = null;
+        renderChatList();
+        renderMessages();
       });
       contentArea.querySelector('#logoutCancelBtn').addEventListener('click', () => {
         renderTab('profile');
@@ -1846,17 +1917,27 @@ async function openAccountModal() {
         </div>
       `;
     } else if (tabId === 'security') {
+      const twofaEnabled = profile.two_factor_enabled || false;
       html = `
         <h2>Security</h2>
         <div class="security-section">
-          <p>Two‑factor authentication is not enabled.</p>
-          <button class="btn-primary" id="enable2faBtn" disabled>Enable 2FA (coming soon)</button>
-          <hr />
-          <button class="btn-primary btn-danger" id="deleteAccountBtn">Delete Account</button>
-          <div id="deleteVerification" style="display:none; margin-top:0.5rem;">
-            <label>Verification code</label>
-            <input type="text" id="deleteCodeInput" placeholder="6-digit code" />
-            <button class="btn-primary btn-danger" id="deleteVerifyBtn">Verify & Delete</button>
+          <h3>Two-Factor Authentication</h3>
+          <p>${twofaEnabled ? '2FA is currently enabled.' : '2FA is disabled.'}</p>
+          <div id="twofaSetupArea">
+            ${twofaEnabled ? `
+              <button class="btn-primary btn-danger" id="disable2faBtn">Disable 2FA</button>
+            ` : `
+              <button class="btn-primary" id="enable2faBtn">Enable 2FA</button>
+              <div id="twofaSetup" style="display:none; margin-top:1rem;">
+                <div class="twofa-setup">
+                  <p>Scan this QR code with your authenticator app (e.g., Google Authenticator).</p>
+                  <div id="qrCodeContainer"></div>
+                  <label>Enter the 6-digit code:</label>
+                  <input type="text" id="twofaSetupCode" placeholder="123456" />
+                  <button class="btn-primary" id="twofaSetupVerifyBtn">Verify & Enable</button>
+                </div>
+              </div>
+            `}
           </div>
         </div>
       `;
@@ -1872,7 +1953,7 @@ async function openAccountModal() {
     contentArea.innerHTML = html;
     window.refreshIcons();
 
-    // Add password toggles for change password fields
+    // Attach event listeners for the tab
     if (tabId === 'account') {
       const currentPwWrapper = document.getElementById('currentPasswordWrapper');
       if (currentPwWrapper) {
@@ -1966,45 +2047,53 @@ async function openAccountModal() {
     }
 
     if (tabId === 'security') {
-      document.getElementById('deleteAccountBtn').addEventListener('click', async () => {
-        try {
-          await apiFetch('/api/auth/send-verification-code', {
-            method: 'POST',
-            body: JSON.stringify({ action: 'delete-account' }),
-          });
-          showToast('Verification code sent to your email.');
-          document.getElementById('deleteVerification').style.display = 'block';
-          document.getElementById('deleteVerifyBtn').addEventListener('click', async () => {
-            const code = document.getElementById('deleteCodeInput').value.trim();
-            if (!code) { showToast('Enter code.', true); return; }
-            try {
-              await apiFetch('/api/auth/verify-code', {
-                method: 'POST',
-                body: JSON.stringify({ code, action: 'delete-account' }),
-              });
-              const confirmed = await showCustomModal(
-                'Delete Account',
-                'This action is permanent. Are you sure?',
-                'Yes, delete',
-                'Cancel',
-                true
-              );
-              if (!confirmed) return;
-              await apiFetch('/api/auth/delete-account', {
-                method: 'DELETE',
-                body: JSON.stringify({ code }),
-              });
-              showToast('Account deleted.');
-              await state.supabase.auth.signOut();
-              closeModal();
-            } catch (err) {
-              showToast(err.message, true);
+      const enableBtn = document.getElementById('enable2faBtn');
+      const disableBtn = document.getElementById('disable2faBtn');
+      if (enableBtn) {
+        enableBtn.addEventListener('click', async () => {
+          try {
+            const res = await apiFetch('/api/auth/2fa/enable', { method: 'POST' });
+            const data = await res.json();
+            // Show QR code
+            const qrContainer = document.getElementById('qrCodeContainer');
+            if (qrContainer) {
+              qrContainer.innerHTML = `<img src="${data.qrCodeDataUrl}" alt="QR Code" class="qr-code" />`;
             }
-          });
-        } catch (err) {
-          showToast(err.message, true);
-        }
-      });
+            document.getElementById('twofaSetup').style.display = 'block';
+            document.getElementById('twofaSetupVerifyBtn').addEventListener('click', async () => {
+              const code = document.getElementById('twofaSetupCode').value.trim();
+              if (!code) { showToast('Enter the code.', true); return; }
+              try {
+                const verifyRes = await apiFetch('/api/auth/2fa/verify', {
+                  method: 'POST',
+                  body: JSON.stringify({ code }),
+                });
+                await verifyRes.json();
+                showToast('2FA enabled successfully.');
+                closeModal();
+                // Reopen to refresh security tab
+                openAccountModal();
+              } catch (err) {
+                showToast(err.message, true);
+              }
+            });
+          } catch (err) {
+            showToast(err.message, true);
+          }
+        });
+      }
+      if (disableBtn) {
+        disableBtn.addEventListener('click', async () => {
+          try {
+            await apiFetch('/api/auth/2fa/disable', { method: 'POST' });
+            showToast('2FA disabled.');
+            closeModal();
+            openAccountModal();
+          } catch (err) {
+            showToast(err.message, true);
+          }
+        });
+      }
     }
   }
 
