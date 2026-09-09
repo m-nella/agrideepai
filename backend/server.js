@@ -187,7 +187,7 @@ async function tavilySearch(query) {
 
 // ---------- Verification store ----------
 function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
-const verificationStore = {}; // key: userId or email, value: { code, expires, action, data? }
+const verificationStore = {}; // key: email or userId_action
 
 // ======================== EMAIL HELPER ========================
 
@@ -264,7 +264,6 @@ app.post('/api/auth/signup', async (req, res) => {
     }
 
     const code = generateCode();
-    // Store signup data temporarily with expiration (10 min)
     verificationStore[email] = {
       code,
       expires: Date.now() + 10 * 60 * 1000,
@@ -304,14 +303,14 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
       password,
       options: {
         data: { full_name: fullName },
-        email_confirm: true, // we confirm immediately via admin
+        email_confirm: true,
       }
     });
     if (error) throw error;
     const user = data.user;
     if (!user) throw new Error('User creation failed');
 
-    // Confirm email immediately (already set email_confirm: true, but just to be safe)
+    // Confirm email (already set, but just to be safe)
     await supabase.auth.admin.updateUserById(user.id, { email_confirm: true });
 
     // Insert profile
@@ -320,7 +319,7 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
     // Clear the temporary data
     delete verificationStore[email];
 
-    // Sign in the user automatically (so they are logged in)
+    // Sign in the user automatically
     const { data: sessionData, error: signInError } = await supabase.auth.signInWithPassword({
       email: userEmail,
       password
@@ -355,7 +354,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   }
 });
 
-// Login (unchanged)
+// Login
 app.post('/api/auth/login', async (req, res) => {
   log('Login attempt', 'info');
   try {
@@ -370,7 +369,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Send verification code for authenticated actions (change email, password, delete)
+// Send verification code for authenticated actions
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
     const { action } = req.body; // 'change-email', 'change-password', 'delete-account'
@@ -395,7 +394,6 @@ app.post('/api/auth/verify-code', authenticate, async (req, res) => {
     if (!stored || stored.code !== code || Date.now() > stored.expires) {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
-    // Mark as verified
     stored.verified = true;
     res.json({ message: 'Code verified.' });
   } catch (err) {
@@ -580,10 +578,366 @@ Feel free to ask about:
   }
 });
 
-// Authenticated chat routes (same as before, but using getWorkingModel)
-// ... (we keep the existing auth chat endpoints unchanged except for model retrieval)
-// For brevity, we assume they are identical to the previous version, just with await getWorkingModel()
-// They will be included in the full code block.
+// ---------- Authenticated chat endpoints ----------
+app.get('/api/chat/conversations', authenticate, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/chat/conversations', authenticate, async (req, res) => {
+  try {
+    const { title } = req.body;
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert({ user_id: req.user.id, title: title || 'New Chat' })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/chat/conversations/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, pinned, archived } = req.body;
+    const updates = { updated_at: new Date().toISOString() };
+    if (title !== undefined) updates.title = title;
+    if (pinned !== undefined) updates.pinned = pinned;
+    if (archived !== undefined) updates.archived = archived;
+    const { data, error } = await supabase
+      .from('conversations')
+      .update(updates)
+      .eq('id', id)
+      .eq('user_id', req.user.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/chat/conversations/:id', authenticate, async (req, res) => {
+  try {
+    await supabase
+      .from('conversations')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id);
+    res.json({ message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', req.params.id)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('file'), async (req, res) => {
+  try {
+    const conversationId = req.params.id;
+    const { message } = req.body;
+    const file = req.file;
+
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .eq('user_id', req.user.id)
+      .single();
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    // Creator question (short response)
+    if (message) {
+      const question = message.toLowerCase();
+      const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
+      if (creatorKeywords.some(keyword => question.includes(keyword))) {
+        await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message || '' });
+
+        const creatorResponse = `
+I was created by **Ornella Mutuyimana**, a Rwandan technology enthusiast who is passionate about using AI to help farmers and livestock keepers. How can I assist you today with agriculture or livestock?
+
+Feel free to ask about:
+- Crop disease diagnosis
+- Livestock health
+- Yield improvement
+- Farm planning
+        `.trim();
+
+        await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: creatorResponse,
+            versions: [creatorResponse],
+            current_version_index: 0,
+          });
+        await supabase
+          .from('conversations')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', conversationId);
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+
+        const words = creatorResponse.split(' ');
+        for (let i = 0; i < words.length; i++) {
+          const chunk = (i === 0 ? words[i] : ' ' + words[i]);
+          res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+          await new Promise(r => setTimeout(r, 20));
+        }
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        log('Authenticated chat completed (creator question)', 'info');
+        return;
+      }
+    }
+
+    // Normal flow
+    let fileMetadata = null;
+    if (file) {
+      const fileExt = file.originalname.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
+      const filePath = `${req.user.id}/${fileName}`;
+      const { data: uploadData } = await supabase.storage
+        .from(storageBucket)
+        .upload(filePath, file.buffer, { contentType: file.mimetype });
+      const { publicURL } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
+      fileMetadata = {
+        filename: file.originalname,
+        storage_path: filePath,
+        mime_type: file.mimetype,
+        size: file.size,
+        public_url: publicURL,
+      };
+      await supabase.from('files').insert({
+        user_id: req.user.id,
+        filename: file.originalname,
+        storage_path: filePath,
+        mime_type: file.mimetype,
+        size: file.size,
+      });
+    }
+
+    const messageData = {
+      conversation_id: conversationId,
+      role: 'user',
+      content: message || '',
+    };
+    if (fileMetadata) messageData.files = [fileMetadata];
+    await supabase.from('messages').insert(messageData);
+
+    const { data: history } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
+
+    let searchResults = null;
+    if (TAVILY_API_KEY) {
+      searchResults = await tavilySearch(message || 'agriculture update');
+    }
+
+    let finalPrompt = aiMessages[aiMessages.length - 1].content;
+    if (searchResults && searchResults.answer) {
+      finalPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer:\n${finalPrompt}`;
+    }
+
+    const model = await getWorkingModel();
+    const chatHistory = aiMessages.slice(0, -1).map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content
+    }));
+    const chatMessages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...chatHistory,
+      { role: 'user', content: finalPrompt }
+    ];
+
+    const stream = await groq.chat.completions.create({
+      model: model,
+      messages: chatMessages,
+      temperature: 0.7,
+      max_tokens: 512,
+      stream: true,
+    });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    let fullResponse = '';
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        fullResponse += content;
+        res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+      }
+    }
+
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+
+    await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: fullResponse,
+        versions: [fullResponse],
+        current_version_index: 0,
+      });
+    await supabase
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+    log(`Message saved for conversation ${conversationId}`, 'debug');
+  } catch (err) {
+    log(`Send message error: ${err.message}`, 'error');
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+  }
+});
+
+app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
+  try {
+    const conversationId = req.params.id;
+    const { messageIndex } = req.body;
+    const { data: allMessages } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    if (messageIndex >= allMessages.length || allMessages[messageIndex].role !== 'assistant')
+      return res.status(400).json({ error: 'Invalid index' });
+
+    const idsToDelete = allMessages.slice(messageIndex).map(m => m.id);
+    if (idsToDelete.length > 0) await supabase.from('messages').delete().in('id', idsToDelete);
+
+    const { data: remaining } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    const aiMessages = remaining.map(m => ({ role: m.role, content: m.content }));
+    if (aiMessages.length === 0 || aiMessages[aiMessages.length - 1].role !== 'user')
+      return res.status(400).json({ error: 'No user message' });
+
+    const model = await getWorkingModel();
+    const chatHistory = aiMessages.slice(0, -1).map(m => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content
+    }));
+    const userPrompt = aiMessages[aiMessages.length - 1].content;
+    const chatMessages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...chatHistory,
+      { role: 'user', content: userPrompt }
+    ];
+
+    const stream = await groq.chat.completions.create({
+      model: model,
+      messages: chatMessages,
+      temperature: 0.7,
+      max_tokens: 512,
+      stream: true,
+    });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    let fullResponse = '';
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        fullResponse += content;
+        res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+      }
+    }
+    res.write('data: [DONE]\n\n');
+    res.end();
+
+    await supabase
+      .from('messages')
+      .insert({ conversation_id: conversationId, role: 'assistant', content: fullResponse });
+    await supabase
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+    log(`Regenerated for conversation ${conversationId}`, 'debug');
+  } catch (err) {
+    log(`Regenerate error: ${err.message}`, 'error');
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+  }
+});
+
+app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content, truncate } = req.body;
+    const { data: msg } = await supabase
+      .from('messages')
+      .select('*, conversation_id, conversations(user_id)')
+      .eq('id', id)
+      .single();
+    if (!msg || msg.conversations.user_id !== req.user.id)
+      return res.status(403).json({ error: 'Unauthorized' });
+    if (msg.role !== 'user') return res.status(400).json({ error: 'Only user messages can be edited' });
+
+    await supabase.from('messages').update({ content }).eq('id', id);
+    if (truncate) {
+      const { data: later } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', msg.conversation_id)
+        .gt('created_at', msg.created_at);
+      if (later.length) await supabase.from('messages').delete().in('id', later.map(m => m.id));
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', msg.conversation_id);
+    }
+    res.json({ message: 'Updated' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ======================== SHARE ROUTES ========================
 
