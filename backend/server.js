@@ -51,16 +51,47 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+// Updated to currently available free models (as of 2026)
 const MODEL_CANDIDATES = [
-  'mistralai/mistral-7b-instruct:free',
-  'meta-llama/llama-3.1-8b-instruct:free',
+  'meta-llama/llama-3.2-3b-instruct:free',
   'google/gemma-2-9b-it:free',
+  'microsoft/phi-3-mini-128k-instruct:free',
 ];
 
 let workingModel = null;
+let modelDiscoveryDone = false;
+
+async function discoverModels() {
+  if (modelDiscoveryDone) return;
+  try {
+    const response = await axios.get('https://openrouter.ai/api/v1/models', {
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      }
+    });
+    const allModels = response.data.data || [];
+    const freeModels = allModels
+      .filter(m => m.id && m.id.includes(':free'))
+      .map(m => m.id);
+    if (freeModels.length > 0) {
+      // Add free models to candidate list (prepend to try them first)
+      for (const model of freeModels) {
+        if (!MODEL_CANDIDATES.includes(model)) {
+          MODEL_CANDIDATES.unshift(model);
+        }
+      }
+      log(`Discovered free models: ${freeModels.join(', ')}`, 'info');
+    }
+    modelDiscoveryDone = true;
+  } catch (err) {
+    log(`Model discovery failed: ${err.message}`, 'error');
+  }
+}
 
 async function getWorkingModel() {
   if (workingModel) return workingModel;
+  await discoverModels();
+
   for (const model of MODEL_CANDIDATES) {
     try {
       const response = await axios.post(
@@ -86,9 +117,55 @@ async function getWorkingModel() {
         return model;
       }
     } catch (err) {
-      log(`⚠️ Model ${model} failed: ${err.message}`, 'warn');
+      // Log more details about the error
+      if (err.response) {
+        log(`⚠️ Model ${model} failed: ${err.response.status} ${JSON.stringify(err.response.data)}`, 'warn');
+      } else {
+        log(`⚠️ Model ${model} failed: ${err.message}`, 'warn');
+      }
     }
   }
+  // If all fail, try to fetch a random free model from the list again
+  try {
+    const response = await axios.get('https://openrouter.ai/api/v1/models', {
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      }
+    });
+    const allModels = response.data.data || [];
+    const freeModels = allModels
+      .filter(m => m.id && m.id.includes(':free') && m.id.includes('llama'))
+      .map(m => m.id);
+    if (freeModels.length > 0) {
+      const fallbackModel = freeModels[0];
+      log(`🔄 Trying fallback model: ${fallbackModel}`, 'info');
+      const response2 = await axios.post(
+        OPENROUTER_URL,
+        {
+          model: fallbackModel,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 5,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': process.env.FRONTEND_URL,
+            'X-Title': 'AgriDeepAI',
+          },
+          timeout: 5000,
+        }
+      );
+      if (response2.data && response2.data.choices && response2.data.choices.length > 0) {
+        workingModel = fallbackModel;
+        log(`✅ Using fallback model: ${fallbackModel}`, 'info');
+        return fallbackModel;
+      }
+    }
+  } catch (err) {
+    log(`Fallback model discovery failed: ${err.message}`, 'error');
+  }
+
   throw new Error('No working models available. Check your OpenRouter API key.');
 }
 
@@ -420,18 +497,10 @@ app.post('/api/auth/2fa/validate-login', async (req, res) => {
     // Delete the temp token
     delete store[tempToken];
     // Now sign the user in properly (create a session)
-    // We don't have the password here, so we need to create a session via Supabase admin?
-    // Better: we can log in with the password again? But we have the user id.
-    // We can issue a session using supabase.auth.admin.createSession? That requires service key.
-    // Actually, we can just sign in again with the password, but we don't have it.
-    // Alternative: we can use the token we already have from the initial login attempt? We didn't store it.
-    // Simpler: we can return a session by using supabase.auth.admin.createSession (with service key)
-    // We'll implement that.
     const { data: sessionData, error: sessionError } = await supabase.auth.admin.createSession({
       user_id: entry.userId
     });
     if (sessionError) throw sessionError;
-    // Also get the user
     const { data: userData } = await supabase.auth.admin.getUserById(entry.userId);
     log(`User ${userData.user.email} logged in with 2FA`, 'info');
     res.json({ user: userData.user, session: sessionData });
@@ -542,7 +611,6 @@ app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
 app.post('/api/auth/2fa/enable', authenticate, async (req, res) => {
   try {
     const user = req.user;
-    // Check if already enabled
     const { data: profile } = await supabase
       .from('profiles')
       .select('two_factor_enabled')
@@ -551,15 +619,11 @@ app.post('/api/auth/2fa/enable', authenticate, async (req, res) => {
     if (profile && profile.two_factor_enabled) {
       return res.status(400).json({ error: '2FA already enabled' });
     }
-    // Generate secret
     const secret = speakeasy.generateSecret({ length: 20, name: 'AgriDeepAI' });
-    // Store secret temporarily (or directly in profile with enabled false)
-    // We'll store in the profile with enabled false, and only set enabled true after verification
     await supabase
       .from('profiles')
       .update({ two_factor_secret: secret.base32 })
       .eq('id', user.id);
-    // Generate QR code data URL
     const qrCodeDataUrl = await QRCode.toDataURL(secret.otpauth_url);
     res.json({ secret: secret.base32, qrCodeDataUrl });
   } catch (err) {
