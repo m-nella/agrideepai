@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Final, all fixes)
+// AGRIDEEPAI – Full Frontend (Final)
 // ============================================================
 
 const log = (msg, type = 'info') => {
@@ -330,7 +330,6 @@ function renderChatList() {
   const pinned = state.chats.filter(c => c.pinned);
   const unpinned = state.chats.filter(c => !c.pinned);
 
-  // Pinned section
   if (pinned.length > 0) {
     const pinContainer = document.createElement('div');
     pinContainer.className = 'pinned-section';
@@ -343,7 +342,6 @@ function renderChatList() {
     chatList.appendChild(pinContainer);
   }
 
-  // Unpinned section
   if (unpinned.length > 0) {
     unpinned.forEach(chat => appendChatItem(chatList, chat));
   }
@@ -1147,7 +1145,7 @@ async function togglePin(id) {
   chatMenu.classList.add('hidden');
 }
 
-// --- Context menu ---
+// --- Context menu (fixed: close menu immediately on any action) ---
 function openChatMenu(e, chatId) {
   e.preventDefault();
   state.contextMenuTarget = chatId;
@@ -1170,16 +1168,25 @@ function openChatMenu(e, chatId) {
       const chat = state.chats.find(c => c.id === chatId);
       btn.textContent = chat?.pinned ? 'Unpin' : 'Pin';
       btn.innerHTML = `<i data-lucide="${chat?.pinned ? 'pin-off' : 'pin'}"></i> ${chat?.pinned ? 'Unpin' : 'Pin'}`;
-      btn.onclick = () => togglePin(chatId);
+      btn.onclick = () => {
+        chatMenu.classList.add('hidden'); // 👈 close menu immediately
+        togglePin(chatId);
+      };
     } else if (action === 'share') {
       btn.onclick = () => {
+        chatMenu.classList.add('hidden'); // 👈 close immediately
         shareConversation();
-        chatMenu.classList.add('hidden');
       };
     } else if (action === 'rename') {
-      btn.onclick = () => renameChat(chatId);
+      btn.onclick = () => {
+        chatMenu.classList.add('hidden'); // 👈 close immediately
+        renameChat(chatId);
+      };
     } else if (action === 'delete') {
-      btn.onclick = () => deleteChat(chatId);
+      btn.onclick = () => {
+        chatMenu.classList.add('hidden'); // 👈 close immediately
+        deleteChat(chatId);
+      };
     }
   });
   window.refreshIcons();
