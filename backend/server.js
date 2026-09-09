@@ -49,9 +49,10 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 // ---------- Groq (free, no card) ----------
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// We'll use one of the free models – choose the one you like:
-// 'llama-3.1-70b-versatile' (most powerful), or 'llama-3.1-8b-instant' (faster, still good)
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
+// ✅ FIXED: Use the current production model
+// llama-3.3-70b-versatile is the direct replacement for the decommissioned llama-3.1-70b-versatile[reference:4][reference:5]
+// Other available options: llama-3.1-8b-instant (faster, less capable), llama-4-maverick-17b (newer)[reference:6]
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
 // ---------- Tavily ----------
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
@@ -59,7 +60,7 @@ const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 // ---------- Logo URL ----------
 const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// ---------- System Prompt (unchanged) ----------
+// ---------- System Prompt ----------
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. Provide practical, accurate, actionable advice, with focus on Rwanda and African agriculture.
 
