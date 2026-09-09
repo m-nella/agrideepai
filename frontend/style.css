@@ -506,15 +506,15 @@ body {
 }
 .composer-main textarea::placeholder { color: var(--text-muted); }
 
-/* Smaller send button */
+/* Send button - green when enabled */
 .send-button {
-  background: var(--accent-dim);
-  color: var(--text);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--accent);
+  color: #fff;
+  border: none;
   border-radius: var(--radius-sm);
   padding: 0.2rem 0.5rem;
   cursor: pointer;
-  transition: background 0.2s, opacity 0.2s, border-color 0.2s;
+  transition: opacity 0.2s, background 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -522,25 +522,22 @@ body {
   min-height: 32px;
   width: 32px;
   height: 32px;
-  opacity: 0.2;
-}
-.send-button:not(:disabled):hover {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  opacity: 1;
 }
 .send-button:disabled {
+  background: var(--accent-dim);
+  color: var(--text-muted);
   cursor: default;
-  opacity: 0.2;
+  opacity: 0.3;
+}
+.send-button:not(:disabled):hover {
+  background: var(--accent-hover);
 }
 .send-button.generating {
   background: var(--danger);
-  color: #fff;
-  border-color: var(--danger);
-  opacity: 1;
 }
 .send-button.generating:hover {
-  background: #e85d5d;
+  background: #c0392b;
 }
 .send-button .send-icon,
 .send-button .stop-icon {
@@ -634,6 +631,87 @@ body {
 .modal-content .status-msg { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.3rem; }
 .modal-content hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
+/* ===== Account Modal (large, two-column) ===== */
+.account-modal .modal-content {
+  max-width: 700px;
+  width: 95%;
+  padding: 1.5rem;
+}
+.account-modal-layout {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+.account-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 140px;
+  border-right: 1px solid var(--border);
+  padding-right: 1rem;
+}
+.account-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
+  font-size: 0.9rem;
+}
+.account-tab:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.account-tab.active {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+.account-tab.logout-tab {
+  color: var(--danger);
+  margin-top: auto;
+}
+.account-tab.logout-tab:hover {
+  background: rgba(232, 93, 93, 0.12);
+}
+.account-content {
+  flex: 1;
+  padding-right: 0.5rem;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+.account-content h2 {
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+}
+.account-content .profile-info p {
+  margin: 0.3rem 0;
+  font-size: 0.95rem;
+}
+.account-content .account-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.account-content .account-section input {
+  margin-top: 0.2rem;
+}
+.account-content .account-section button {
+  width: auto;
+  align-self: flex-start;
+  padding: 0.4rem 1rem;
+}
+.account-content .security-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.account-content .sessions-list p {
+  margin: 0.3rem 0;
+}
+
 /* ===== Context Menu ===== */
 .context-menu {
   position: fixed;
@@ -687,6 +765,26 @@ body {
   #sidebar.collapsed .chat-history { display: block; }
   #sidebar.collapsed .sidebar-footer span { display: inline; }
   .message { max-width: 92%; }
+  .account-modal .modal-content {
+    max-width: 95%;
+    padding: 1rem;
+  }
+  .account-modal-layout {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .account-tabs {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+    padding-right: 0;
+  }
+  .account-tab {
+    white-space: nowrap;
+    padding: 0.3rem 0.6rem;
+  }
 }
 @media (min-width: 769px) {
   #sidebar.collapsed .brand-name { display: none; }
