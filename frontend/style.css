@@ -684,4 +684,12 @@ body {
   .new-chat-btn span { display: inline !important; }
   .auth-btn span { display: inline !important; }
   #sidebar.collapsed { width: 280px; }
-  #sidebar.collapsed .chat-history
+  #sidebar.collapsed .chat-history { display: block; }
+  #sidebar.collapsed .sidebar-footer span { display: inline; }
+  .message { max-width: 92%; }
+}
+@media (min-width: 769px) {
+  #sidebar.collapsed .brand-name { display: none; }
+  #sidebar.collapsed .new-chat-btn span { display: none; }
+  #sidebar.collapsed .auth-btn span { display: none; }
+}
