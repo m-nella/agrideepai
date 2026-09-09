@@ -1,8 +1,7 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Final)
+// AGRIDEEPAI – Full Frontend (Final, all fixes)
 // ============================================================
 
-// --- Logging ---
 const log = (msg, type = 'info') => {
   const timestamp = new Date().toISOString();
   console.log(`[FRONTEND] [${timestamp}] [${type.toUpperCase()}] ${msg}`);
@@ -61,7 +60,7 @@ function showCustomModal(title, message, confirmText = 'Confirm', cancelText = '
         <h2>${title}</h2>
         <p style="margin: 1rem 0; color: var(--text-muted);">${message}</p>
         <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
-          <button class="btn-primary" id="customModalConfirm" style="flex:1; ${isDanger ? 'background: var(--danger);' : ''}">${confirmText}</button>
+          <button class="btn-primary ${isDanger ? 'btn-danger' : ''}" id="customModalConfirm" style="flex:1;">${confirmText}</button>
           <button class="btn-primary" id="customModalCancel" style="flex:1; background: transparent; border: 1px solid var(--border); color: var(--text);">${cancelText}</button>
         </div>
       </div>
@@ -325,53 +324,66 @@ function rebuildVersions() {
   });
 }
 
-// --- Render chat list (with pin icon and sorting) ---
+// --- Render chat list (with pinned section) ---
 function renderChatList() {
   chatList.innerHTML = '';
-  if (!state.chats.length) {
-    chatList.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:1.5rem 0;font-size:0.9rem;">No chats yet</div>';
-    return;
+  const pinned = state.chats.filter(c => c.pinned);
+  const unpinned = state.chats.filter(c => !c.pinned);
+
+  // Pinned section
+  if (pinned.length > 0) {
+    const pinContainer = document.createElement('div');
+    pinContainer.className = 'pinned-section';
+    pinContainer.style.cssText = 'border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; padding-bottom: 0.5rem;';
+    const pinLabel = document.createElement('div');
+    pinLabel.style.cssText = 'font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; padding: 0.2rem 0.6rem;';
+    pinLabel.textContent = 'Pinned';
+    pinContainer.appendChild(pinLabel);
+    pinned.forEach(chat => appendChatItem(pinContainer, chat));
+    chatList.appendChild(pinContainer);
   }
-  const sorted = [...state.chats].sort((a, b) => {
-    // Pinned chats on top
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
-    const da = a.updated_at || a.updatedAt || a.createdAt;
-    const db = b.updated_at || b.updatedAt || b.createdAt;
-    return new Date(db) - new Date(da);
-  });
-  sorted.forEach(chat => {
-    const div = document.createElement('div');
-    div.className = `chat-item${chat.id === state.activeChatId ? ' active' : ''}`;
-    div.dataset.id = chat.id;
-    const titleSpan = document.createElement('span');
-    titleSpan.className = 'title';
-    titleSpan.textContent = chat.title || 'New Chat';
-    if (chat.pinned) {
-      const pinIcon = document.createElement('i');
-      pinIcon.setAttribute('data-lucide', 'pin');
-      pinIcon.style.width = '14px';
-      pinIcon.style.height = '14px';
-      pinIcon.style.marginRight = '4px';
-      pinIcon.style.color = 'var(--accent)';
-      titleSpan.prepend(pinIcon);
-    }
-    div.appendChild(titleSpan);
-    const actions = document.createElement('div');
-    actions.className = 'actions';
-    const moreBtn = document.createElement('button');
-    moreBtn.innerHTML = `<i data-lucide="more-horizontal" style="width:16px;height:16px;"></i>`;
-    moreBtn.title = 'More options';
-    moreBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openChatMenu(e, chat.id);
-    });
-    actions.appendChild(moreBtn);
-    div.appendChild(actions);
-    div.addEventListener('click', () => selectChat(chat.id));
-    chatList.appendChild(div);
-  });
+
+  // Unpinned section
+  if (unpinned.length > 0) {
+    unpinned.forEach(chat => appendChatItem(chatList, chat));
+  }
+
+  if (state.chats.length === 0) {
+    chatList.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:1.5rem 0;font-size:0.9rem;">No chats yet</div>';
+  }
   window.refreshIcons();
+}
+
+function appendChatItem(container, chat) {
+  const div = document.createElement('div');
+  div.className = `chat-item${chat.id === state.activeChatId ? ' active' : ''}`;
+  div.dataset.id = chat.id;
+  const titleSpan = document.createElement('span');
+  titleSpan.className = 'title';
+  titleSpan.textContent = chat.title || 'New Chat';
+  if (chat.pinned) {
+    const pinIcon = document.createElement('i');
+    pinIcon.setAttribute('data-lucide', 'pin');
+    pinIcon.style.width = '14px';
+    pinIcon.style.height = '14px';
+    pinIcon.style.marginRight = '4px';
+    pinIcon.style.color = 'var(--accent)';
+    titleSpan.prepend(pinIcon);
+  }
+  div.appendChild(titleSpan);
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const moreBtn = document.createElement('button');
+  moreBtn.innerHTML = `<i data-lucide="more-horizontal" style="width:16px;height:16px;"></i>`;
+  moreBtn.title = 'More options';
+  moreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openChatMenu(e, chat.id);
+  });
+  actions.appendChild(moreBtn);
+  div.appendChild(actions);
+  div.addEventListener('click', () => selectChat(chat.id));
+  container.appendChild(div);
 }
 
 // --- Render messages ---
@@ -955,10 +967,8 @@ async function shareConversation() {
   try {
     let response;
     if (state.currentUser) {
-      // Authenticated: use the existing endpoint
       response = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
     } else {
-      // Guest: send messages to a new public endpoint
       const messages = state.messages.map(m => ({ role: m.role, content: m.content }));
       response = await fetch('/api/share/guest', {
         method: 'POST',
@@ -1048,7 +1058,7 @@ async function deleteChat(id) {
     'Are you sure you want to delete this chat? This action cannot be undone.',
     'Delete',
     'Cancel',
-    true // danger
+    true
   );
   if (!confirmed) return;
 
@@ -1222,7 +1232,7 @@ function updateSendButton() {
     if (sendIcon) sendIcon.style.display = 'inline';
     if (stopIcon) stopIcon.style.display = 'none';
     sendBtn.disabled = !hasContent;
-    sendBtn.style.opacity = hasContent ? '1' : '0.35';
+    sendBtn.style.opacity = hasContent ? '1' : '0.2';
     sendBtn.classList.remove('generating');
   } else {
     if (sendIcon) sendIcon.style.display = 'none';
@@ -1553,7 +1563,7 @@ function renderAuthForm(mode) {
         const { data, error } = await state.supabase.auth.signUp({
           email,
           password,
-          options: { data: { full_name: fullName } },
+          options: { data: { full_name: fullName }, email_confirm: false },
         });
         if (error) throw error;
         document.getElementById('verifySection').style.display = 'block';
@@ -1640,7 +1650,7 @@ function openSettingsModal() {
       <hr />
       <h3 style="color:var(--danger);">Delete Account</h3>
       <p style="color:var(--danger);font-size:0.85rem;">This action is permanent and cannot be undone.</p>
-      <button class="btn-primary" id="deleteAccountBtn" style="background:var(--danger);">Delete Account</button>
+      <button class="btn-primary btn-danger" id="deleteAccountBtn" style="background:var(--danger);">Delete Account</button>
       <hr />
       <button class="btn-primary" id="logoutBtn" style="background:transparent;border:1px solid var(--border);color:var(--text);">Log Out</button>
     </div>
