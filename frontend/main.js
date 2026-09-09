@@ -50,7 +50,7 @@ let state = {
 };
 
 // --- Custom Modal helpers ---
-function showCustomModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel') {
+function showCustomModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel', isDanger = false) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal';
@@ -61,7 +61,7 @@ function showCustomModal(title, message, confirmText = 'Confirm', cancelText = '
         <h2>${title}</h2>
         <p style="margin: 1rem 0; color: var(--text-muted);">${message}</p>
         <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
-          <button class="btn-primary" id="customModalConfirm" style="flex:1;">${confirmText}</button>
+          <button class="btn-primary" id="customModalConfirm" style="flex:1; ${isDanger ? 'background: var(--danger);' : ''}">${confirmText}</button>
           <button class="btn-primary" id="customModalCancel" style="flex:1; background: transparent; border: 1px solid var(--border); color: var(--text);">${cancelText}</button>
         </div>
       </div>
@@ -142,7 +142,7 @@ function showCustomPrompt(title, defaultValue = '') {
   });
 }
 
-// --- Clean content: remove "Sources:" section ---
+// --- Clean content ---
 function cleanContent(content) {
   if (!content) return content;
   const lines = content.split('\n');
@@ -325,7 +325,7 @@ function rebuildVersions() {
   });
 }
 
-// --- Render chat list ---
+// --- Render chat list (with pin icon and sorting) ---
 function renderChatList() {
   chatList.innerHTML = '';
   if (!state.chats.length) {
@@ -333,6 +333,7 @@ function renderChatList() {
     return;
   }
   const sorted = [...state.chats].sort((a, b) => {
+    // Pinned chats on top
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
     const da = a.updated_at || a.updatedAt || a.createdAt;
@@ -347,10 +348,13 @@ function renderChatList() {
     titleSpan.className = 'title';
     titleSpan.textContent = chat.title || 'New Chat';
     if (chat.pinned) {
-      const pin = document.createElement('span');
-      pin.className = 'pin-icon';
-      pin.textContent = '📌';
-      titleSpan.prepend(pin);
+      const pinIcon = document.createElement('i');
+      pinIcon.setAttribute('data-lucide', 'pin');
+      pinIcon.style.width = '14px';
+      pinIcon.style.height = '14px';
+      pinIcon.style.marginRight = '4px';
+      pinIcon.style.color = 'var(--accent)';
+      titleSpan.prepend(pinIcon);
     }
     div.appendChild(titleSpan);
     const actions = document.createElement('div');
@@ -387,7 +391,6 @@ function renderMessages() {
     const row = document.createElement('div');
     row.className = `message-row ${msg.role}`;
 
-    // Assistant header (outside bubble)
     if (msg.role === 'assistant') {
       const header = document.createElement('div');
       header.className = 'assistant-header-row';
@@ -398,7 +401,6 @@ function renderMessages() {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
-    // Editing state for user messages
     if (state.editingMessageId === msg.id && msg.role === 'user') {
       const editArea = document.createElement('div');
       editArea.style.cssText = 'width:100%;';
@@ -442,7 +444,6 @@ function renderMessages() {
       msgDiv.appendChild(editArea);
       setTimeout(() => textarea.focus(), 50);
     } else {
-      // --- Assistant message with integrated thinking ---
       if (msg.role === 'assistant') {
         const isLastMessage = (index === lastIndex);
         const isThinking = isLastMessage && state.isGenerating && msg.content === '';
@@ -457,12 +458,10 @@ function renderMessages() {
           `;
           msgDiv.appendChild(thinkingDiv);
         } else if (msg.content) {
-          // Clean content (remove sources)
           const cleaned = cleanContent(msg.content);
           const contentDiv = document.createElement('div');
           contentDiv.className = 'message-content';
           let html = marked.parse(cleaned || '');
-          // Remove <hr> tags
           html = html.replace(/<hr\s*\/?>/g, '');
           contentDiv.innerHTML = html;
           msgDiv.appendChild(contentDiv);
@@ -541,14 +540,12 @@ function renderMessages() {
           }
         }
       } else {
-        // User message content
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
         contentDiv.textContent = msg.content;
         msgDiv.appendChild(contentDiv);
       }
 
-      // --- Actions Row (only after response complete) ---
       const showActions = (msg.role === 'user') ||
                           (msg.role === 'assistant' && msg.content && !(state.isGenerating && index === lastIndex && msg.content === ''));
 
@@ -556,7 +553,6 @@ function renderMessages() {
         const actionsRow = document.createElement('div');
         actionsRow.className = 'message-actions-row';
 
-        // Copy
         const copyBtn = document.createElement('button');
         copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
         copyBtn.title = 'Copy';
@@ -568,7 +564,6 @@ function renderMessages() {
         actionsRow.appendChild(copyBtn);
 
         if (msg.role === 'user') {
-          // Edit
           const editBtn = document.createElement('button');
           editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
           editBtn.title = 'Edit';
@@ -581,7 +576,6 @@ function renderMessages() {
         }
 
         if (msg.role === 'assistant') {
-          // Like
           const likeBtn = document.createElement('button');
           const isLiked = state.likedMessages.has(msg.id);
           likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
@@ -594,7 +588,6 @@ function renderMessages() {
           });
           actionsRow.appendChild(likeBtn);
 
-          // Dislike
           const dislikeBtn = document.createElement('button');
           const isDisliked = state.dislikedMessages.has(msg.id);
           dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
@@ -607,7 +600,6 @@ function renderMessages() {
           });
           actionsRow.appendChild(dislikeBtn);
 
-          // Regenerate
           const regenBtn = document.createElement('button');
           regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
           regenBtn.title = 'Regenerate';
@@ -618,7 +610,6 @@ function renderMessages() {
           });
           actionsRow.appendChild(regenBtn);
 
-          // Share (opens modal with link)
           const shareBtn = document.createElement('button');
           shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
           shareBtn.title = 'Share';
@@ -642,7 +633,6 @@ function renderMessages() {
 
   window.refreshIcons();
   const container = document.getElementById('chatContainer');
-  // Auto-scroll to bottom if user is near bottom or we just sent a new message
   if (state.shouldScrollToBottom || isNearBottom(container)) {
     container.scrollTop = container.scrollHeight;
     state.shouldScrollToBottom = false;
@@ -954,7 +944,7 @@ async function regenerateMessage(index) {
   }
 }
 
-// --- Share Conversation (opens modal with link) ---
+// --- Share Conversation (works with or without auth) ---
 async function shareConversation() {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
@@ -962,14 +952,25 @@ async function shareConversation() {
     return;
   }
 
-  if (!state.currentUser) {
-    showToast('Please sign in to share chats', true);
-    return;
-  }
-
   try {
-    const res = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
-    const data = await res.json();
+    let response;
+    if (state.currentUser) {
+      // Authenticated: use the existing endpoint
+      response = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
+    } else {
+      // Guest: send messages to a new public endpoint
+      const messages = state.messages.map(m => ({ role: m.role, content: m.content }));
+      response = await fetch('/api/share/guest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages }),
+      });
+    }
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to generate share link');
+    }
+    const data = await response.json();
     shareLinkDisplay.textContent = data.url;
     shareModal.classList.remove('hidden');
     copyShareLink.onclick = () => {
@@ -1046,7 +1047,8 @@ async function deleteChat(id) {
     'Delete Chat',
     'Are you sure you want to delete this chat? This action cannot be undone.',
     'Delete',
-    'Cancel'
+    'Cancel',
+    true // danger
   );
   if (!confirmed) return;
 
@@ -1155,6 +1157,9 @@ function openChatMenu(e, chatId) {
     btn.onclick = null;
     const action = btn.dataset.action;
     if (action === 'pin') {
+      const chat = state.chats.find(c => c.id === chatId);
+      btn.textContent = chat?.pinned ? 'Unpin' : 'Pin';
+      btn.innerHTML = `<i data-lucide="${chat?.pinned ? 'pin-off' : 'pin'}"></i> ${chat?.pinned ? 'Unpin' : 'Pin'}`;
       btn.onclick = () => togglePin(chatId);
     } else if (action === 'share') {
       btn.onclick = () => {
@@ -1176,7 +1181,7 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// --- New Chat (creates chat only if no empty chat exists) ---
+// --- New Chat ---
 function handleNewChat() {
   log('New Chat clicked', 'info');
   const emptyChat = state.chats.find(chat => chat.messages.length === 0);
@@ -1259,7 +1264,6 @@ async function sendMessage() {
   if (!hasText && !hasAttachments) return;
   if (state.isGenerating) return;
 
-  // Create chat if none exists
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
@@ -1708,7 +1712,8 @@ function openSettingsModal() {
       'Delete Account',
       'Are you sure you want to permanently delete your account? This action cannot be undone and all your data will be lost.',
       'Delete Account',
-      'Cancel'
+      'Cancel',
+      true
     );
     if (!confirmed) return;
 
