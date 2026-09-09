@@ -400,27 +400,21 @@ app.post('/api/chat/guest', async (req, res) => {
       const question = lastUserMsg.content.toLowerCase();
       const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
       if (creatorKeywords.some(keyword => question.includes(keyword))) {
+        // ---------- Improved creator response (professional, no bullet lists) ----------
         const creatorResponse = `
 # AgriDeepAI Creator
 
-AgriDeepAI was created and developed by **Ornella Mutuyimana**, a Rwandan female technology enthusiast and developer.
+AgriDeepAI was created and developed by **Ornella Mutuyimana**, a Rwandan technology enthusiast and developer with a passion for leveraging artificial intelligence to solve real-world challenges in agriculture and livestock management.
 
-## About the Creator
+## About Ornella
 
-- **Name:** Ornella Mutuyimana
-- **Country:** Rwanda
-- **Education:** A-Level secondary education (2025)
-- **Combination:** Mathematics, Computer Science and Economics (MCE)
-- **School:** Lycée Saint Marcel de Rukara, Kayonza District, Eastern Province, Rwanda
-- **Interests:** Artificial Intelligence, Software Development, Information Technology, Computer Science, and Modern Digital Technologies
+Ornella completed her A-Level secondary education in 2025 at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, where she excelled in Mathematics, Computer Science, and Economics (MCE). Her deep interest in artificial intelligence, software development, and modern digital technologies drives her mission to make advanced agricultural knowledge accessible to farmers and agribusinesses across Rwanda and beyond.
 
 ## Vision
 
-AgriDeepAI is part of Ornella's vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+AgriDeepAI embodies Ornella's vision of using AI to democratize expert agricultural advice—providing practical, actionable insights that empower farmers to improve crop yields, manage livestock health, and adopt sustainable practices.
 
----
-
-If you have any other questions about agriculture, livestock, or related topics, feel free to ask!
+If you have any questions about agriculture, livestock, or related topics, feel free to ask!
         `.trim();
 
         res.setHeader('Content-Type', 'text/event-stream');
@@ -597,27 +591,21 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         // Save user message
         await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message || '' });
 
+        // ---------- Improved creator response (professional, no bullet lists) ----------
         const creatorResponse = `
 # AgriDeepAI Creator
 
-AgriDeepAI was created and developed by **Ornella Mutuyimana**, a Rwandan female technology enthusiast and developer.
+AgriDeepAI was created and developed by **Ornella Mutuyimana**, a Rwandan technology enthusiast and developer with a passion for leveraging artificial intelligence to solve real-world challenges in agriculture and livestock management.
 
-## About the Creator
+## About Ornella
 
-- **Name:** Ornella Mutuyimana
-- **Country:** Rwanda
-- **Education:** A-Level secondary education (2025)
-- **Combination:** Mathematics, Computer Science and Economics (MCE)
-- **School:** Lycée Saint Marcel de Rukara, Kayonza District, Eastern Province, Rwanda
-- **Interests:** Artificial Intelligence, Software Development, Information Technology, Computer Science, and Modern Digital Technologies
+Ornella completed her A-Level secondary education in 2025 at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, where she excelled in Mathematics, Computer Science, and Economics (MCE). Her deep interest in artificial intelligence, software development, and modern digital technologies drives her mission to make advanced agricultural knowledge accessible to farmers and agribusinesses across Rwanda and beyond.
 
 ## Vision
 
-AgriDeepAI is part of Ornella's vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+AgriDeepAI embodies Ornella's vision of using AI to democratize expert agricultural advice—providing practical, actionable insights that empower farmers to improve crop yields, manage livestock health, and adopt sustainable practices.
 
----
-
-If you have any other questions about agriculture, livestock, or related topics, feel free to ask!
+If you have any questions about agriculture, livestock, or related topics, feel free to ask!
         `.trim();
 
         await supabase
