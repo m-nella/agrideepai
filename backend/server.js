@@ -49,67 +49,51 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 // ---------- Groq (free, no card) ----------
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// ---------- Model Fallback Chain ----------
-// Order: most capable first, but all confirmed to exist on free tier.
-// If a model is decommissioned or inaccessible, we move to the next.
-const MODEL_CANDIDATES = [
-  'llama-3.3-70b-versatile',   // Most capable, if available
-  'llama-3.1-8b-instant',      // Fast, reliable, good quality
-  'mixtral-8x7b-32768',        // Strong alternative
-  'gemma2-9b-it',              // Google’s open model
-];
+// ---------- Dynamic Model Discovery ----------
+let availableModels = [];
+let workingModel = null;
 
-let workingModel = null; // cache the first model that works
+async function discoverModels() {
+  if (availableModels.length > 0) return availableModels;
+  try {
+    const response = await groq.models.list();
+    const models = response.data
+      .filter(m => m.id && m.id.includes('llama') || m.id.includes('mixtral') || m.id.includes('gemma'))
+      .map(m => m.id);
+    // Filter out deprecated or non-chat models (keep only "versatile" and "instant")
+    const preferred = models.filter(m => m.includes('versatile') || m.includes('instant'));
+    availableModels = preferred.length > 0 ? preferred : models;
+    log(`Discovered Groq models: ${availableModels.join(', ')}`, 'info');
+    return availableModels;
+  } catch (err) {
+    log(`Failed to discover models: ${err.message}`, 'error');
+    // Fallback to a static list of known working models
+    availableModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+    return availableModels;
+  }
+}
 
-// Function to try Groq with fallback
-async function groqChatWithFallback(messages, options = {}) {
-  const maxAttempts = MODEL_CANDIDATES.length;
-  let lastError = null;
-
-  // If we already have a working model, try it first, but if it fails with model error, reset cache
-  const modelsToTry = workingModel
-    ? [workingModel, ...MODEL_CANDIDATES.filter(m => m !== workingModel)]
-    : MODEL_CANDIDATES;
-
-  for (let i = 0; i < modelsToTry.length; i++) {
-    const model = modelsToTry[i];
+async function getWorkingModel() {
+  if (workingModel) return workingModel;
+  const candidates = await discoverModels();
+  for (const model of candidates) {
     try {
-      log(`Trying Groq model: ${model}`, 'debug');
-      const stream = await groq.chat.completions.create({
+      // Quick test with a minimal request
+      const test = await groq.chat.completions.create({
         model: model,
-        messages: messages,
-        temperature: options.temperature || 0.7,
-        max_tokens: options.max_tokens || 2048,
-        stream: true,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
       });
-      // If we get here, model works -> cache it
-      if (!workingModel) {
+      if (test.choices && test.choices.length > 0) {
         workingModel = model;
         log(`✅ Cached working Groq model: ${model}`, 'info');
+        return model;
       }
-      return stream;
     } catch (err) {
-      const isModelError =
-        err.status === 404 ||
-        err.status === 400 && err.message?.includes('decommissioned') ||
-        err.message?.includes('model_not_found') ||
-        err.message?.includes('does not exist');
-      if (isModelError) {
-        log(`⚠️ Model ${model} failed (${err.message}). Trying next...`, 'warn');
-        lastError = err;
-        // If this was the cached model, clear cache
-        if (workingModel === model) {
-          workingModel = null;
-        }
-        continue;
-      } else {
-        // Non‑model error (network, auth, etc.) – throw immediately
-        throw err;
-      }
+      log(`⚠️ Model ${model} failed: ${err.message}`, 'warn');
     }
   }
-  // If all models failed
-  throw new Error(`All Groq models failed. Last error: ${lastError?.message || 'Unknown'}`);
+  throw new Error('No working Groq models found. Check your API key or try later.');
 }
 
 // ---------- Tavily ----------
@@ -137,37 +121,6 @@ To ensure your answers are professional and readable, you **MUST** use Markdown 
 5. **Use bold** (\`**bold**\`) for emphasis and *italic* (\`*italic*\`) for less emphasis.
 6. **Separate sections** with blank lines.
 7. **Keep paragraphs short** – one idea per paragraph.
-
-**EXAMPLE STRUCTURE FOR A LONG ANSWER:**
-\`\`\`
-# Main Heading
-
-Short introduction paragraph.
-
-## Important Points
-
-- Point one with explanation.
-- Point two with explanation.
-- Point three with explanation.
-
-## Steps
-
-1. First step.
-2. Second step.
-3. Third step.
-
-## Recommendation
-
-Final clear advice.
-
-| Factor | Impact | Action |
-|--------|--------|--------|
-| Soil pH | Affects nutrient uptake | Test and adjust |
-| Water | Critical for growth | Irrigate properly |
-
-\`\`\`
-
-For short answers, a simple heading and a few bullet points are sufficient. Always use formatting to improve clarity.
 
 **CREATOR IDENTITY:**
 AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
@@ -226,20 +179,59 @@ async function tavilySearch(query) {
 function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 const verificationStore = {};
 
-// ======================== EMAIL HELPER ========================
+// ======================== EMAIL HELPER (professional) ========================
 
-async function sendBrevoEmail(to, subject, htmlContent) {
+async function sendVerificationEmail(email, code, userId) {
   try {
+    const logoUrl = LOGO_URL;
+    const expiration = '10 minutes';
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Verify your AgriDeepAI account</title>
+        <style>
+          body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
+          .container { max-width: 560px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+          .logo { text-align: center; margin-bottom: 20px; }
+          .logo img { height: 60px; }
+          h1 { color: #1e232a; font-size: 24px; margin: 0 0 8px; }
+          p { color: #555; font-size: 16px; line-height: 1.6; }
+          .code { font-size: 28px; font-weight: bold; color: #2f8f46; background: #f0f8f0; padding: 10px 20px; border-radius: 8px; display: inline-block; letter-spacing: 4px; margin: 10px 0; }
+          .footer { margin-top: 30px; font-size: 13px; color: #888; border-top: 1px solid #eee; padding-top: 20px; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">
+            <img src="${logoUrl}" alt="AgriDeepAI Logo" />
+          </div>
+          <h1>Welcome to AgriDeepAI!</h1>
+          <p>Thanks for signing up. Please use the verification code below to complete your registration.</p>
+          <div style="text-align: center;">
+            <span class="code">${code}</span>
+          </div>
+          <p><strong>This code is valid for ${expiration}.</strong> If you didn't request this, please ignore this email.</p>
+          <p>If you have any questions, feel free to contact us at support@agrideepai.agentdomains.co.</p>
+          <div class="footer">
+            &copy; 2026 AgriDeepAI. All rights reserved.<br>
+            You're receiving this email because you signed up for an account.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
     const sendSmtpEmail = new brevo.SendSmtpEmail();
-    sendSmtpEmail.subject = subject;
+    sendSmtpEmail.subject = 'Verify your AgriDeepAI account';
     sendSmtpEmail.htmlContent = htmlContent;
-    sendSmtpEmail.sender = { name: 'AgriDeepAI', email: process.env.RESEND_FROM_EMAIL };
-    sendSmtpEmail.to = [{ email: to }];
+    sendSmtpEmail.sender = { name: 'AgriDeepAI', email: 'noreply@agrideepai.agentdomains.co' };
+    sendSmtpEmail.to = [{ email }];
     await brevoApi.sendTransacEmail(sendSmtpEmail);
-    log(`Email sent to ${to}`, 'info');
-    return true;
+    log(`Verification email sent to ${email}`, 'info');
   } catch (err) {
-    log(`Brevo email error: ${err.message}`, 'error');
+    log(`Email send error: ${err.message}`, 'error');
     throw err;
   }
 }
@@ -267,8 +259,8 @@ app.post('/api/auth/signup', async (req, res) => {
     const code = generateCode();
     verificationStore[user.id] = { code, expires: Date.now() + 10 * 60 * 1000 };
 
-    const html = `<div style="text-align:center;font-family:sans-serif;"><img src="${LOGO_URL}" style="height:60px;"/><h1>Welcome!</h1><p>Your verification code: <strong>${code}</strong></p><p>Valid for 10 minutes.</p></div>`;
-    await sendBrevoEmail(email, 'Verify your AgriDeepAI account', html);
+    // Send professional email
+    await sendVerificationEmail(email, code, user.id);
 
     log(`Signup successful for ${email}`, 'info');
     res.status(201).json({ message: 'User created. Verify email.', userId: user.id });
@@ -305,8 +297,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     const code = generateCode();
     verificationStore[user.id] = { code, expires: Date.now() + 10 * 60 * 1000 };
-    const html = `<p>Your new code: <strong>${code}</strong></p>`;
-    await sendBrevoEmail(email, 'Verify your account', html);
+    await sendVerificationEmail(email, code, user.id);
     res.json({ message: 'Code resent' });
   } catch (err) {
     log(`Resend error: ${err.message}`, 'error');
@@ -400,7 +391,6 @@ app.post('/api/chat/guest', async (req, res) => {
       const question = lastUserMsg.content.toLowerCase();
       const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
       if (creatorKeywords.some(keyword => question.includes(keyword))) {
-        // ---------- Improved creator response (professional, no bullet lists) ----------
         const creatorResponse = `
 # AgriDeepAI Creator
 
@@ -436,7 +426,9 @@ If you have any questions about agriculture, livestock, or related topics, feel 
       }
     }
 
-    // Normal flow - use Groq with fallback
+    // Normal flow - use Groq with dynamic model
+    const model = await getWorkingModel();
+
     let searchResults = null;
     if (TAVILY_API_KEY && lastUserMsg) {
       searchResults = await tavilySearch(lastUserMsg.content);
@@ -447,21 +439,21 @@ If you have any questions about agriculture, livestock, or related topics, feel 
       finalPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer the following question using this information where relevant:\n${finalPrompt}`;
     }
 
-    // Build message history
     const history = messages.map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content
     }));
-    // Add system prompt at the beginning
     const chatMessages = [
       { role: 'system', content: SYSTEM_PROMPT },
       ...history
     ];
 
-    // Stream from Groq with fallback
-    const stream = await groqChatWithFallback(chatMessages, {
+    const stream = await groq.chat.completions.create({
+      model: model,
+      messages: chatMessages,
       temperature: 0.7,
       max_tokens: 2048,
+      stream: true,
     });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -583,15 +575,13 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Creator question detection
+    // Creator question detection (same as guest)
     if (message) {
       const question = message.toLowerCase();
       const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
       if (creatorKeywords.some(keyword => question.includes(keyword))) {
-        // Save user message
         await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message || '' });
 
-        // ---------- Improved creator response (professional, no bullet lists) ----------
         const creatorResponse = `
 # AgriDeepAI Creator
 
@@ -692,7 +682,7 @@ If you have any questions about agriculture, livestock, or related topics, feel 
       finalPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer:\n${finalPrompt}`;
     }
 
-    // Build chat history for Groq (excluding the last user message, which we'll send as the prompt)
+    const model = await getWorkingModel();
     const chatHistory = aiMessages.slice(0, -1).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content
@@ -703,10 +693,12 @@ If you have any questions about agriculture, livestock, or related topics, feel 
       { role: 'user', content: finalPrompt }
     ];
 
-    // Stream from Groq with fallback
-    const stream = await groqChatWithFallback(chatMessages, {
+    const stream = await groq.chat.completions.create({
+      model: model,
+      messages: chatMessages,
       temperature: 0.7,
       max_tokens: 2048,
+      stream: true,
     });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -727,7 +719,6 @@ If you have any questions about agriculture, livestock, or related topics, feel 
     res.write('data: [DONE]\n\n');
     res.end();
 
-    // Save assistant message with versioning support
     await supabase
       .from('messages')
       .insert({
@@ -774,7 +765,7 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
     if (aiMessages.length === 0 || aiMessages[aiMessages.length - 1].role !== 'user')
       return res.status(400).json({ error: 'No user message' });
 
-    // Build history for Groq
+    const model = await getWorkingModel();
     const chatHistory = aiMessages.slice(0, -1).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content
@@ -786,10 +777,12 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
       { role: 'user', content: userPrompt }
     ];
 
-    // Stream from Groq with fallback
-    const stream = await groqChatWithFallback(chatMessages, {
+    const stream = await groq.chat.completions.create({
+      model: model,
+      messages: chatMessages,
       temperature: 0.7,
       max_tokens: 2048,
+      stream: true,
     });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -856,9 +849,9 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   }
 });
 
-// ======================== SHARE ========================
+// ======================== SHARE (Public + Authenticated) ========================
 
-// Generate a shareable link for a conversation (authenticated)
+// Generate share link for authenticated users
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -884,21 +877,58 @@ app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   }
 });
 
-// Publicly accessible share view (no authentication)
+// Public share generation for guest chats (no auth)
+app.post('/api/share/guest', async (req, res) => {
+  try {
+    const { messages } = req.body;
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'No messages to share' });
+    }
+    // Store in a temporary table (shared_messages) with a token
+    const token = crypto.randomBytes(16).toString('hex');
+    const { data, error } = await supabase
+      .from('shared_links')
+      .insert({
+        token,
+        messages: messages, // store full messages as JSON
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    const shareUrl = `${process.env.FRONTEND_URL}/share/${token}`;
+    res.json({ url: shareUrl });
+  } catch (err) {
+    log(`Guest share error: ${err.message}`, 'error');
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Public view for shared links (works for both auth and guest)
 app.get('/api/share/:token', async (req, res) => {
   try {
     const { token } = req.params;
+    // Try to find in shared_links
     const { data, error } = await supabase
       .from('shared_links')
-      .select('conversation_id')
+      .select('conversation_id, messages')
       .eq('token', token)
       .single();
     if (error || !data) return res.status(404).json({ error: 'Share not found' });
-    const { data: messages } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', data.conversation_id)
-      .order('created_at', { ascending: true });
+
+    let messages = [];
+    if (data.conversation_id) {
+      // Authenticated user share: fetch messages from conversation
+      const { data: msgs } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', data.conversation_id)
+        .order('created_at', { ascending: true });
+      messages = msgs || [];
+    } else if (data.messages) {
+      // Guest share: return stored messages
+      messages = data.messages;
+    }
     res.json({ messages });
   } catch (err) {
     log(`Share view error: ${err.message}`, 'error');
@@ -913,5 +943,5 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI server running on port ${PORT}`, 'info');
-  log(`🧠 Using Groq with fallback chain: ${MODEL_CANDIDATES.join(' -> ')}`, 'info');
+  log(`🧠 Using Groq with dynamic model discovery`, 'info');
 });
