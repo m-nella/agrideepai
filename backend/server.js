@@ -49,10 +49,68 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 // ---------- Groq (free, no card) ----------
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// ✅ FIXED: Use the current production model
-// llama-3.3-70b-versatile is the direct replacement for the decommissioned llama-3.1-70b-versatile[reference:4][reference:5]
-// Other available options: llama-3.1-8b-instant (faster, less capable), llama-4-maverick-17b (newer)[reference:6]
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+// ---------- Model Fallback Chain ----------
+// Order: most capable first, but all confirmed to exist on free tier.
+// If a model is decommissioned or inaccessible, we move to the next.
+const MODEL_CANDIDATES = [
+  'llama-3.3-70b-versatile',   // Most capable, if available
+  'llama-3.1-8b-instant',      // Fast, reliable, good quality
+  'mixtral-8x7b-32768',        // Strong alternative
+  'gemma2-9b-it',              // Google’s open model
+];
+
+let workingModel = null; // cache the first model that works
+
+// Function to try Groq with fallback
+async function groqChatWithFallback(messages, options = {}) {
+  const maxAttempts = MODEL_CANDIDATES.length;
+  let lastError = null;
+
+  // If we already have a working model, try it first, but if it fails with model error, reset cache
+  const modelsToTry = workingModel
+    ? [workingModel, ...MODEL_CANDIDATES.filter(m => m !== workingModel)]
+    : MODEL_CANDIDATES;
+
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const model = modelsToTry[i];
+    try {
+      log(`Trying Groq model: ${model}`, 'debug');
+      const stream = await groq.chat.completions.create({
+        model: model,
+        messages: messages,
+        temperature: options.temperature || 0.7,
+        max_tokens: options.max_tokens || 2048,
+        stream: true,
+      });
+      // If we get here, model works -> cache it
+      if (!workingModel) {
+        workingModel = model;
+        log(`✅ Cached working Groq model: ${model}`, 'info');
+      }
+      return stream;
+    } catch (err) {
+      const isModelError =
+        err.status === 404 ||
+        err.status === 400 && err.message?.includes('decommissioned') ||
+        err.message?.includes('model_not_found') ||
+        err.message?.includes('does not exist');
+      if (isModelError) {
+        log(`⚠️ Model ${model} failed (${err.message}). Trying next...`, 'warn');
+        lastError = err;
+        // If this was the cached model, clear cache
+        if (workingModel === model) {
+          workingModel = null;
+        }
+        continue;
+      } else {
+        // Non‑model error (network, auth, etc.) – throw immediately
+        throw err;
+      }
+    }
+  }
+  // If all models failed
+  throw new Error(`All Groq models failed. Last error: ${lastError?.message || 'Unknown'}`);
+}
 
 // ---------- Tavily ----------
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
@@ -384,7 +442,7 @@ If you have any other questions about agriculture, livestock, or related topics,
       }
     }
 
-    // Normal flow - use Groq
+    // Normal flow - use Groq with fallback
     let searchResults = null;
     if (TAVILY_API_KEY && lastUserMsg) {
       searchResults = await tavilySearch(lastUserMsg.content);
@@ -406,13 +464,10 @@ If you have any other questions about agriculture, livestock, or related topics,
       ...history
     ];
 
-    // Stream from Groq
-    const stream = await groq.chat.completions.create({
-      model: GROQ_MODEL,
-      messages: chatMessages,
+    // Stream from Groq with fallback
+    const stream = await groqChatWithFallback(chatMessages, {
       temperature: 0.7,
       max_tokens: 2048,
-      stream: true,
     });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -660,13 +715,10 @@ If you have any other questions about agriculture, livestock, or related topics,
       { role: 'user', content: finalPrompt }
     ];
 
-    // Stream from Groq
-    const stream = await groq.chat.completions.create({
-      model: GROQ_MODEL,
-      messages: chatMessages,
+    // Stream from Groq with fallback
+    const stream = await groqChatWithFallback(chatMessages, {
       temperature: 0.7,
       max_tokens: 2048,
-      stream: true,
     });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -746,12 +798,10 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
       { role: 'user', content: userPrompt }
     ];
 
-    const stream = await groq.chat.completions.create({
-      model: GROQ_MODEL,
-      messages: chatMessages,
+    // Stream from Groq with fallback
+    const stream = await groqChatWithFallback(chatMessages, {
       temperature: 0.7,
       max_tokens: 2048,
-      stream: true,
     });
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -875,5 +925,5 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI server running on port ${PORT}`, 'info');
-  log(`🧠 Using Groq model: ${GROQ_MODEL}`, 'info');
+  log(`🧠 Using Groq with fallback chain: ${MODEL_CANDIDATES.join(' -> ')}`, 'info');
 });
