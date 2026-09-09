@@ -827,3 +827,70 @@ body {
   object-fit: cover;
   border-radius: 4px;
 }
+/* Copy button flash */
+.icon-button-sm.copied {
+  color: var(--accent);
+  transition: color 0.1s;
+}
+
+/* Liked / Disliked colours */
+.icon-button-sm.liked {
+  color: var(--accent);
+}
+.icon-button-sm.disliked {
+  color: var(--danger);
+}
+
+/* QR code for 2FA */
+.twofa-setup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.twofa-setup img.qr-code {
+  width: 200px;
+  height: 200px;
+  border-radius: 8px;
+  background: white;
+  padding: 8px;
+}
+.twofa-setup input {
+  width: 100%;
+  max-width: 200px;
+  text-align: center;
+  letter-spacing: 4px;
+}
+
+/* Attachment thumbnail */
+.attachment-chip img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+/* Version controls styling */
+.version-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.version-controls button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0.1rem;
+  border-radius: 4px;
+}
+.version-controls button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.version-controls button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
