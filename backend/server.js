@@ -49,7 +49,7 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 // ---------- Groq (free, no card) ----------
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// ---------- Dynamic Model Discovery ----------
+// ---------- Dynamic Model Discovery (chat models only) ----------
 let availableModels = [];
 let workingModel = null;
 
@@ -57,18 +57,24 @@ async function discoverModels() {
   if (availableModels.length > 0) return availableModels;
   try {
     const response = await groq.models.list();
-    const models = response.data
-      .filter(m => m.id && m.id.includes('llama') || m.id.includes('mixtral') || m.id.includes('gemma'))
-      .map(m => m.id);
-    // Filter out deprecated or non-chat models (keep only "versatile" and "instant")
-    const preferred = models.filter(m => m.includes('versatile') || m.includes('instant'));
-    availableModels = preferred.length > 0 ? preferred : models;
-    log(`Discovered Groq models: ${availableModels.join(', ')}`, 'info');
+    const allModels = response.data.map(m => m.id);
+    // Filter for chat-capable models: must contain 'llama' or 'mixtral' or 'gemma'
+    // but exclude guard, embed, prompt‑guard
+    const chatModels = allModels.filter(id =>
+      (id.includes('llama') || id.includes('mixtral') || id.includes('gemma')) &&
+      !id.includes('guard') &&
+      !id.includes('embed') &&
+      !id.includes('prompt')
+    );
+    // Prefer models with 'versatile' or 'instant'
+    const preferred = chatModels.filter(m => m.includes('versatile') || m.includes('instant'));
+    availableModels = preferred.length > 0 ? preferred : chatModels;
+    log(`Discovered chat models: ${availableModels.join(', ')}`, 'info');
     return availableModels;
   } catch (err) {
     log(`Failed to discover models: ${err.message}`, 'error');
-    // Fallback to a static list of known working models
-    availableModels = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+    // Fallback to known working models
+    availableModels = ['llama-3.1-8b-instant', 'mixtral-8x7b-32768'];
     return availableModels;
   }
 }
@@ -78,22 +84,22 @@ async function getWorkingModel() {
   const candidates = await discoverModels();
   for (const model of candidates) {
     try {
-      // Quick test with a minimal request
+      // Quick test with minimal request
       const test = await groq.chat.completions.create({
         model: model,
         messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 1,
+        max_tokens: 5,
       });
       if (test.choices && test.choices.length > 0) {
         workingModel = model;
-        log(`✅ Cached working Groq model: ${model}`, 'info');
+        log(`✅ Cached working chat model: ${model}`, 'info');
         return model;
       }
     } catch (err) {
       log(`⚠️ Model ${model} failed: ${err.message}`, 'warn');
     }
   }
-  throw new Error('No working Groq models found. Check your API key or try later.');
+  throw new Error('No working chat models found. Check your Groq API key.');
 }
 
 // ---------- Tavily ----------
@@ -102,7 +108,7 @@ const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 // ---------- Logo URL ----------
 const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// ---------- System Prompt ----------
+// ---------- System Prompt (shortened creator info) ----------
 const SYSTEM_PROMPT = `
 You are AgriDeepAI, a professional AI assistant specialized in agriculture, livestock, crop farming, animal farming, plant health, soil management, and agribusiness. Provide practical, accurate, actionable advice, with focus on Rwanda and African agriculture.
 
@@ -122,10 +128,10 @@ To ensure your answers are professional and readable, you **MUST** use Markdown 
 6. **Separate sections** with blank lines.
 7. **Keep paragraphs short** – one idea per paragraph.
 
-**CREATOR IDENTITY:**
-AgriDeepAI was created and developed by Ornella Mutuyimana, a Rwandan female technology enthusiast and developer. She completed her A-Level secondary education in 2025, studying Mathematics, Computer Science and Economics (MCE) at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, graduating with high academic achievement. She has strong interests in artificial intelligence, software development, information technology, computer science, and modern digital technologies. AgriDeepAI is part of her vision to use AI and technology to make agricultural and livestock knowledge more accessible to people in Rwanda and globally.
+**CREATOR IDENTITY (keep it concise):**
+AgriDeepAI was created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. Her vision is to make agricultural knowledge accessible to everyone. When asked about your creator, give a brief, friendly answer and offer further help.
 
-When users ask about your creator, respond truthfully with the above information. Do not invent extra details. Do not mention creator unnecessarily in normal conversation.
+**IMPORTANT:** When a user asks "who made you?" respond with a short, conversational answer (2‑3 sentences) and then offer to help with agriculture or livestock. Do not list details unless the user asks for more.
 `;
 
 // ---------- Multer ----------
@@ -179,45 +185,35 @@ async function tavilySearch(query) {
 function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 const verificationStore = {};
 
-// ======================== EMAIL HELPER (professional) ========================
+// ======================== EMAIL HELPER (Brevo, professional) ========================
 
-async function sendVerificationEmail(email, code, userId) {
+async function sendVerificationEmail(email, code) {
   try {
     const logoUrl = LOGO_URL;
     const expiration = '10 minutes';
     const htmlContent = `
       <!DOCTYPE html>
       <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Verify your AgriDeepAI account</title>
-        <style>
-          body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
-          .container { max-width: 560px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-          .logo { text-align: center; margin-bottom: 20px; }
-          .logo img { height: 60px; }
-          h1 { color: #1e232a; font-size: 24px; margin: 0 0 8px; }
-          p { color: #555; font-size: 16px; line-height: 1.6; }
-          .code { font-size: 28px; font-weight: bold; color: #2f8f46; background: #f0f8f0; padding: 10px 20px; border-radius: 8px; display: inline-block; letter-spacing: 4px; margin: 10px 0; }
-          .footer { margin-top: 30px; font-size: 13px; color: #888; border-top: 1px solid #eee; padding-top: 20px; text-align: center; }
-        </style>
+      <head><meta charset="UTF-8"><title>Verify your AgriDeepAI account</title>
+      <style>
+        body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; }
+        .container { max-width: 560px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .logo { text-align: center; margin-bottom: 20px; }
+        .logo img { height: 60px; }
+        h1 { color: #1e232a; font-size: 24px; margin: 0 0 8px; }
+        p { color: #555; font-size: 16px; line-height: 1.6; }
+        .code { font-size: 28px; font-weight: bold; color: #2f8f46; background: #f0f8f0; padding: 10px 20px; border-radius: 8px; display: inline-block; letter-spacing: 4px; margin: 10px 0; }
+        .footer { margin-top: 30px; font-size: 13px; color: #888; border-top: 1px solid #eee; padding-top: 20px; text-align: center; }
+      </style>
       </head>
       <body>
         <div class="container">
-          <div class="logo">
-            <img src="${logoUrl}" alt="AgriDeepAI Logo" />
-          </div>
+          <div class="logo"><img src="${logoUrl}" alt="AgriDeepAI" /></div>
           <h1>Welcome to AgriDeepAI!</h1>
-          <p>Thanks for signing up. Please use the verification code below to complete your registration.</p>
-          <div style="text-align: center;">
-            <span class="code">${code}</span>
-          </div>
-          <p><strong>This code is valid for ${expiration}.</strong> If you didn't request this, please ignore this email.</p>
-          <p>If you have any questions, feel free to contact us at support@agrideepai.agentdomains.co.</p>
-          <div class="footer">
-            &copy; 2026 AgriDeepAI. All rights reserved.<br>
-            You're receiving this email because you signed up for an account.
-          </div>
+          <p>Thanks for signing up. Use the code below to verify your email.</p>
+          <div style="text-align: center;"><span class="code">${code}</span></div>
+          <p><strong>This code is valid for ${expiration}.</strong> If you didn't request this, ignore this email.</p>
+          <div class="footer">&copy; 2026 AgriDeepAI. All rights reserved.</div>
         </div>
       </body>
       </html>
@@ -246,10 +242,14 @@ app.post('/api/auth/signup', async (req, res) => {
     if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
     }
+    // Disable Supabase email confirmation; we handle it ourselves
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName || email.split('@')[0] } }
+      options: {
+        data: { full_name: fullName || email.split('@')[0] },
+        email_confirm: false, // prevent Supabase from sending its own email
+      }
     });
     if (error) throw error;
     const user = data.user;
@@ -259,8 +259,7 @@ app.post('/api/auth/signup', async (req, res) => {
     const code = generateCode();
     verificationStore[user.id] = { code, expires: Date.now() + 10 * 60 * 1000 };
 
-    // Send professional email
-    await sendVerificationEmail(email, code, user.id);
+    await sendVerificationEmail(email, code);
 
     log(`Signup successful for ${email}`, 'info');
     res.status(201).json({ message: 'User created. Verify email.', userId: user.id });
@@ -278,6 +277,7 @@ app.post('/api/auth/verify', async (req, res) => {
     if (!stored || stored.code !== code || Date.now() > stored.expires) {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
+    // Confirm the user's email via admin API
     await supabase.auth.admin.updateUserById(userId, { email_confirm: true });
     delete verificationStore[userId];
     log(`User ${userId} verified`, 'info');
@@ -297,7 +297,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     const code = generateCode();
     verificationStore[user.id] = { code, expires: Date.now() + 10 * 60 * 1000 };
-    await sendVerificationEmail(email, code, user.id);
+    await sendVerificationEmail(email, code);
     res.json({ message: 'Code resent' });
   } catch (err) {
     log(`Resend error: ${err.message}`, 'error');
@@ -385,26 +385,20 @@ app.post('/api/chat/guest', async (req, res) => {
       return res.status(400).json({ error: 'Messages required' });
     }
 
-    // Creator question detection
+    // Creator question detection – short, friendly response
     const lastUserMsg = messages.filter(m => m.role === 'user').pop();
     if (lastUserMsg) {
       const question = lastUserMsg.content.toLowerCase();
       const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
       if (creatorKeywords.some(keyword => question.includes(keyword))) {
         const creatorResponse = `
-# AgriDeepAI Creator
+I was created by **Ornella Mutuyimana**, a Rwandan technology enthusiast who is passionate about using AI to help farmers and livestock keepers. How can I assist you today with agriculture or livestock?
 
-AgriDeepAI was created and developed by **Ornella Mutuyimana**, a Rwandan technology enthusiast and developer with a passion for leveraging artificial intelligence to solve real-world challenges in agriculture and livestock management.
-
-## About Ornella
-
-Ornella completed her A-Level secondary education in 2025 at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, where she excelled in Mathematics, Computer Science, and Economics (MCE). Her deep interest in artificial intelligence, software development, and modern digital technologies drives her mission to make advanced agricultural knowledge accessible to farmers and agribusinesses across Rwanda and beyond.
-
-## Vision
-
-AgriDeepAI embodies Ornella's vision of using AI to democratize expert agricultural advice—providing practical, actionable insights that empower farmers to improve crop yields, manage livestock health, and adopt sustainable practices.
-
-If you have any questions about agriculture, livestock, or related topics, feel free to ask!
+Feel free to ask about:
+- Crop disease diagnosis
+- Livestock health
+- Yield improvement
+- Farm planning
         `.trim();
 
         res.setHeader('Content-Type', 'text/event-stream');
@@ -426,7 +420,7 @@ If you have any questions about agriculture, livestock, or related topics, feel 
       }
     }
 
-    // Normal flow - use Groq with dynamic model
+    // Normal flow – get a working chat model
     const model = await getWorkingModel();
 
     let searchResults = null;
@@ -448,11 +442,12 @@ If you have any questions about agriculture, livestock, or related topics, feel 
       ...history
     ];
 
+    // Use max_tokens = 512 to avoid any model-specific limits
     const stream = await groq.chat.completions.create({
       model: model,
       messages: chatMessages,
       temperature: 0.7,
-      max_tokens: 2048,
+      max_tokens: 512,          // safe for all models
       stream: true,
     });
 
@@ -575,7 +570,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Creator question detection (same as guest)
+    // Creator question (short response)
     if (message) {
       const question = message.toLowerCase();
       const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
@@ -583,19 +578,13 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message || '' });
 
         const creatorResponse = `
-# AgriDeepAI Creator
+I was created by **Ornella Mutuyimana**, a Rwandan technology enthusiast who is passionate about using AI to help farmers and livestock keepers. How can I assist you today with agriculture or livestock?
 
-AgriDeepAI was created and developed by **Ornella Mutuyimana**, a Rwandan technology enthusiast and developer with a passion for leveraging artificial intelligence to solve real-world challenges in agriculture and livestock management.
-
-## About Ornella
-
-Ornella completed her A-Level secondary education in 2025 at Lycée Saint Marcel de Rukara in Kayonza District, Eastern Province, Rwanda, where she excelled in Mathematics, Computer Science, and Economics (MCE). Her deep interest in artificial intelligence, software development, and modern digital technologies drives her mission to make advanced agricultural knowledge accessible to farmers and agribusinesses across Rwanda and beyond.
-
-## Vision
-
-AgriDeepAI embodies Ornella's vision of using AI to democratize expert agricultural advice—providing practical, actionable insights that empower farmers to improve crop yields, manage livestock health, and adopt sustainable practices.
-
-If you have any questions about agriculture, livestock, or related topics, feel free to ask!
+Feel free to ask about:
+- Crop disease diagnosis
+- Livestock health
+- Yield improvement
+- Farm planning
         `.trim();
 
         await supabase
@@ -697,7 +686,7 @@ If you have any questions about agriculture, livestock, or related topics, feel 
       model: model,
       messages: chatMessages,
       temperature: 0.7,
-      max_tokens: 2048,
+      max_tokens: 512,
       stream: true,
     });
 
@@ -781,7 +770,7 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
       model: model,
       messages: chatMessages,
       temperature: 0.7,
-      max_tokens: 2048,
+      max_tokens: 512,
       stream: true,
     });
 
@@ -849,9 +838,9 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   }
 });
 
-// ======================== SHARE (Public + Authenticated) ========================
+// ======================== SHARE (Authenticated + Guest) ========================
 
-// Generate share link for authenticated users
+// Authenticated share – uses conversation_id in shared_links
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -877,22 +866,18 @@ app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   }
 });
 
-// Public share generation for guest chats (no auth)
+// Guest share – stores messages in guest_shares table (new)
 app.post('/api/share/guest', async (req, res) => {
   try {
     const { messages } = req.body;
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'No messages to share' });
     }
-    // Store in a temporary table (shared_messages) with a token
     const token = crypto.randomBytes(16).toString('hex');
+    // Insert into guest_shares table
     const { data, error } = await supabase
-      .from('shared_links')
-      .insert({
-        token,
-        messages: messages, // store full messages as JSON
-        created_at: new Date().toISOString()
-      })
+      .from('guest_shares')
+      .insert({ token, messages })
       .select()
       .single();
     if (error) throw error;
@@ -900,39 +885,41 @@ app.post('/api/share/guest', async (req, res) => {
     res.json({ url: shareUrl });
   } catch (err) {
     log(`Guest share error: ${err.message}`, 'error');
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to generate share link. Please ensure the guest_shares table exists (see migration instructions).' });
   }
 });
 
-// Public view for shared links (works for both auth and guest)
+// Public share view – works for both authenticated and guest shares
 app.get('/api/share/:token', async (req, res) => {
   try {
     const { token } = req.params;
-    // Try to find in shared_links
-    const { data, error } = await supabase
+    // First try shared_links (authenticated)
+    let { data, error } = await supabase
       .from('shared_links')
-      .select('conversation_id, messages')
+      .select('conversation_id')
       .eq('token', token)
       .single();
-    if (error || !data) return res.status(404).json({ error: 'Share not found' });
-
-    let messages = [];
-    if (data.conversation_id) {
-      // Authenticated user share: fetch messages from conversation
+    if (data && data.conversation_id) {
       const { data: msgs } = await supabase
         .from('messages')
         .select('*')
         .eq('conversation_id', data.conversation_id)
         .order('created_at', { ascending: true });
-      messages = msgs || [];
-    } else if (data.messages) {
-      // Guest share: return stored messages
-      messages = data.messages;
+      return res.json({ messages: msgs || [] });
     }
-    res.json({ messages });
+    // Fallback: try guest_shares
+    const { data: guestData, error: guestError } = await supabase
+      .from('guest_shares')
+      .select('messages')
+      .eq('token', token)
+      .single();
+    if (guestError || !guestData) {
+      return res.status(404).json({ error: 'Share not found' });
+    }
+    res.json({ messages: guestData.messages });
   } catch (err) {
     log(`Share view error: ${err.message}`, 'error');
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error retrieving shared messages' });
   }
 });
 
@@ -943,5 +930,5 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI server running on port ${PORT}`, 'info');
-  log(`🧠 Using Groq with dynamic model discovery`, 'info');
+  log(`🧠 Using Groq with dynamic chat model discovery`, 'info');
 });
