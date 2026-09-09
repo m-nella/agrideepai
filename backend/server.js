@@ -7,6 +7,8 @@ const { createClient } = require('@supabase/supabase-js');
 const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
 
 // ---------- Brevo Email ----------
 const brevo = require('@getbrevo/brevo');
@@ -49,7 +51,6 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-// Free models (no credit card required)
 const MODEL_CANDIDATES = [
   'mistralai/mistral-7b-instruct:free',
   'meta-llama/llama-3.1-8b-instruct:free',
@@ -355,14 +356,33 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   }
 });
 
-// Login
+// Login (with 2FA check)
 app.post('/api/auth/login', async (req, res) => {
   log('Login attempt', 'info');
   try {
     const { email, password } = req.body;
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    log(`User ${email} logged in`, 'info');
+    if (error) {
+      // If error is about email not confirmed, we can handle, but we'll just throw.
+      throw error;
+    }
+    // Check if 2FA is enabled
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('two_factor_enabled')
+      .eq('id', data.user.id)
+      .single();
+    if (profileError) throw profileError;
+    if (profile && profile.two_factor_enabled) {
+      // Return a temporary token and require 2FA
+      const tempToken = crypto.randomBytes(32).toString('hex');
+      // Store in memory for 10 minutes
+      const twoFactorStore = global.twoFactorStore || {};
+      twoFactorStore[tempToken] = { userId: data.user.id, expires: Date.now() + 10 * 60 * 1000 };
+      global.twoFactorStore = twoFactorStore;
+      return res.json({ requires2fa: true, tempToken, message: '2FA required' });
+    }
+    log(`User ${email} logged in (no 2FA)`, 'info');
     res.json({ user: data.user, session: data.session });
   } catch (err) {
     log(`Login error: ${err.message}`, 'warn');
@@ -370,10 +390,61 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Validate 2FA code for login
+app.post('/api/auth/2fa/validate-login', async (req, res) => {
+  try {
+    const { tempToken, code } = req.body;
+    if (!tempToken || !code) return res.status(400).json({ error: 'Missing token or code' });
+    const store = global.twoFactorStore || {};
+    const entry = store[tempToken];
+    if (!entry || Date.now() > entry.expires) {
+      return res.status(400).json({ error: 'Invalid or expired token' });
+    }
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('two_factor_secret')
+      .eq('id', entry.userId)
+      .single();
+    if (!profile || !profile.two_factor_secret) {
+      return res.status(400).json({ error: '2FA not set up for this user' });
+    }
+    const verified = speakeasy.totp.verify({
+      secret: profile.two_factor_secret,
+      encoding: 'base32',
+      token: code,
+      window: 1
+    });
+    if (!verified) {
+      return res.status(400).json({ error: 'Invalid 2FA code' });
+    }
+    // Delete the temp token
+    delete store[tempToken];
+    // Now sign the user in properly (create a session)
+    // We don't have the password here, so we need to create a session via Supabase admin?
+    // Better: we can log in with the password again? But we have the user id.
+    // We can issue a session using supabase.auth.admin.createSession? That requires service key.
+    // Actually, we can just sign in again with the password, but we don't have it.
+    // Alternative: we can use the token we already have from the initial login attempt? We didn't store it.
+    // Simpler: we can return a session by using supabase.auth.admin.createSession (with service key)
+    // We'll implement that.
+    const { data: sessionData, error: sessionError } = await supabase.auth.admin.createSession({
+      user_id: entry.userId
+    });
+    if (sessionError) throw sessionError;
+    // Also get the user
+    const { data: userData } = await supabase.auth.admin.getUserById(entry.userId);
+    log(`User ${userData.user.email} logged in with 2FA`, 'info');
+    res.json({ user: userData.user, session: sessionData });
+  } catch (err) {
+    log(`2FA login validation error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to validate 2FA' });
+  }
+});
+
 // Send verification code for authenticated actions
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
-    const { action } = req.body;
+    const { action } = req.body; // 'change-email', 'change-password', 'delete-account'
     const user = req.user;
     const code = generateCode();
     const key = `${user.id}_${action}`;
@@ -462,6 +533,89 @@ app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
     res.json({ message: 'Account deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ======================== 2FA ROUTES ========================
+
+// Enable 2FA – generate secret and QR code
+app.post('/api/auth/2fa/enable', authenticate, async (req, res) => {
+  try {
+    const user = req.user;
+    // Check if already enabled
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('two_factor_enabled')
+      .eq('id', user.id)
+      .single();
+    if (profile && profile.two_factor_enabled) {
+      return res.status(400).json({ error: '2FA already enabled' });
+    }
+    // Generate secret
+    const secret = speakeasy.generateSecret({ length: 20, name: 'AgriDeepAI' });
+    // Store secret temporarily (or directly in profile with enabled false)
+    // We'll store in the profile with enabled false, and only set enabled true after verification
+    await supabase
+      .from('profiles')
+      .update({ two_factor_secret: secret.base32 })
+      .eq('id', user.id);
+    // Generate QR code data URL
+    const qrCodeDataUrl = await QRCode.toDataURL(secret.otpauth_url);
+    res.json({ secret: secret.base32, qrCodeDataUrl });
+  } catch (err) {
+    log(`Enable 2FA error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to enable 2FA' });
+  }
+});
+
+// Verify and enable 2FA
+app.post('/api/auth/2fa/verify', authenticate, async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'Code required' });
+    const user = req.user;
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('two_factor_secret')
+      .eq('id', user.id)
+      .single();
+    if (!profile || !profile.two_factor_secret) {
+      return res.status(400).json({ error: '2FA not initialized. Enable first.' });
+    }
+    const verified = speakeasy.totp.verify({
+      secret: profile.two_factor_secret,
+      encoding: 'base32',
+      token: code,
+      window: 1
+    });
+    if (!verified) {
+      return res.status(400).json({ error: 'Invalid code' });
+    }
+    await supabase
+      .from('profiles')
+      .update({ two_factor_enabled: true })
+      .eq('id', user.id);
+    log(`2FA enabled for ${user.email}`, 'info');
+    res.json({ message: '2FA enabled successfully' });
+  } catch (err) {
+    log(`Verify 2FA error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to verify 2FA' });
+  }
+});
+
+// Disable 2FA
+app.post('/api/auth/2fa/disable', authenticate, async (req, res) => {
+  try {
+    const user = req.user;
+    await supabase
+      .from('profiles')
+      .update({ two_factor_enabled: false, two_factor_secret: null })
+      .eq('id', user.id);
+    log(`2FA disabled for ${user.email}`, 'info');
+    res.json({ message: '2FA disabled successfully' });
+  } catch (err) {
+    log(`Disable 2FA error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to disable 2FA' });
   }
 });
 
@@ -592,8 +746,7 @@ Feel free to ask about:
 });
 
 // ---------- Authenticated chat endpoints ----------
-// (same as before, but using OpenRouter in all three endpoints)
-// We'll keep the existing functions but replace the Groq calls with OpenRouter calls.
+// (same as before, using callOpenRouter)
 
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
@@ -687,7 +840,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Creator question (short response) - same as guest
+    // Creator question (short response)
     if (message) {
       const question = message.toLowerCase();
       const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
@@ -830,7 +983,6 @@ Feel free to ask about:
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       res.write('data: [DONE]\n\n');
       res.end();
-      // Save assistant message
       supabase
         .from('messages')
         .insert({
@@ -844,8 +996,7 @@ Feel free to ask about:
           supabase
             .from('conversations')
             .update({ updated_at: new Date().toISOString() })
-            .eq('id', conversationId)
-            .then(() => log(`Message saved for conversation ${conversationId}`, 'debug'));
+            .eq('id', conversationId);
         });
     });
     stream.on('error', (err) => {
@@ -982,7 +1133,7 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
 
 // ======================== SHARE ROUTES ========================
 
-// Authenticated share
+// Authenticated share (whole chat)
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1008,7 +1159,7 @@ app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   }
 });
 
-// Guest share
+// Guest share (any chat or single message)
 app.post('/api/share/guest', async (req, res) => {
   try {
     const { messages } = req.body;
