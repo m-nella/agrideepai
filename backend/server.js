@@ -7,7 +7,6 @@ const { createClient } = require('@supabase/supabase-js');
 const multer = require('multer');
 const axios = require('axios');
 const crypto = require('crypto');
-const Groq = require('groq-sdk');
 
 // ---------- Brevo Email ----------
 const brevo = require('@getbrevo/brevo');
@@ -46,66 +45,75 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- Groq ----------
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// ---------- OpenRouter ----------
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-// ---------- Hardcoded models (reliable) ----------
-const HARDCODED_MODELS = [
-  'llama-3.1-8b-instant',
-  'mixtral-8x7b-32768',
-  'gemma2-9b-it',
+// Free models (no credit card required)
+const MODEL_CANDIDATES = [
+  'mistralai/mistral-7b-instruct:free',
+  'meta-llama/llama-3.1-8b-instruct:free',
+  'google/gemma-2-9b-it:free',
 ];
 
 let workingModel = null;
 
 async function getWorkingModel() {
   if (workingModel) return workingModel;
-
-  for (const model of HARDCODED_MODELS) {
+  for (const model of MODEL_CANDIDATES) {
     try {
-      const test = await groq.chat.completions.create({
-        model: model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 5,
-      });
-      if (test.choices && test.choices.length > 0) {
+      const response = await axios.post(
+        OPENROUTER_URL,
+        {
+          model: model,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 5,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': process.env.FRONTEND_URL,
+            'X-Title': 'AgriDeepAI',
+          },
+          timeout: 5000,
+        }
+      );
+      if (response.data && response.data.choices && response.data.choices.length > 0) {
         workingModel = model;
-        log(`✅ Cached working model: ${model}`, 'info');
+        log(`✅ Using OpenRouter model: ${model}`, 'info');
         return model;
       }
     } catch (err) {
       log(`⚠️ Model ${model} failed: ${err.message}`, 'warn');
     }
   }
-  // Fallback: dynamic discovery
-  try {
-    const response = await groq.models.list();
-    const allModels = response.data.map(m => m.id);
-    const chatModels = allModels.filter(id =>
-      (id.includes('llama') || id.includes('mixtral') || id.includes('gemma')) &&
-      !id.includes('guard') &&
-      !id.includes('embed') &&
-      !id.includes('prompt')
-    );
-    for (const model of chatModels) {
-      try {
-        const test = await groq.chat.completions.create({
-          model: model,
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 5,
-        });
-        if (test.choices && test.choices.length > 0) {
-          workingModel = model;
-          log(`✅ Cached working model (discovered): ${model}`, 'info');
-          return model;
-        }
-      } catch (e) {}
-    }
-  } catch (err) {
-    log(`Model discovery failed: ${err.message}`, 'error');
-  }
+  throw new Error('No working models available. Check your OpenRouter API key.');
+}
 
-  throw new Error('No working chat models found. Check your Groq API key or try again later.');
+async function callOpenRouter(messages, stream = true) {
+  const model = await getWorkingModel();
+  const response = await axios.post(
+    OPENROUTER_URL,
+    {
+      model: model,
+      messages: messages,
+      temperature: 0.7,
+      max_tokens: 512,
+      stream: stream,
+    },
+    {
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.FRONTEND_URL,
+        'X-Title': 'AgriDeepAI',
+      },
+      responseType: stream ? 'stream' : 'json',
+      timeout: 30000,
+    }
+  );
+  return response;
 }
 
 // ---------- Tavily ----------
@@ -256,7 +264,6 @@ app.post('/api/auth/signup', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
     }
 
-    // Check if email already exists in Supabase
     const { data: existingUsers } = await supabase.auth.admin.listUsers();
     const exists = existingUsers.users.some(u => u.email === email);
     if (exists) {
@@ -297,7 +304,6 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
 
     const { email: userEmail, password, fullName } = stored.data;
 
-    // Create user in Supabase
     const { data, error } = await supabase.auth.signUp({
       email: userEmail,
       password,
@@ -310,16 +316,11 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
     const user = data.user;
     if (!user) throw new Error('User creation failed');
 
-    // Confirm email (already set, but just to be safe)
     await supabase.auth.admin.updateUserById(user.id, { email_confirm: true });
-
-    // Insert profile
     await supabase.from('profiles').insert({ id: user.id, full_name: fullName });
 
-    // Clear the temporary data
     delete verificationStore[email];
 
-    // Sign in the user automatically
     const { data: sessionData, error: signInError } = await supabase.auth.signInWithPassword({
       email: userEmail,
       password
@@ -372,7 +373,7 @@ app.post('/api/auth/login', async (req, res) => {
 // Send verification code for authenticated actions
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
-    const { action } = req.body; // 'change-email', 'change-password', 'delete-account'
+    const { action } = req.body;
     const user = req.user;
     const code = generateCode();
     const key = `${user.id}_${action}`;
@@ -525,7 +526,6 @@ Feel free to ask about:
       }
     }
 
-    const model = await getWorkingModel();
     let searchResults = null;
     if (TAVILY_API_KEY && lastUserMsg) {
       searchResults = await tavilySearch(lastUserMsg.content);
@@ -545,32 +545,45 @@ Feel free to ask about:
       ...history
     ];
 
-    const stream = await groq.chat.completions.create({
-      model: model,
-      messages: chatMessages,
-      temperature: 0.7,
-      max_tokens: 512,
-      stream: true,
-    });
-
+    const response = await callOpenRouter(chatMessages, true);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
     let fullResponse = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        fullResponse += content;
-        res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+    const stream = response.data;
+    let buffer = '';
+    stream.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices[0]?.delta?.content || '';
+            if (content) {
+              fullResponse += content;
+              res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+            }
+          } catch (e) {}
+        }
       }
-    }
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
-    log('Guest chat completed', 'debug');
+    });
+    stream.on('end', () => {
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      log('Guest chat completed', 'debug');
+    });
+    stream.on('error', (err) => {
+      log(`Stream error: ${err.message}`, 'error');
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+      else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+    });
   } catch (err) {
     log(`Guest chat error: ${err.message}`, 'error');
     if (!res.headersSent) res.status(500).json({ error: err.message });
@@ -579,6 +592,9 @@ Feel free to ask about:
 });
 
 // ---------- Authenticated chat endpoints ----------
+// (same as before, but using OpenRouter in all three endpoints)
+// We'll keep the existing functions but replace the Groq calls with OpenRouter calls.
+
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -671,7 +687,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Creator question (short response)
+    // Creator question (short response) - same as guest
     if (message) {
       const question = message.toLowerCase();
       const creatorKeywords = ['who made you', 'who built you', 'who created you', 'who is your creator', 'who is your developer', 'who is behind', 'who founded', 'who develops', 'who is the creator of', 'who is the developer of', 'who made this', 'who built this', 'who created this'];
@@ -772,7 +788,6 @@ Feel free to ask about:
       finalPrompt = `Current information (from web search):\n${searchResults.answer}\n\nNow answer:\n${finalPrompt}`;
     }
 
-    const model = await getWorkingModel();
     const chatHistory = aiMessages.slice(0, -1).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content
@@ -783,47 +798,61 @@ Feel free to ask about:
       { role: 'user', content: finalPrompt }
     ];
 
-    const stream = await groq.chat.completions.create({
-      model: model,
-      messages: chatMessages,
-      temperature: 0.7,
-      max_tokens: 512,
-      stream: true,
-    });
-
+    const response = await callOpenRouter(chatMessages, true);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
     let fullResponse = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        fullResponse += content;
-        res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+    const stream = response.data;
+    let buffer = '';
+    stream.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices[0]?.delta?.content || '';
+            if (content) {
+              fullResponse += content;
+              res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+            }
+          } catch (e) {}
+        }
       }
-    }
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
-
-    await supabase
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: fullResponse,
-        versions: [fullResponse],
-        current_version_index: 0,
-      });
-    await supabase
-      .from('conversations')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', conversationId);
-
-    log(`Message saved for conversation ${conversationId}`, 'debug');
+    });
+    stream.on('end', () => {
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      // Save assistant message
+      supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: fullResponse,
+          versions: [fullResponse],
+          current_version_index: 0,
+        })
+        .then(() => {
+          supabase
+            .from('conversations')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', conversationId)
+            .then(() => log(`Message saved for conversation ${conversationId}`, 'debug'));
+        });
+    });
+    stream.on('error', (err) => {
+      log(`Stream error: ${err.message}`, 'error');
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+      else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+    });
   } catch (err) {
     log(`Send message error: ${err.message}`, 'error');
     if (!res.headersSent) res.status(500).json({ error: err.message });
@@ -855,7 +884,6 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
     if (aiMessages.length === 0 || aiMessages[aiMessages.length - 1].role !== 'user')
       return res.status(400).json({ error: 'No user message' });
 
-    const model = await getWorkingModel();
     const chatHistory = aiMessages.slice(0, -1).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content
@@ -867,39 +895,52 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
       { role: 'user', content: userPrompt }
     ];
 
-    const stream = await groq.chat.completions.create({
-      model: model,
-      messages: chatMessages,
-      temperature: 0.7,
-      max_tokens: 512,
-      stream: true,
-    });
-
+    const response = await callOpenRouter(chatMessages, true);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
     let fullResponse = '';
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content || '';
-      if (content) {
-        fullResponse += content;
-        res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+    const stream = response.data;
+    let buffer = '';
+    stream.on('data', (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices[0]?.delta?.content || '';
+            if (content) {
+              fullResponse += content;
+              res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
+            }
+          } catch (e) {}
+        }
       }
-    }
-    res.write('data: [DONE]\n\n');
-    res.end();
-
-    await supabase
-      .from('messages')
-      .insert({ conversation_id: conversationId, role: 'assistant', content: fullResponse });
-    await supabase
-      .from('conversations')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', conversationId);
-
-    log(`Regenerated for conversation ${conversationId}`, 'debug');
+    });
+    stream.on('end', () => {
+      res.write('data: [DONE]\n\n');
+      res.end();
+      supabase
+        .from('messages')
+        .insert({ conversation_id: conversationId, role: 'assistant', content: fullResponse })
+        .then(() => {
+          supabase
+            .from('conversations')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', conversationId);
+        });
+    });
+    stream.on('error', (err) => {
+      log(`Stream error: ${err.message}`, 'error');
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+      else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+    });
   } catch (err) {
     log(`Regenerate error: ${err.message}`, 'error');
     if (!res.headersSent) res.status(500).json({ error: err.message });
@@ -1028,5 +1069,5 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI server running on port ${PORT}`, 'info');
-  log(`🧠 Using Groq with hardcoded model fallback`, 'info');
+  log(`🧠 Using OpenRouter with fallback chain`, 'info');
 });
