@@ -142,6 +142,9 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 .chat-item .actions {
   display: flex;
@@ -156,7 +159,6 @@ body {
   border-radius: 4px;
 }
 .chat-item .actions button:hover { background: var(--border); color: var(--text); }
-.chat-item .pin-icon { font-size: 0.65rem; margin-right: 0.25rem; }
 
 .sidebar-footer {
   border-top: 1px solid var(--border);
@@ -606,6 +608,16 @@ body {
 }
 .modal-content .btn-primary:hover { background: var(--accent-hover); }
 .modal-content .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Danger button (for delete actions) */
+.modal-content .btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+.modal-content .btn-danger:hover {
+  background: #c0392b;
+}
+
 .modal-content .toggle-link {
   margin-top: 0.75rem;
   text-align: center;
