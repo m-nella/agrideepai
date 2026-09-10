@@ -1,12 +1,14 @@
 // ============================================================
-// AGRIDEEPAI — Full Frontend
+// AGRIDEEPAI — Full Frontend (Final)
 // ============================================================
 
 const log = (msg, type = 'info') => console.log(`[FRONTEND] [${new Date().toISOString()}] [${type.toUpperCase()}] ${msg}`);
 
-// CRITICAL: apply share-view class IMMEDIATELY (before anything else renders)
+// CRITICAL: apply share-view class IMMEDIATELY
 if (window.location.pathname.startsWith('/share/')) {
   document.body.classList.add('share-view');
+  // Force-hide anything left over
+  document.documentElement.style.background = '#171b20';
 }
 
 // --- DOM refs ---
@@ -135,19 +137,33 @@ function cleanContent(content) {
   return out.join('\n').trim();
 }
 
-// ============ SUPABASE INIT ============
+// ============ SUPABASE INIT (with persistence) ============
 async function initSupabase() {
   log('Initializing Supabase...', 'info');
   try {
     const res = await fetch('/api/config');
     const config = await res.json();
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
-    state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
-    state.supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
+    state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+        storage: window.localStorage,
+        storageKey: 'agrideepai-auth-v1',
+      },
+    });
+
+    state.supabase.auth.onAuthStateChange(async (event, session) => {
+      log(`Auth state change: ${event}`, 'debug');
+      if (event === 'TOKEN_REFRESHED' && session) {
+        state.currentUser = session.user;
+        return;
+      }
+      if (session?.user) {
         state.currentUser = session.user;
         updateAuthUI();
-        loadCloudConversations();
+        await loadCloudConversations();
       } else {
         state.currentUser = null;
         state.chats = []; state.messages = []; state.activeChatId = null;
@@ -155,14 +171,24 @@ async function initSupabase() {
         renderChatList(); renderMessages();
       }
     });
+
+    // Wait for initial session
     const { data: { session } } = await state.supabase.auth.getSession();
-    if (session) {
+    if (session?.user) {
       state.currentUser = session.user;
       updateAuthUI();
       await loadCloudConversations();
     } else {
-      updateAuthUI();
-      renderChatList(); renderMessages();
+      // Try refreshing in case token expired
+      const { data: refreshed } = await state.supabase.auth.refreshSession();
+      if (refreshed.session?.user) {
+        state.currentUser = refreshed.session.user;
+        updateAuthUI();
+        await loadCloudConversations();
+      } else {
+        updateAuthUI();
+        renderChatList(); renderMessages();
+      }
     }
   } catch (err) {
     log(`Supabase init error: ${err.message}`, 'error');
@@ -183,19 +209,45 @@ function updateAuthUI() {
   window.refreshIcons();
 }
 
+// ============ ROBUST API FETCH WITH AUTO-REFRESH ============
 async function apiFetch(endpoint, options = {}) {
-  const session = await state.supabase.auth.getSession();
-  const token = session.data.session?.access_token;
+  if (!state.supabase) throw new Error('Not initialized');
+
+  let session = (await state.supabase.auth.getSession()).data.session;
+  if (!session) {
+    try {
+      const { data } = await state.supabase.auth.refreshSession();
+      session = data.session;
+    } catch (e) {}
+  }
+  if (!session?.access_token) throw new Error('Not authenticated');
+
   const headers = {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    Authorization: `Bearer ${session.access_token}`,
     ...options.headers,
   };
-  const res = await fetch(endpoint, { ...options, headers });
-  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || 'Request failed'); }
+
+  let res = await fetch(endpoint, { ...options, headers });
+
+  // If 401, try refreshing and retrying once
+  if (res.status === 401) {
+    log('Got 401, attempting refresh', 'warn');
+    const { data } = await state.supabase.auth.refreshSession();
+    if (data.session?.access_token) {
+      const retryHeaders = { ...headers, Authorization: `Bearer ${data.session.access_token}` };
+      res = await fetch(endpoint, { ...options, headers: retryHeaders });
+    }
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed (${res.status})`);
+  }
   return res;
 }
 
+// ============ CLOUD CONVERSATIONS ============
 async function loadCloudConversations() {
   if (!state.currentUser) return;
   try {
@@ -334,7 +386,7 @@ function renderMessages() {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
-    // ----- EDITING MODE -----
+    // EDITING MODE
     if (state.editingMessageId === msg.id && msg.role === 'user') {
       const area = document.createElement('div');
       area.style.width = '100%';
@@ -372,18 +424,12 @@ function renderMessages() {
 
       const cancel = document.createElement('button');
       cancel.textContent = 'Cancel';
-      cancel.style.cssText = 'padding:.45rem 1.1rem;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-weight:500;font-size:.9rem;';
-      cancel.onmouseenter = () => cancel.style.background = 'var(--surface-hover)';
-      cancel.onmouseleave = () => cancel.style.background = 'transparent';
+      cancel.style.cssText = 'padding:.5rem 1.1rem;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-weight:500;font-size:.9rem;';
       cancel.onclick = () => { state.editingMessageId = null; renderMessages(); };
 
       const send = document.createElement('button');
       send.textContent = 'Send';
-      send.style.cssText = 'padding:.45rem 1.4rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-weight:600;font-size:.9rem;cursor:pointer;box-shadow:0 2px 8px rgba(47,143,70,.35);transition:all .2s;';
-      send.onmouseenter = () => { send.style.background = 'var(--accent-hover)'; send.style.boxShadow = '0 4px 14px rgba(47,143,70,.45)'; };
-      send.onmouseleave = () => { send.style.background = 'var(--accent)'; send.style.boxShadow = '0 2px 8px rgba(47,143,70,.35)'; };
-      send.onmousedown = () => send.style.transform = 'scale(0.97)';
-      send.onmouseup = () => send.style.transform = 'scale(1)';
+      send.style.cssText = 'padding:.5rem 1.4rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-weight:600;font-size:.9rem;cursor:pointer;box-shadow:0 2px 8px rgba(47,143,70,.35);';
       send.onclick = async () => {
         const newContent = ta.value.trim();
         if (!newContent) return;
@@ -410,7 +456,7 @@ function renderMessages() {
       return;
     }
 
-    // ----- NORMAL DISPLAY -----
+    // NORMAL DISPLAY
     if (msg.role === 'assistant') {
       const isLast = index === lastIndex;
       const thinking = isLast && state.isGenerating && msg.content === '';
@@ -428,7 +474,6 @@ function renderMessages() {
         msgDiv.appendChild(c);
       }
     } else {
-      // User — attachments ABOVE text
       if (msg.files?.length) {
         const atts = document.createElement('div');
         atts.className = 'attachments-above';
@@ -465,7 +510,6 @@ function renderMessages() {
       const ar = document.createElement('div');
       ar.className = 'message-actions-row';
 
-      // Copy
       const copy = document.createElement('button');
       copy.className = 'icon-button-sm';
       copy.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
@@ -510,7 +554,6 @@ function renderMessages() {
       }
 
       if (msg.role === 'assistant') {
-        // LIKE — className set FIRST, then classList.add
         const like = document.createElement('button');
         like.className = 'icon-button-sm';
         if (state.likedMessages.has(msg.id)) like.classList.add('liked');
@@ -519,7 +562,6 @@ function renderMessages() {
         like.onclick = (e) => { e.stopPropagation(); toggleLike(msg); };
         ar.appendChild(like);
 
-        // DISLIKE
         const dislike = document.createElement('button');
         dislike.className = 'icon-button-sm';
         if (state.dislikedMessages.has(msg.id)) dislike.classList.add('disliked');
@@ -528,7 +570,6 @@ function renderMessages() {
         dislike.onclick = (e) => { e.stopPropagation(); toggleDislike(msg); };
         ar.appendChild(dislike);
 
-        // Regenerate
         const regen = document.createElement('button');
         regen.className = 'icon-button-sm';
         regen.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
@@ -536,7 +577,6 @@ function renderMessages() {
         regen.onclick = (e) => { e.stopPropagation(); regenerateMessage(index); };
         ar.appendChild(regen);
 
-        // Share
         const share = document.createElement('button');
         share.className = 'icon-button-sm';
         share.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
@@ -578,7 +618,7 @@ function showToast(message, isError = false) {
     background: bg, color: '#fff', padding: '.5rem 1.2rem', borderRadius: '10px',
     fontSize: '.9rem', fontWeight: '500', boxShadow: '0 8px 24px rgba(0,0,0,.4)',
     zIndex: '9999', opacity: '0', transition: 'opacity .3s, transform .3s',
-    transform: 'translateX(-50%) translateY(10px)',
+    transform: 'translateX(-50%) translateY(10px)', maxWidth: '90vw',
   });
   document.body.appendChild(toast);
   requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateX(-50%) translateY(0)'; });
@@ -749,14 +789,16 @@ async function createChat(title = 'New Chat') {
       state.chats.unshift(chat);
       renderChatList();
       return chat;
-    } catch (err) { showToast('Failed to create chat', true); return null; }
+    } catch (err) { showToast('Failed to create chat: ' + err.message, true); return null; }
   }
   return createLocalChat(title);
 }
 async function selectChat(id) {
   state.activeChatId = id;
-  if (state.currentUser) { await loadCloudMessages(id); renderChatList(); }
-  else {
+  if (state.currentUser && !id.startsWith('local_')) {
+    await loadCloudMessages(id);
+    renderChatList();
+  } else {
     const chat = state.chats.find(c => c.id === id);
     if (chat) { state.messages = chat.messages || []; rebuildVersions(); renderMessages(); renderChatList(); }
   }
@@ -766,8 +808,8 @@ async function selectChat(id) {
 async function deleteChat(id) {
   const ok = await showCustomModal('Delete Chat', 'Are you sure? This cannot be undone.', 'Delete', 'Cancel', true);
   if (!ok) return;
-  if (state.currentUser) {
-    try { await apiFetch(`/api/chat/conversations/${id}`, { method: 'DELETE' }); } catch (err) { showToast('Failed', true); return; }
+  if (state.currentUser && !id.startsWith('local_')) {
+    try { await apiFetch(`/api/chat/conversations/${id}`, { method: 'DELETE' }); } catch (err) { showToast('Failed: ' + err.message, true); return; }
   }
   state.chats = state.chats.filter(c => c.id !== id);
   if (state.activeChatId === id) { state.activeChatId = null; state.messages = []; renderMessages(); }
@@ -778,16 +820,28 @@ async function renameChat(id) {
   if (!chat) return;
   const t = await showCustomPrompt('Rename Chat', chat.title);
   if (!t) return;
-  if (state.currentUser) {
-    try { const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ title: t }) }); const u = await res.json(); const i = state.chats.findIndex(c => c.id === id); if (i !== -1) state.chats[i] = u; renderChatList(); } catch (err) { showToast('Failed', true); }
+  if (state.currentUser && !id.startsWith('local_')) {
+    try {
+      const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ title: t }) });
+      const u = await res.json();
+      const i = state.chats.findIndex(c => c.id === id);
+      if (i !== -1) state.chats[i] = u;
+      renderChatList();
+    } catch (err) { showToast('Failed: ' + err.message, true); }
   } else { chat.title = t; renderChatList(); }
   chatMenu.classList.add('hidden');
 }
 async function togglePin(id) {
   const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
-  if (state.currentUser) {
-    try { const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ pinned: !chat.pinned }) }); const u = await res.json(); const i = state.chats.findIndex(c => c.id === id); if (i !== -1) state.chats[i] = u; renderChatList(); } catch (err) { showToast('Failed', true); }
+  if (state.currentUser && !id.startsWith('local_')) {
+    try {
+      const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ pinned: !chat.pinned }) });
+      const u = await res.json();
+      const i = state.chats.findIndex(c => c.id === id);
+      if (i !== -1) state.chats[i] = u;
+      renderChatList();
+    } catch (err) { showToast('Failed: ' + err.message, true); }
   } else { chat.pinned = !chat.pinned; renderChatList(); }
   chatMenu.classList.add('hidden');
 }
@@ -891,14 +945,15 @@ async function sendMessage() {
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     const title = (text || 'New Chat').substring(0, 42);
-    const newChat = { id: 'local_' + Date.now().toString(36), title, messages: [], pinned: false, updatedAt: new Date().toISOString(), createdAt: new Date().toISOString() };
-    state.chats.unshift(newChat);
-    state.activeChatId = newChat.id;
     if (state.currentUser) {
       const cloud = await createChat(title);
-      if (cloud) { state.activeChatId = cloud.id; state.chats = state.chats.filter(c => c.id !== newChat.id); renderChatList(); chat = cloud; }
-      else return;
-    } else { renderChatList(); chat = newChat; }
+      if (!cloud) return;
+      chat = cloud;
+      state.activeChatId = chat.id;
+    } else {
+      chat = createLocalChat(title);
+      state.activeChatId = chat.id;
+    }
   }
 
   const localFiles = state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size, public_url: URL.createObjectURL(f) }));
@@ -923,26 +978,34 @@ async function sendMessage() {
 
   try {
     let response;
-    if (state.currentUser) {
+    if (state.currentUser && !chat.id.startsWith('local_')) {
       const fd = new FormData();
       fd.append('message', text || '');
       atts.forEach(f => fd.append('file', f));
-      const session = await state.supabase.auth.getSession();
-      const token = session.data.session?.access_token;
+      const session = (await state.supabase.auth.getSession()).data.session;
+      const token = session?.access_token;
+      if (!token) {
+        // Refresh
+        const { data } = await state.supabase.auth.refreshSession();
+        if (!data.session?.access_token) throw new Error('Session expired. Please sign in again.');
+      }
+      const finalToken = (await state.supabase.auth.getSession()).data.session?.access_token;
       response = await fetch(`/api/chat/conversations/${chat.id}/messages`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+        method: 'POST', headers: { Authorization: `Bearer ${finalToken}` },
         body: fd, signal: state.abortController.signal,
       });
     } else {
       const payload = { messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })) };
       if (atts.length > 0) {
         const first = atts[0];
-        const b64 = await new Promise(resolve => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result.split(',')[1]);
-          r.readAsDataURL(first);
-        });
-        payload.image = { base64: b64, mimeType: first.type, filename: first.name };
+        if (first.type?.startsWith('image/') && first.size < 4 * 1024 * 1024) {
+          const b64 = await new Promise(resolve => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result.split(',')[1]);
+            r.readAsDataURL(first);
+          });
+          payload.image = { base64: b64, mimeType: first.type, filename: first.name };
+        }
       }
       response = await fetch('/api/chat/guest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -951,341 +1014,4 @@ async function sendMessage() {
     }
     if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'AI failed'); }
     await consumeStream(response, chat);
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      const last = state.messages[state.messages.length - 1];
-      if (last?.role === 'assistant') { last.status = 'stopped'; renderMessages(); }
-    } else {
-      showToast('Error: ' + err.message, true);
-      const last = state.messages[state.messages.length - 1];
-      if (last?.role === 'assistant' && last.content === '') { state.messages.pop(); chat.messages = state.messages; renderMessages(); }
-    }
-  } finally {
-    state.isGenerating = false;
-    sendBtn.classList.remove('generating');
-    sendBtn.disabled = false;
-    messageInput.disabled = false;
-    state.abortController = null;
-    updateSendButton();
-  }
-}
-
-function stopGeneration() {
-  if (state.abortController) {
-    state.abortController.abort();
-    state.abortController = null;
-    state.isGenerating = false;
-    sendBtn.classList.remove('generating');
-    sendBtn.disabled = false;
-    messageInput.disabled = false;
-    updateSendButton();
-  }
-}
-
-// ============ PASSWORD FIELD ============
-function createPasswordField(id, placeholder) {
-  const w = document.createElement('div');
-  w.style.cssText = 'position:relative;width:100%;';
-  const input = document.createElement('input');
-  input.type = 'password'; input.id = id; input.placeholder = placeholder;
-  input.style.cssText = 'width:100%;padding-right:40px;';
-  const t = document.createElement('button');
-  t.type = 'button';
-  t.innerHTML = `<i data-lucide="eye" style="width:18px;height:18px;"></i>`;
-  t.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;';
-  t.onclick = () => {
-    const isPw = input.type === 'password';
-    input.type = isPw ? 'text' : 'password';
-    t.innerHTML = `<i data-lucide="${isPw ? 'eye-off' : 'eye'}" style="width:18px;height:18px;"></i>`;
-    window.refreshIcons();
-  };
-  w.appendChild(input); w.appendChild(t);
-  return w;
-}
-
-// ============ AUTH MODAL ============
-function openAuthModal(mode = 'login') { authModal.classList.remove('hidden'); renderAuthForm(mode); }
-function closeAuthModal() { authModal.classList.add('hidden'); }
-modalClose.forEach(b => b.addEventListener('click', closeAuthModal));
-authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
-
-function renderAuthForm(mode) {
-  const isLogin = mode === 'login';
-  authModalBody.innerHTML = `
-    <h2>${isLogin ? 'Sign In' : 'Create Account'}</h2>
-    <div id="authError" class="error-msg" style="display:none;"></div>
-    <div id="authStatus" class="status-msg" style="display:none;"></div>
-    <label>Email</label>
-    <input type="email" id="authEmail" placeholder="you@example.com" />
-    <label>Password</label>
-    <div id="authPasswordWrapper"></div>
-    ${!isLogin ? `<label>Confirm Password</label><div id="authConfirmPasswordWrapper"></div>` : ''}
-    ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" />` : ''}
-    <button class="btn-primary" id="authSubmitBtn" disabled>${isLogin ? 'Sign In' : 'Sign Up'}</button>
-    <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
-    ${!isLogin ? `<div id="verifySection" style="display:none;margin-top:1rem;">
-      <p>We sent a verification code to your email.</p>
-      <input type="text" id="verifyCode" placeholder="6-digit code" />
-      <button class="btn-primary" id="verifyBtn">Verify & Create Account</button>
-      <button id="resendVerifyBtn" style="background:none;border:none;color:var(--accent);cursor:pointer;margin-top:.5rem;">Resend code</button>
-    </div>` : ''}`;
-  document.getElementById('authPasswordWrapper').appendChild(createPasswordField('authPassword', '••••••••'));
-  if (!isLogin) document.getElementById('authConfirmPasswordWrapper').appendChild(createPasswordField('authConfirmPassword', 'Confirm password'));
-  window.refreshIcons();
-
-  const submitBtn = document.getElementById('authSubmitBtn');
-  const toggleLink = document.getElementById('authToggle');
-  const errDiv = document.getElementById('authError');
-  const statDiv = document.getElementById('authStatus');
-  const emailInput = document.getElementById('authEmail');
-  const pwInput = document.getElementById('authPassword');
-  const confirmInput = document.getElementById('authConfirmPassword');
-  const verifySection = document.getElementById('verifySection');
-
-  const check = () => {
-    const e = emailInput.value.trim(); const p = pwInput.value;
-    let v = e && p;
-    if (!isLogin) { const c = confirmInput?.value || ''; v = v && c && p === c; }
-    submitBtn.disabled = !v;
-  };
-  emailInput.addEventListener('input', check);
-  pwInput.addEventListener('input', check);
-  if (confirmInput) confirmInput.addEventListener('input', check);
-  check();
-  toggleLink.onclick = () => renderAuthForm(isLogin ? 'signup' : 'login');
-
-  submitBtn.onclick = async () => {
-    if (!isLogin) {
-      const email = emailInput.value.trim(), password = pwInput.value, confirm = confirmInput?.value || '';
-      if (!email || !password) { errDiv.textContent = 'All fields required'; errDiv.style.display = 'block'; return; }
-      if (password !== confirm) { errDiv.textContent = 'Passwords do not match'; errDiv.style.display = 'block'; return; }
-      const fullName = document.getElementById('authFullName')?.value.trim() || email.split('@')[0];
-      errDiv.style.display = 'none'; statDiv.textContent = 'Sending code...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
-      try {
-        const res = await fetch('/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, fullName }) });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        verifySection.style.display = 'block'; statDiv.textContent = 'Verification code sent.';
-        document.getElementById('verifyBtn').onclick = async () => {
-          const code = document.getElementById('verifyCode').value.trim();
-          if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
-          statDiv.textContent = 'Verifying...';
-          try {
-            const cr = await fetch('/api/auth/confirm-signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code }) });
-            const cd = await cr.json();
-            if (!cr.ok) throw new Error(cd.error);
-            state.currentUser = cd.user; updateAuthUI(); closeAuthModal();
-            showToast('Account created!');
-            await loadCloudConversations();
-          } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
-        };
-        document.getElementById('resendVerifyBtn').onclick = async () => {
-          statDiv.textContent = 'Resending...';
-          await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-          statDiv.textContent = 'New code sent.';
-        };
-      } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
-      finally { submitBtn.disabled = false; }
-    } else {
-      const email = emailInput.value.trim(), password = pwInput.value;
-      if (!email || !password) { errDiv.textContent = 'Email and password required'; errDiv.style.display = 'block'; return; }
-      errDiv.style.display = 'none'; statDiv.textContent = 'Signing in...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
-      try {
-        const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        if (data.requires2fa) {
-          authModalBody.innerHTML = `<h2>Two-Factor Authentication</h2>
-            <p style="margin-bottom:1rem;">Enter the code from your authenticator app.</p>
-            <label>Code</label><input type="text" id="twofaCode" placeholder="6-digit code" />
-            <button class="btn-primary" id="twofaBtn">Verify</button>
-            <div id="twofaError" class="error-msg" style="display:none;"></div>`;
-          window.refreshIcons();
-          document.getElementById('twofaBtn').onclick = async () => {
-            const code = document.getElementById('twofaCode').value.trim();
-            if (!code) { document.getElementById('twofaError').textContent = 'Enter code'; document.getElementById('twofaError').style.display = 'block'; return; }
-            try {
-              const vr = await fetch('/api/auth/2fa/validate-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tempToken: data.tempToken, code }) });
-              const vd = await vr.json();
-              if (!vr.ok) throw new Error(vd.error);
-              state.currentUser = vd.user; updateAuthUI(); closeAuthModal(); showToast('Signed in!'); await loadCloudConversations();
-            } catch (e) { document.getElementById('twofaError').textContent = e.message; document.getElementById('twofaError').style.display = 'block'; }
-          };
-          return;
-        }
-        state.currentUser = data.user; updateAuthUI(); closeAuthModal(); showToast('Signed in!'); await loadCloudConversations();
-      } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
-      finally { submitBtn.disabled = false; }
-    }
-  };
-}
-
-// ============ ACCOUNT MODAL ============
-async function openAccountModal() {
-  if (!state.currentUser) return;
-  let profile = {};
-  try { const res = await apiFetch('/api/auth/me'); const d = await res.json(); profile = d.profile || {}; } catch (e) {}
-  const modal = document.createElement('div');
-  modal.className = 'modal account-modal';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <button class="modal-close" id="accClose">&times;</button>
-      <div class="account-modal-layout">
-        <div class="account-tabs">
-          <div class="account-tab active" data-tab="profile"><i data-lucide="user"></i> Profile</div>
-          <div class="account-tab" data-tab="account"><i data-lucide="settings"></i> Account</div>
-          <div class="account-tab" data-tab="security"><i data-lucide="shield"></i> Security</div>
-          <div class="account-tab" data-tab="sessions"><i data-lucide="monitor"></i> Sessions</div>
-          <div class="account-tab logout-tab" data-tab="logout"><i data-lucide="log-out"></i> Log out</div>
-        </div>
-        <div class="account-content" id="accContent"></div>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  const close = () => modal.remove();
-  modal.querySelector('#accClose').onclick = close;
-  modal.onclick = (e) => { if (e.target === modal) close(); };
-  const tabs = modal.querySelectorAll('.account-tab');
-  const content = modal.querySelector('#accContent');
-
-  const render = (id) => {
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === id));
-    if (id === 'logout') {
-      content.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure?</p><button class="btn-primary" id="loConfirm" style="background:var(--danger);">Log out</button><button class="btn-primary" id="loCancel" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
-      content.querySelector('#loConfirm').onclick = async () => { await state.supabase.auth.signOut(); close(); showToast('Logged out'); state.chats = []; state.messages = []; state.activeChatId = null; renderChatList(); renderMessages(); };
-      content.querySelector('#loCancel').onclick = () => render('profile');
-      return;
-    }
-    let html = '';
-    if (id === 'profile') html = `<h2>Profile</h2><div class="profile-info"><p><strong>Name:</strong> ${profile.full_name || state.currentUser.email}</p><p><strong>Email:</strong> ${state.currentUser.email}</p><p><strong>Member since:</strong> ${new Date(state.currentUser.created_at).toLocaleDateString()}</p></div>`;
-    else if (id === 'account') html = `<h2>Account Settings</h2><div class="account-section"><label>Email</label><input type="email" id="newEmail" value="${state.currentUser.email}" /><button class="btn-primary" id="changeEmailBtn">Change Email</button><div id="emailVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="emailCode" /><button class="btn-primary" id="emailVerifyBtn">Verify & Change</button></div><hr /><label>Current Password</label><div id="curPwWrap"></div><label>New Password</label><div id="newPwWrap"></div><button class="btn-primary" id="changePwBtn">Change Password</button><div id="pwVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="pwCode" /><button class="btn-primary" id="pwVerifyBtn">Verify & Change</button></div></div>`;
-    else if (id === 'security') { const en = profile.two_factor_enabled; html = `<h2>Security</h2><div class="security-section"><h3>Two-Factor Authentication</h3><p>${en ? 'Enabled.' : 'Disabled.'}</p>${en ? `<button class="btn-primary btn-danger" id="dis2fa">Disable 2FA</button>` : `<button class="btn-primary" id="en2fa">Enable 2FA</button><div id="twofaSetup" style="display:none;margin-top:1rem;"><div class="twofa-setup"><p>Scan with your authenticator app:</p><div id="qrCode"></div><label>Enter 6-digit code:</label><input type="text" id="twofaCodeIn" /><button class="btn-primary" id="verify2faBtn">Verify & Enable</button></div></div>`}</div>`; }
-    else if (id === 'sessions') html = `<h2>Active Sessions</h2><p>You are logged in on this device.</p>`;
-    content.innerHTML = html;
-    window.refreshIcons();
-
-    if (id === 'account') {
-      document.getElementById('curPwWrap').appendChild(createPasswordField('curPw', 'Current password'));
-      document.getElementById('newPwWrap').appendChild(createPasswordField('newPw', 'New password'));
-      window.refreshIcons();
-      document.getElementById('changeEmailBtn').onclick = async () => {
-        const newEmail = document.getElementById('newEmail').value.trim();
-        if (!newEmail || newEmail === state.currentUser.email) { showToast('Different email required', true); return; }
-        try {
-          await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
-          showToast('Code sent.'); document.getElementById('emailVerify').style.display = 'block';
-          document.getElementById('emailVerifyBtn').onclick = async () => {
-            const code = document.getElementById('emailCode').value.trim();
-            try {
-              await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-email' }) });
-              await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail }) });
-              showToast('Email changed.'); close();
-            } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      };
-      document.getElementById('changePwBtn').onclick = async () => {
-        const cur = document.getElementById('curPw').value, np = document.getElementById('newPw').value;
-        if (!cur || !np) { showToast('Fill both fields', true); return; }
-        if (np.length < 8) { showToast('Min 8 chars', true); return; }
-        try {
-          await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
-          showToast('Code sent.'); document.getElementById('pwVerify').style.display = 'block';
-          document.getElementById('pwVerifyBtn').onclick = async () => {
-            const code = document.getElementById('pwCode').value.trim();
-            try {
-              await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-password' }) });
-              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: np }) });
-              showToast('Password changed.'); close();
-            } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      };
-    }
-    if (id === 'security') {
-      document.getElementById('en2fa')?.addEventListener('click', async () => {
-        try {
-          const res = await apiFetch('/api/auth/2fa/enable', { method: 'POST' });
-          const d = await res.json();
-          document.getElementById('qrCode').innerHTML = `<img src="${d.qrCodeDataUrl}" class="qr-code" />`;
-          document.getElementById('twofaSetup').style.display = 'block';
-          document.getElementById('verify2faBtn').onclick = async () => {
-            const code = document.getElementById('twofaCodeIn').value.trim();
-            try { await apiFetch('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }); showToast('2FA enabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      });
-      document.getElementById('dis2fa')?.addEventListener('click', async () => {
-        try { await apiFetch('/api/auth/2fa/disable', { method: 'POST' }); showToast('2FA disabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
-      });
-    }
-  };
-  tabs.forEach(t => t.onclick = () => render(t.dataset.tab));
-  render('profile');
-}
-
-// ============ ATTACH BUTTON ============
-attachBtn.onclick = () => {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*,.pdf,.txt,.doc,.docx';
-  input.multiple = true;
-  input.onchange = () => {
-    const files = Array.from(input.files);
-    if (files.some(f => f.size > 10 * 1024 * 1024)) { showToast('Max 10MB per file', true); return; }
-    if (state.attachments.length + files.length > MAX_ATTACHMENTS) { showToast(`Max ${MAX_ATTACHMENTS} files`, true); return; }
-    state.attachments.push(...files);
-    renderAttachments(); updateSendButton();
-  };
-  input.click();
-};
-
-// ============ SIDEBAR ============
-sidebarToggle.onclick = () => {
-  sidebar.classList.toggle('collapsed');
-  const c = sidebar.classList.contains('collapsed');
-  sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = c ? 'none' : 'inline';
-  sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = c ? 'inline' : 'none';
-};
-openSidebarBtn.onclick = () => sidebar.classList.toggle('mobile-open');
-document.addEventListener('click', (e) => {
-  if (window.innerWidth < 768 && sidebar.classList.contains('mobile-open') && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
-});
-
-// ============ OTHER LISTENERS ============
-newChatBtn.onclick = handleNewChat;
-sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
-messageInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!state.isGenerating) sendMessage(); }
-});
-messageInput.addEventListener('input', () => { resizeComposer(); updateSendButton(); });
-chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; updateSendButton(); sendMessage(); });
-document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
-shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
-
-// ============ SHARE VIEW ============
-async function checkShareView() {
-  const path = window.location.pathname;
-  if (!path.startsWith('/share/')) return false;
-  const token = path.split('/share/')[1];
-  if (!token) return false;
-  state.isShareView = true;
-  document.body.classList.add('share-view');
-  try {
-    const res = await fetch(`/api/share/${token}`);
-    if (!res.ok) throw new Error('Share not found');
-    const data = await res.json();
-    state.shareMessages = data.messages || [];
-    renderMessages();
-    document.title = 'Shared Chat — AgriDeepAI';
-  } catch (err) {
-    messageList.innerHTML = `<p style="color:var(--danger);text-align:center;padding:2rem;">Error loading share: ${err.message}</p>`;
-  }
-  return true;
-}
-
-// ============ INIT ============
-(async function init() {
-  const isShare = await checkShareView();
-  if (!isShare) { await initSupabase(); updateSendButton(); }
-})();
+  } catch (err
