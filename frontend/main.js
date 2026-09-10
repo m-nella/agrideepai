@@ -4,23 +4,26 @@
 
 const log = (msg, type = 'info') => console.log(`[FRONTEND] [${new Date().toISOString()}] [${type.toUpperCase()}] ${msg}`);
 
-// CRITICAL: apply share-view class + hide elements IMMEDIATELY
-const IS_SHARE_VIEW = window.location.pathname.startsWith('/share/');
+// Share-view flag was set on <html> by an inline script in <head> before body renders
+const IS_SHARE_VIEW = document.documentElement.classList.contains('is-share-view');
+
+function applyShareViewHiding() {
+  document.body.classList.add('share-view');
+  ['sidebar','topBar','composerArea','welcomeScreen'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  const fn = document.querySelector('.footer-note');
+  if (fn) fn.style.display = 'none';
+  const wl = document.querySelector('.welcome-logo');
+  if (wl) wl.style.display = 'none';
+  const sc = document.querySelector('.suggestion-chips');
+  if (sc) sc.style.display = 'none';
+}
+
 if (IS_SHARE_VIEW) {
-  document.documentElement.style.background = '#171b20';
-  document.addEventListener('DOMContentLoaded', () => {
-    document.body.classList.add('share-view');
-    ['sidebar','topBar','composerArea','welcomeScreen'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
-    });
-    const fn = document.querySelector('.footer-note');
-    if (fn) fn.style.display = 'none';
-    const wl = document.querySelector('.welcome-logo');
-    if (wl) wl.style.display = 'none';
-    const sc = document.querySelector('.suggestion-chips');
-    if (sc) sc.style.display = 'none';
-  }, { once: true });
+  if (document.body) applyShareViewHiding();
+  else document.addEventListener('DOMContentLoaded', applyShareViewHiding, { once: true });
 }
 
 // --- DOM refs ---
@@ -47,6 +50,7 @@ const copyShareLink = document.getElementById('copyShareLink');
 const chatMenu = document.getElementById('chatMenu');
 
 const MAX_ATTACHMENTS = 5;
+const CODE_RESEND_SECONDS = 60;
 
 let state = {
   activeChatId: null, chats: [], messages: [],
@@ -57,6 +61,27 @@ let state = {
   contextMenuTarget: null, isShareView: IS_SHARE_VIEW, shareMessages: [], copyTimeout: null,
   pendingAuth: null,
 };
+
+// ============ COUNTDOWN TIMER ============
+function attachCountdown(btn, seconds = CODE_RESEND_SECONDS) {
+  if (!btn) return;
+  if (btn._cdInterval) { clearInterval(btn._cdInterval); btn._cdInterval = null; }
+  if (!btn.dataset.originalText) btn.dataset.originalText = btn.textContent.trim() || 'Resend code';
+  let remaining = seconds;
+  btn.disabled = true;
+  btn.textContent = `Resend in ${remaining}s`;
+  btn._cdInterval = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(btn._cdInterval);
+      btn._cdInterval = null;
+      btn.disabled = false;
+      btn.textContent = btn.dataset.originalText;
+    } else {
+      btn.textContent = `Resend in ${remaining}s`;
+    }
+  }, 1000);
+}
 
 // ============ LIGHTBOX ============
 function openLightbox(src, isImage = true) {
@@ -234,8 +259,9 @@ function rebuildVersions() {
   state.messageVersions = {};
   state.messages.forEach(msg => {
     if (msg.versions && msg.versions.length > 0) {
-      state.messageVersions[msg.id] = { versions: msg.versions, currentIndex: msg.currentVersionIndex || 0 };
-      msg.content = msg.versions[msg.currentVersionIndex || 0] || '';
+      const idx = msg.current_version_index ?? msg.currentVersionIndex ?? 0;
+      state.messageVersions[msg.id] = { versions: msg.versions, currentIndex: idx };
+      msg.content = msg.versions[idx] || '';
     }
   });
 }
@@ -516,6 +542,14 @@ function startEditing(msg) {
   state.editingMessageId = msg.id; state.editingValue = msg.content; renderMessages();
 }
 
+// Build a clean payload for the guest endpoint: only non-empty user/assistant msgs
+function buildGuestPayload(messages) {
+  return messages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .filter(m => m.content && String(m.content).trim().length > 0)
+    .map(m => ({ role: m.role, content: m.content }));
+}
+
 async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId); if (!chat) return;
   const assist = { id: 'assist_' + Date.now().toString(36), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
@@ -524,10 +558,12 @@ async function sendEditedUserMessage() {
   renderMessages(); updateSendButton();
   state.abortController = new AbortController();
   try {
-    const payload = { messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })) };
+    // Strip the empty assistant placeholder
+    const cleanMessages = state.messages.filter(m => m.id !== assist.id);
+    const payload = { messages: buildGuestPayload(cleanMessages) };
     const response = await fetch('/api/chat/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: state.abortController.signal });
     if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'AI failed'); }
-    await consumeStream(response, chat);
+    await consumeStream(response, chat, null, { skipCloudReload: true });
   } catch (err) { if (err.name !== 'AbortError') showToast('Error: ' + err.message, true); }
   finally {
     state.isGenerating = false; sendBtn.classList.remove('generating'); sendBtn.disabled = false;
@@ -547,10 +583,10 @@ async function regenerateMessage(index) {
   renderMessages(); updateSendButton();
   state.abortController = new AbortController();
   try {
-    const payload = { messages: ctx.map(m => ({ role: m.role, content: m.content })) };
+    const payload = { messages: buildGuestPayload(ctx) };
     const response = await fetch('/api/chat/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: state.abortController.signal });
     if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'AI failed'); }
-    await consumeStream(response, chat, v);
+    await consumeStream(response, chat, v, { skipCloudReload: true });
   } catch (err) {
     if (err.name !== 'AbortError') {
       showToast('Regenerate failed: ' + err.message, true);
@@ -562,7 +598,7 @@ async function regenerateMessage(index) {
   }
 }
 
-async function consumeStream(response, chat, versionData = null) {
+async function consumeStream(response, chat, versionData = null, opts = {}) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let full = ''; let buffer = '';
@@ -585,14 +621,13 @@ async function consumeStream(response, chat, versionData = null) {
     }
   }
   const last = state.messages[state.messages.length - 1];
-  if (last && last.role === 'assistant') {
+  if (last && last.role === 'assistant' && last.content) {
     if (!state.messageVersions[last.id]) state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
     const v = state.messageVersions[last.id];
     if (v.versions.length === 0 || v.versions[v.versions.length - 1] !== last.content) { v.versions.push(last.content); v.currentIndex = v.versions.length - 1; }
     renderMessages();
   }
-  // Wait for backend to save, then reload
-  if (state.currentUser) {
+  if (state.currentUser && !opts.skipCloudReload) {
     await new Promise(r => setTimeout(r, 300));
     await loadCloudMessages(chat.id);
     await loadCloudConversations();
@@ -603,10 +638,11 @@ async function shareConversation(messagesToShare = null) {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat && !messagesToShare) { showToast('No chat to share', true); return; }
   let messages = messagesToShare || state.messages.map(m => ({ role: m.role, content: m.content }));
+  messages = messages.filter(m => m.content && String(m.content).trim());
   if (!messages.length) { showToast('Nothing to share', true); return; }
   try {
     let response;
-    if (state.currentUser && !messagesToShare) {
+    if (state.currentUser && !messagesToShare && chat) {
       response = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
     } else {
       response = await fetch('/api/share/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }) });
@@ -766,6 +802,8 @@ async function sendMessage() {
 
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
+    // Ensure clean state when creating a new chat
+    state.messages = [];
     const title = (text || 'New Chat').substring(0, 42);
     if (state.currentUser) {
       const cloud = await createChat(title); if (!cloud) return;
@@ -810,7 +848,9 @@ async function sendMessage() {
       if (!token) throw new Error('Session expired');
       response = await fetch(`/api/chat/conversations/${chat.id}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd, signal: state.abortController.signal });
     } else {
-      const payload = { messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })) };
+      // Guest path: strip the empty assistant placeholder
+      const cleanMessages = state.messages.filter(m => m.id !== assist.id);
+      const payload = { messages: buildGuestPayload(cleanMessages) };
       if (atts.length > 0) {
         const first = atts[0];
         if (first.type?.startsWith('image/') && first.size < 4 * 1024 * 1024) {
@@ -829,7 +869,10 @@ async function sendMessage() {
     } else {
       showToast('Error: ' + err.message, true);
       const last = state.messages[state.messages.length - 1];
-      if (last?.role === 'assistant' && last.content === '') { state.messages.pop(); chat.messages = state.messages; renderMessages(); }
+      // Only remove the assistant if NOTHING was received. Keep partial content.
+      if (last?.role === 'assistant' && (!last.content || !last.content.trim())) {
+        state.messages.pop(); chat.messages = state.messages; renderMessages();
+      }
     }
   } finally {
     state.isGenerating = false; sendBtn.classList.remove('generating'); sendBtn.disabled = false;
@@ -873,14 +916,16 @@ function renderAuthForm(mode) {
     <h2>${isLogin ? 'Sign In' : 'Create Account'}</h2>
     <div id="authError" class="error-msg" style="display:none;"></div>
     <div id="authStatus" class="status-msg" style="display:none;"></div>
-    <label>Email</label>
-    <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
-    <label>Password</label>
-    <div id="authPasswordWrapper"></div>
-    ${!isLogin ? `<label>Confirm Password</label><div id="authConfirmPasswordWrapper"></div>` : ''}
-    ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" autocomplete="name" />` : ''}
-    <button class="btn-primary" id="authSubmitBtn" disabled>${isLogin ? 'Sign In' : 'Sign Up'}</button>
-    <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
+    <div id="authInitialSection">
+      <label>Email</label>
+      <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
+      <label>Password</label>
+      <div id="authPasswordWrapper"></div>
+      ${!isLogin ? `<label>Confirm Password</label><div id="authConfirmPasswordWrapper"></div>` : ''}
+      ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" autocomplete="name" />` : ''}
+      <button class="btn-primary" id="authSubmitBtn" disabled>${isLogin ? 'Sign In' : 'Sign Up'}</button>
+      <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
+    </div>
     <div id="verifySection" style="display:none;margin-top:1rem;">
       <p>We sent a verification code to your email.</p>
       <input type="text" id="verifyCode" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
@@ -915,6 +960,35 @@ function renderAuthForm(mode) {
   check();
   toggleLink.onclick = () => renderAuthForm(isLogin ? 'signup' : 'login');
 
+  // Helper: wire up resend button once a code has been sent
+  const wireResend = (resendBtn, endpoint, getToken, setToken) => {
+    attachCountdown(resendBtn);
+    resendBtn.onclick = async () => {
+      if (resendBtn.disabled) return;
+      statDiv.textContent = 'Resending...'; statDiv.style.display = 'block'; errDiv.style.display = 'none';
+      try {
+        const rr = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pendingToken: getToken() })
+        });
+        const rd = await rr.json();
+        if (!rr.ok) throw new Error(rd.error || 'Failed to resend');
+        setToken(rd.pendingToken);
+        statDiv.textContent = 'New code sent. Check your email.';
+        showToast('New code sent.');
+        attachCountdown(resendBtn);
+      } catch (e) {
+        errDiv.textContent = e.message; errDiv.style.display = 'block';
+        statDiv.style.display = 'none';
+        // Give the user a chance to retry soon
+        resendBtn.disabled = false;
+        if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; }
+        resendBtn.textContent = resendBtn.dataset.originalText || 'Resend code';
+      }
+    };
+  };
+
   submitBtn.onclick = async () => {
     if (!isLogin) {
       const email = emailInput.value.trim(), password = pwInput.value, confirm = confirmInput?.value || '';
@@ -928,6 +1002,9 @@ function renderAuthForm(mode) {
         state.pendingAuth = data.pendingToken;
         document.getElementById('verifySection').style.display = 'block';
         statDiv.textContent = 'Verification code sent.';
+        const resendBtn = document.getElementById('resendVerifyBtn');
+        wireResend(resendBtn, '/api/auth/resend-verification', () => state.pendingAuth, t => state.pendingAuth = t);
+
         document.getElementById('verifyBtn').onclick = async () => {
           const code = document.getElementById('verifyCode').value.trim();
           if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
@@ -939,15 +1016,6 @@ function renderAuthForm(mode) {
             state.currentUser = cd.user; state.pendingAuth = null;
             updateAuthUI(); closeAuthModal(); showToast('Account created!');
             await loadCloudConversations();
-          } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
-        };
-        document.getElementById('resendVerifyBtn').onclick = async () => {
-          statDiv.textContent = 'Resending...'; statDiv.style.display = 'block';
-          try {
-            const rr = await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: state.pendingAuth }) });
-            const rd = await rr.json(); if (!rr.ok) throw new Error(rd.error);
-            state.pendingAuth = rd.pendingToken;
-            statDiv.textContent = 'New code sent. Check your email.'; showToast('New code sent.');
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
       } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
@@ -962,6 +1030,9 @@ function renderAuthForm(mode) {
         state.pendingAuth = data.pendingToken;
         statDiv.textContent = 'Verification code sent. Check your email.';
         document.getElementById('verifySection').style.display = 'block';
+        const resendBtn = document.getElementById('resendVerifyBtn');
+        wireResend(resendBtn, '/api/auth/resend-login-code', () => state.pendingAuth, t => state.pendingAuth = t);
+
         document.getElementById('verifyBtn').onclick = async () => {
           const code = document.getElementById('verifyCode').value.trim();
           if (!code) { errDiv.textContent = 'Enter code'; errDiv.style.display = 'block'; return; }
@@ -992,15 +1063,6 @@ function renderAuthForm(mode) {
             state.currentUser = vd.user; state.pendingAuth = null;
             updateAuthUI(); closeAuthModal(); showToast('Signed in!');
             await loadCloudConversations();
-          } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
-        };
-        document.getElementById('resendVerifyBtn').onclick = async () => {
-          statDiv.textContent = 'Resending...'; statDiv.style.display = 'block';
-          try {
-            const rr = await fetch('/api/auth/resend-login-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: state.pendingAuth }) });
-            const rd = await rr.json(); if (!rr.ok) throw new Error(rd.error);
-            state.pendingAuth = rd.pendingToken;
-            statDiv.textContent = 'New code sent. Check your email.'; showToast('New code sent.');
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
       } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
@@ -1053,7 +1115,40 @@ async function openAccountModal() {
     if (id === 'profile') {
       html = `<h2>Profile</h2><div class="profile-info"><p><strong>Name:</strong> ${profile.full_name || state.currentUser.email}</p><p><strong>Email:</strong> ${state.currentUser.email}</p><p><strong>Member since:</strong> ${new Date(state.currentUser.created_at).toLocaleDateString()}</p></div>`;
     } else if (id === 'account') {
-      html = `<h2>Account Settings</h2><div class="account-section"><label>Email</label><input type="email" id="newEmail" value="${state.currentUser.email}" /><button class="btn-primary" id="changeEmailBtn">Change Email</button><div id="emailVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="emailCode" inputmode="numeric" maxlength="6" /><button class="btn-primary" id="emailVerifyBtn">Verify & Change</button></div><hr /><label>Current Password</label><div id="curPwWrap"></div><label>New Password</label><div id="newPwWrap"></div><button class="btn-primary" id="changePwBtn">Change Password</button><div id="pwVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="pwCode" inputmode="numeric" maxlength="6" /><button class="btn-primary" id="pwVerifyBtn">Verify & Change</button></div></div>`;
+      html = `<h2>Account Settings</h2>
+        <div class="account-section">
+          <label>Email</label>
+          <input type="email" id="newEmail" value="${state.currentUser.email}" />
+          <button class="btn-primary" id="changeEmailBtn">Change Email</button>
+          <div id="emailVerify" style="display:none;margin-top:.5rem;">
+            <label>Verification code</label>
+            <input type="text" id="emailCode" inputmode="numeric" maxlength="6" />
+            <button class="btn-primary" id="emailVerifyBtn">Verify & Change</button>
+            <button id="emailResendBtn" class="link-btn" type="button">Resend code</button>
+          </div>
+          <hr />
+          <label>Current Password</label>
+          <div id="curPwWrap"></div>
+          <label>New Password</label>
+          <div id="newPwWrap"></div>
+          <button class="btn-primary" id="changePwBtn">Change Password</button>
+          <div id="pwVerify" style="display:none;margin-top:.5rem;">
+            <label>Verification code</label>
+            <input type="text" id="pwCode" inputmode="numeric" maxlength="6" />
+            <button class="btn-primary" id="pwVerifyBtn">Verify & Change</button>
+            <button id="pwResendBtn" class="link-btn" type="button">Resend code</button>
+          </div>
+          <hr />
+          <h3 style="color:var(--danger);margin-top:.5rem;">Danger Zone</h3>
+          <p style="font-size:.85rem;color:var(--text-muted);">Permanently delete your account and all associated data. This cannot be undone.</p>
+          <button class="btn-primary" id="deleteAccountBtn" style="background:var(--danger);">Delete Account</button>
+          <div id="deleteVerify" style="display:none;margin-top:.5rem;">
+            <label>Verification code</label>
+            <input type="text" id="deleteCode" inputmode="numeric" maxlength="6" />
+            <button class="btn-primary" id="deleteVerifyBtn" style="background:var(--danger);">Verify & Delete</button>
+            <button id="deleteResendBtn" class="link-btn" type="button">Resend code</button>
+          </div>
+        </div>`;
     } else if (id === 'security') {
       const en = profile.two_factor_enabled;
       html = `<h2>Security</h2><div class="security-section"><h3>Two-Factor Authentication</h3><p>${en ? 'Enabled.' : 'Disabled.'}</p>${en ? `<button class="btn-primary btn-danger" id="dis2fa">Disable 2FA</button>` : `<button class="btn-primary" id="en2fa">Enable 2FA</button><div id="twofaSetup" style="display:none;margin-top:1rem;"><div class="twofa-setup"><p>Scan with your authenticator app:</p><div id="qrCode"></div><div class="manual-secret"><p style="font-size:.85rem;color:var(--text-muted);margin-top:.75rem;">Or enter this code manually in your app:</p><div class="secret-box"><code id="manualSecret"></code><button type="button" id="copySecretBtn" class="copy-secret-btn">Copy</button></div></div><label style="margin-top:1rem;">Enter 6-digit code:</label><input type="text" id="twofaCodeIn" inputmode="numeric" maxlength="6" /><button class="btn-primary" id="verify2faBtn">Verify & Enable</button></div></div>`}</div>`;
@@ -1093,17 +1188,35 @@ async function openAccountModal() {
       document.getElementById('curPwWrap').appendChild(createPasswordField('curPw', 'Current password'));
       document.getElementById('newPwWrap').appendChild(createPasswordField('newPw', 'New password'));
       window.refreshIcons();
+
+      // --- Change Email flow (with resend + countdown) ---
+      let emailPendingToken = null;
       document.getElementById('changeEmailBtn').onclick = async () => {
         const newEmail = document.getElementById('newEmail').value.trim();
         if (!newEmail || newEmail === state.currentUser.email) { showToast('Different email required', true); return; }
         try {
           const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
           const data = await res.json();
-          showToast('Code sent.'); document.getElementById('emailVerify').style.display = 'block';
+          emailPendingToken = data.pendingToken;
+          showToast('Code sent.');
+          document.getElementById('emailVerify').style.display = 'block';
+          const resendBtn = document.getElementById('emailResendBtn');
+          attachCountdown(resendBtn);
+          resendBtn.onclick = async () => {
+            if (resendBtn.disabled) return;
+            try {
+              const r = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
+              const rd = await r.json();
+              emailPendingToken = rd.pendingToken;
+              showToast('New code sent.');
+              attachCountdown(resendBtn);
+            } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
+          };
           document.getElementById('emailVerifyBtn').onclick = async () => {
             const code = document.getElementById('emailCode').value.trim();
+            if (!code) { showToast('Enter code', true); return; }
             try {
-              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: data.pendingToken, code, action: 'change-email' }) });
+              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken, code, action: 'change-email' }) });
               const vd = await vr.json();
               await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail, grantedToken: vd.grantedToken }) });
               showToast('Email changed.'); close();
@@ -1111,6 +1224,9 @@ async function openAccountModal() {
           };
         } catch (e) { showToast(e.message, true); }
       };
+
+      // --- Change Password flow (with resend + countdown) ---
+      let pwPendingToken = null;
       document.getElementById('changePwBtn').onclick = async () => {
         const cur = document.getElementById('curPw').value, np = document.getElementById('newPw').value;
         if (!cur || !np) { showToast('Fill both fields', true); return; }
@@ -1118,14 +1234,67 @@ async function openAccountModal() {
         try {
           const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
           const data = await res.json();
-          showToast('Code sent.'); document.getElementById('pwVerify').style.display = 'block';
+          pwPendingToken = data.pendingToken;
+          showToast('Code sent.');
+          document.getElementById('pwVerify').style.display = 'block';
+          const resendBtn = document.getElementById('pwResendBtn');
+          attachCountdown(resendBtn);
+          resendBtn.onclick = async () => {
+            if (resendBtn.disabled) return;
+            try {
+              const r = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
+              const rd = await r.json();
+              pwPendingToken = rd.pendingToken;
+              showToast('New code sent.');
+              attachCountdown(resendBtn);
+            } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
+          };
           document.getElementById('pwVerifyBtn').onclick = async () => {
             const code = document.getElementById('pwCode').value.trim();
+            if (!code) { showToast('Enter code', true); return; }
             try {
-              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: data.pendingToken, code, action: 'change-password' }) });
+              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: pwPendingToken, code, action: 'change-password' }) });
               const vd = await vr.json();
               await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: np, grantedToken: vd.grantedToken }) });
               showToast('Password changed.'); close();
+            } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      };
+
+      // --- Delete Account flow (new) ---
+      let delPendingToken = null;
+      document.getElementById('deleteAccountBtn').onclick = async () => {
+        const ok = await showCustomModal('Delete Account', 'This will permanently delete your account and all chats. Continue?', 'Continue', 'Cancel', true);
+        if (!ok) return;
+        try {
+          const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'delete-account' }) });
+          const data = await res.json();
+          delPendingToken = data.pendingToken;
+          showToast('Verification code sent.');
+          document.getElementById('deleteVerify').style.display = 'block';
+          const resendBtn = document.getElementById('deleteResendBtn');
+          attachCountdown(resendBtn);
+          resendBtn.onclick = async () => {
+            if (resendBtn.disabled) return;
+            try {
+              const r = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'delete-account' }) });
+              const rd = await r.json();
+              delPendingToken = rd.pendingToken;
+              showToast('New code sent.');
+              attachCountdown(resendBtn);
+            } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
+          };
+          document.getElementById('deleteVerifyBtn').onclick = async () => {
+            const code = document.getElementById('deleteCode').value.trim();
+            if (!code) { showToast('Enter code', true); return; }
+            try {
+              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: delPendingToken, code, action: 'delete-account' }) });
+              const vd = await vr.json();
+              await apiFetch('/api/auth/delete-account', { method: 'DELETE', body: JSON.stringify({ grantedToken: vd.grantedToken }) });
+              showToast('Account deleted.');
+              await state.supabase.auth.signOut();
+              close();
             } catch (e) { showToast(e.message, true); }
           };
         } catch (e) { showToast(e.message, true); }
@@ -1144,80 +1313,4 @@ async function openAccountModal() {
           document.getElementById('twofaSetup').style.display = 'block';
           document.getElementById('verify2faBtn').onclick = async () => {
             const code = document.getElementById('twofaCodeIn').value.trim();
-            try { await apiFetch('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }); showToast('2FA enabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      });
-      document.getElementById('dis2fa')?.addEventListener('click', async () => {
-        try { await apiFetch('/api/auth/2fa/disable', { method: 'POST' }); showToast('2FA disabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
-      });
-    }
-  };
-  tabs.forEach(t => t.onclick = () => render(t.dataset.tab));
-  render('profile');
-}
-
-// ============ ATTACH ============
-attachBtn.onclick = () => {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*,.pdf,.txt,.doc,.docx';
-  input.multiple = true;
-  input.onchange = () => {
-    const files = Array.from(input.files);
-    if (files.some(f => f.size > 10 * 1024 * 1024)) { showToast('Max 10MB per file', true); return; }
-    if (state.attachments.length + files.length > MAX_ATTACHMENTS) { showToast(`Max ${MAX_ATTACHMENTS} files`, true); return; }
-    state.attachments.push(...files);
-    renderAttachments(); updateSendButton();
-  };
-  input.click();
-};
-
-// ============ SIDEBAR ============
-sidebarToggle.onclick = () => {
-  sidebar.classList.toggle('collapsed');
-  const c = sidebar.classList.contains('collapsed');
-  sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = c ? 'none' : 'inline';
-  sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = c ? 'inline' : 'none';
-};
-openSidebarBtn.onclick = () => sidebar.classList.toggle('mobile-open');
-document.addEventListener('click', (e) => {
-  if (window.innerWidth < 768 && sidebar.classList.contains('mobile-open') && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
-});
-
-// ============ MAIN LISTENERS ============
-newChatBtn.onclick = handleNewChat;
-sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
-messageInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!state.isGenerating) sendMessage(); }
-});
-messageInput.addEventListener('input', () => { resizeComposer(); updateSendButton(); });
-chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; updateSendButton(); sendMessage(); });
-document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
-shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
-
-// ============ SHARE VIEW ============
-async function checkShareView() {
-  const path = window.location.pathname;
-  if (!path.startsWith('/share/')) return false;
-  const token = path.split('/share/')[1];
-  if (!token) return false;
-  state.isShareView = true;
-  document.body.classList.add('share-view');
-  try {
-    const res = await fetch(`/api/share/${token}`);
-    if (!res.ok) throw new Error('Share not found');
-    const data = await res.json();
-    state.shareMessages = data.messages || [];
-    renderMessages();
-    document.title = 'Shared Chat — AgriDeepAI';
-  } catch (err) {
-    messageList.innerHTML = `<p style="color:var(--danger);text-align:center;padding:2rem;">Error loading share: ${err.message}</p>`;
-  }
-  return true;
-}
-
-(async function init() {
-  const isShare = await checkShareView();
-  if (!isShare) { await initSupabase(); updateSendButton(); }
-})();
+            try { await apiFetch('/api/auth/2fa/verify', { method
