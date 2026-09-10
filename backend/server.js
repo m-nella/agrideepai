@@ -10,6 +10,8 @@ const crypto = require('crypto');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const Groq = require('groq-sdk');
+const pdfParse = require('pdf-parse');
+const FormData = require('form-data');
 
 // ---------- Brevo Email ----------
 const brevo = require('@getbrevo/brevo');
@@ -41,48 +43,67 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
-// ============ THE FIX: Correct model names from /api/debug/groq-models ============
 const GROQ_TEXT_MODELS = [
-  'openai/gpt-oss-120b',      // ✅ Verified on your key - most capable
-  'openai/gpt-oss-20b',       // ✅ Verified on your key - fast
-  'qwen/qwen3.8-27b',         // ✅ Verified on your key
-  'qwen/qwen3.6-27b',         // ✅ Verified on your key
-  'groq/compound',            // ✅ Verified on your key - agentic
+  'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'qwen/qwen3.8-27b',
+  'qwen/qwen3.6-27b',
+  'groq/compound',
 ];
 const GROQ_VISION_MODELS = [
-  'qwen/qwen3.8-27b',         // ✅ Verified - text + image
-  'qwen/qwen3.6-27b',         // ✅ Verified - text + image
+  'qwen/qwen3.8-27b',
+  'qwen/qwen3.6-27b',
 ];
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-
 const OPENROUTER_TEXT_MODELS = [
   'meta-llama/llama-3.3-70b-instruct:free',
   'qwen/qwen3-235b-a22b:free',
   'mistralai/mistral-7b-instruct:free',
-  'google/gemma-3-27b-it:free',
 ];
 const OPENROUTER_VISION_MODELS = [
   'qwen/qwen2.5-vl-72b-instruct:free',
-  'google/gemma-3-27b-it:free',
 ];
 
 const openRouterCooldown = {};
 const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 1000; };
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
 
-// ---------- Diagnostic endpoint ----------
+// ---------- OCR.space (free API for image/doc reading) ----------
+const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY;
+async function ocrImage(buffer, filename, mimeType) {
+  if (!OCR_SPACE_API_KEY) return null;
+  try {
+    const formData = new FormData();
+    formData.append('file', buffer, { filename, contentType: mimeType });
+    formData.append('language', 'eng');
+    formData.append('isOverlayRequired', 'false');
+    formData.append('OCREngine', '2');
+    const res = await axios.post('https://api.ocr.space/parse/image', formData, {
+      headers: {
+        ...formData.getHeaders(),
+        apikey: OCR_SPACE_API_KEY,
+      },
+      maxBodyLength: Infinity,
+      timeout: 30000,
+    });
+    const text = res.data?.ParsedResults?.[0]?.ParsedText || '';
+    return text.trim();
+  } catch (err) {
+    log(`OCR.space error: ${err.message}`, 'warn');
+    return null;
+  }
+}
+
+// ---------- Diagnostic ----------
 app.get('/api/debug/groq-models', async (req, res) => {
   if (!groq) return res.json({ error: 'GROQ_API_KEY not set' });
   try {
     const models = await groq.models.list();
     const ids = (models.data || []).map(m => m.id).sort();
-    log(`Groq available models: ${ids.join(', ')}`, 'info');
     res.json({ count: ids.length, models: ids });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ---------- AI Streaming ----------
@@ -94,17 +115,13 @@ async function getAIStream(chatMessages, imageData = null) {
     for (const model of models) {
       try {
         const stream = await groq.chat.completions.create({
-          model,
-          messages: chatMessages,
-          temperature: 0.6,
-          max_tokens: 1500,
-          stream: true,
+          model, messages: chatMessages, temperature: 0.6,
+          max_tokens: 1500, stream: true,
         });
         log(`✅ Using Groq model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
         return { stream, provider: 'groq', model };
       } catch (err) {
-        const msg = err.message || String(err);
-        log(`⚠️ Groq ${model} failed: ${msg.slice(0, 150)}`, 'warn');
+        log(`⚠️ Groq ${model} failed: ${String(err.message).slice(0, 150)}`, 'warn');
         errors.push(`groq:${model}`);
       }
     }
@@ -121,21 +138,14 @@ async function getAIStream(chatMessages, imageData = null) {
             if (i === chatMessages.length - 1 && m.role === 'user') {
               const parts = [];
               if (m.content) parts.push({ type: 'text', text: m.content });
-              parts.push({
-                type: 'image_url',
-                image_url: { url: `data:${imageData.mimeType};base64,${imageData.base64}` },
-              });
+              parts.push({ type: 'image_url', image_url: { url: `data:${imageData.mimeType};base64,${imageData.base64}` } });
               return { role: 'user', content: parts };
             }
             return m;
           });
         }
         const response = await axios.post(OPENROUTER_URL, {
-          model,
-          messages: finalMessages,
-          temperature: 0.6,
-          max_tokens: 1500,
-          stream: true,
+          model, messages: finalMessages, temperature: 0.6, max_tokens: 1500, stream: true,
         }, {
           headers: {
             'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
@@ -143,8 +153,7 @@ async function getAIStream(chatMessages, imageData = null) {
             'HTTP-Referer': process.env.FRONTEND_URL || 'https://agrideepai.agentdomains.co',
             'X-Title': 'AgriDeepAI',
           },
-          responseType: 'stream',
-          timeout: 45000,
+          responseType: 'stream', timeout: 45000,
         });
         log(`✅ Using OpenRouter model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
         return { stream: response.data, provider: 'openrouter', model };
@@ -167,10 +176,7 @@ function consumeGroqStream(stream, res, onDone) {
     try {
       for await (const chunk of stream) {
         const text = chunk.choices?.[0]?.delta?.content || '';
-        if (text) {
-          full += text;
-          res.write(`data: ${JSON.stringify({ text })}\n\n`);
-        }
+        if (text) { full += text; res.write(`data: ${JSON.stringify({ text })}\n\n`); }
       }
       res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       res.write('data: [DONE]\n\n');
@@ -198,10 +204,7 @@ function consumeOpenRouterStream(stream, res, onDone) {
         try {
           const parsed = JSON.parse(data);
           const text = parsed.choices?.[0]?.delta?.content || '';
-          if (text) {
-            full += text;
-            res.write(`data: ${JSON.stringify({ text })}\n\n`);
-          }
+          if (text) { full += text; res.write(`data: ${JSON.stringify({ text })}\n\n`); }
         } catch (e) {}
       }
     }
@@ -258,24 +261,49 @@ async function tavilySearch(query) {
 
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
-const SYSTEM_PROMPT = `You are AgriDeepAI, an expert AI assistant for agriculture and livestock.
+// ============ SYSTEM PROMPT — STRICT ROLE ============
+const SYSTEM_PROMPT = `You are **AgriDeepAI**, an expert AI assistant dedicated ONLY to agriculture, livestock, and directly related fields.
 
 ## IDENTITY (never violate)
 - Your name is **AgriDeepAI**. Created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
 - You are NEVER "Nex", "Nex-AGI", "Llama", "GPT", "Claude", "Gemini" or any other AI.
-- If asked who you are, who made you, or who developed you: answer **AgriDeepAI, created by Ornella Mutuyimana**.
+- If asked who you are, who made you, or who developed you: answer briefly — "I'm AgriDeepAI, created by Ornella Mutuyimana."
 
-## GREETING BEHAVIOUR
-- For "hi", "hello", "hey": reply in 1-2 short sentences only.
-- Example: "Hello! I'm AgriDeepAI. How can I help you with agriculture or livestock today?"
+## ROLE — STRICT BOUNDARIES (CRITICAL)
+You ONLY help with:
+- Crops: maize, beans, cassava, coffee, tea, banana, rice, vegetables, fruits, etc.
+- Livestock: cattle, goats, poultry, pigs, rabbits, fish farming, bees
+- Soil health, fertilisers, composting, irrigation, water management
+- Pests, diseases, weed control, plant health
+- Post-harvest handling, storage, food processing
+- Farm machinery, tools, agribusiness, markets, pricing for farm products
+- Agricultural education, schooling questions from agriculture students, research, science of plants and animals
+- Where to find agricultural inputs, seeds, fertilisers, veterinary services, farm supplies
+- Farming policy, cooperatives, agricultural programs (especially Rwanda and Africa)
+- Climate, weather impacts on farming
+- Nutrition related to farm produce
+- Natural conversation (greetings, small talk) and general knowledge ONLY when it directly serves the above topics.
 
-## EXPERTISE
-Crops, livestock, soil, pests, diseases, irrigation, storage, markets, agribusiness.
-Focus on Rwanda and African agriculture. Note when advice applies elsewhere.
+## OFF-TOPIC — MUST REFUSE (VERY IMPORTANT)
+If the user asks about anything NOT in the list above — for example:
+- Music artists, songs, entertainment, movies, celebrities
+- Sports, politics, religion, personal gossip
+- General programming, unrelated tech, unrelated history
+- Fashion, relationships, personal advice unrelated to farming
+- Any topic that has NO connection to agriculture, livestock, or rural life
+
+You MUST politely refuse and redirect. Use a short reply like:
+
+"I'm AgriDeepAI, specialised in agriculture and livestock, so I can't help with that. If you have a question about crops, livestock, soil, farming, or agribusiness, I'd be glad to help."
+
+**Never** provide the actual off-topic answer. Never mix it in. Never apologise excessively. Just decline and offer help in your domain.
+
+## IMAGES & DOCUMENTS
+- If an uploaded image or document is clearly NOT related to agriculture, livestock, farming, or rural life, tell the user politely: "This image/document doesn't appear to be related to agriculture or livestock. If you have a farming question, feel free to share it."
+- If the image/document IS related (e.g., a crop photo, a livestock photo, a soil sample, a farm document), analyse it carefully and help.
 
 ## STYLE
-Warm, professional, concise. Use Markdown when it helps. Ask for details on disease questions.
-Include brief disclaimers for chemicals and animal health.`;
+Warm, professional, concise. Use Markdown when it helps. For disease questions, ask for symptoms/age/weather first. Include brief disclaimers for chemicals and animal health.`;
 
 // ---------- Multer ----------
 const storage = multer.memoryStorage();
@@ -335,7 +363,7 @@ async function tryIdentityShortcut(messages, res) {
   const last = [...messages].reverse().find(m => m.role === 'user');
   if (!last) return false;
   if (isCreatorQuestion(last.content)) {
-    await streamSimpleText(res, `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`);
+    await streamSimpleText(res, `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you with agriculture or livestock today?`);
     return true;
   }
   if (isGreeting(last.content)) {
@@ -380,7 +408,6 @@ async function sendVerificationEmail(email, code, action = 'verify', extra = '')
 }
 
 // ============ AUTH ROUTES ============
-
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -443,39 +470,30 @@ app.post('/api/auth/login', async (req, res) => {
       code, expires: Date.now() + 10 * 60 * 1000,
       session: data.session, user: data.user,
       twoFactorEnabled: !!profile?.two_factor_enabled,
-      twoFactorValidated: false,
     };
     await sendVerificationEmail(email, code, 'login', 'Use the code below to complete your sign-in.');
     await supabase.auth.signOut();
     res.json({ requiresCode: true, email, message: 'Verification code sent to your email.' });
-  } catch (err) {
-    log(`Login error: ${err.message}`, 'warn');
-    res.status(401).json({ error: err.message });
-  }
+  } catch (err) { res.status(401).json({ error: err.message }); }
 });
 
 app.post('/api/auth/verify-login', async (req, res) => {
   try {
     const { email, code } = req.body;
-    if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
     const pending = pendingLogins[email];
     if (!pending) return res.status(400).json({ error: 'No pending login. Please sign in again.' });
     if (pending.code !== code || Date.now() > pending.expires)
       return res.status(400).json({ error: 'Invalid or expired code.' });
-    if (pending.twoFactorEnabled && !pending.twoFactorValidated) {
+    if (pending.twoFactorEnabled) {
       const tempToken = crypto.randomBytes(32).toString('hex');
       twoFactorStore[tempToken] = { email, expires: Date.now() + 10 * 60 * 1000 };
-      pending.emailVerified = true;
       return res.json({ requires2fa: true, tempToken, message: 'Email verified. Now enter your 2FA code.' });
     }
     const session = pending.session;
     const user = pending.user;
     delete pendingLogins[email];
     res.json({ user, session, message: 'Login successful' });
-  } catch (err) {
-    log(`Verify login error: ${err.message}`, 'error');
-    res.status(500).json({ error: 'Verification failed.' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
 });
 
 app.post('/api/auth/2fa/validate-login', async (req, res) => {
@@ -484,31 +502,25 @@ app.post('/api/auth/2fa/validate-login', async (req, res) => {
     const entry = twoFactorStore[tempToken];
     if (!entry || Date.now() > entry.expires) return res.status(400).json({ error: 'Invalid or expired token' });
     const pending = pendingLogins[entry.email];
-    if (!pending) return res.status(400).json({ error: 'Session expired. Please sign in again.' });
+    if (!pending) return res.status(400).json({ error: 'Session expired.' });
     const { data: p2 } = await supabase.from('profiles').select('two_factor_secret').eq('id', pending.user.id).single();
-    if (!p2?.two_factor_secret) return res.status(400).json({ error: '2FA not set up for this user' });
-    const verified = speakeasy.totp.verify({
-      secret: p2.two_factor_secret, encoding: 'base32', token: code, window: 1,
-    });
+    if (!p2?.two_factor_secret) return res.status(400).json({ error: '2FA not set up' });
+    const verified = speakeasy.totp.verify({ secret: p2.two_factor_secret, encoding: 'base32', token: code, window: 1 });
     if (!verified) return res.status(400).json({ error: 'Invalid 2FA code' });
     delete twoFactorStore[tempToken];
     const session = pending.session;
     const user = pending.user;
     delete pendingLogins[entry.email];
     res.json({ user, session, message: 'Login successful' });
-  } catch (err) {
-    log(`2FA login validation error: ${err.message}`, 'error');
-    res.status(500).json({ error: 'Failed to validate 2FA' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to validate 2FA' }); }
 });
 
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
     const { action } = req.body;
-    const user = req.user;
     const code = generateCode();
-    verificationStore[`${user.id}_${action}`] = { code, expires: Date.now() + 10 * 60 * 1000, action, verified: false };
-    await sendVerificationEmail(user.email, code, action);
+    verificationStore[`${req.user.id}_${action}`] = { code, expires: Date.now() + 10 * 60 * 1000, action, verified: false };
+    await sendVerificationEmail(req.user.email, code, action);
     res.json({ message: 'Verification code sent.' });
   } catch (err) { res.status(500).json({ error: 'Failed to send code.' }); }
 });
@@ -529,8 +541,7 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     const key = `${req.user.id}_change-password`;
-    const stored = verificationStore[key];
-    if (!stored?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
+    if (!verificationStore[key]?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
     const { error: si } = await supabase.auth.signInWithPassword({ email: req.user.email, password: currentPassword });
     if (si) return res.status(401).json({ error: 'Current password incorrect' });
     if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword))
@@ -545,19 +556,17 @@ app.post('/api/auth/change-email', authenticate, async (req, res) => {
   try {
     const { newEmail } = req.body;
     const key = `${req.user.id}_change-email`;
-    const stored = verificationStore[key];
-    if (!stored?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
+    if (!verificationStore[key]?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
     await supabase.auth.updateUser({ email: newEmail });
     delete verificationStore[key];
-    res.json({ message: 'Email change requested. Please verify the new email.' });
+    res.json({ message: 'Email change requested.' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
   try {
     const key = `${req.user.id}_delete-account`;
-    const stored = verificationStore[key];
-    if (!stored?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
+    if (!verificationStore[key]?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
     await supabase.auth.admin.deleteUser(req.user.id);
     delete verificationStore[key];
     res.json({ message: 'Account deleted successfully' });
@@ -599,17 +608,8 @@ app.get('/api/auth/sessions', authenticate, async (req, res) => {
     const ua = req.headers['user-agent'] || 'Unknown';
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
     res.json({
-      current: {
-        user_agent: ua, ip,
-        signed_in_at: new Date().toISOString(),
-        email: req.user.email,
-      },
-      account: {
-        created_at: req.user.created_at,
-        last_sign_in_at: req.user.last_sign_in_at,
-        email: req.user.email,
-        provider: req.user.app_metadata?.provider || 'email',
-      },
+      current: { user_agent: ua, ip, signed_in_at: new Date().toISOString(), email: req.user.email },
+      account: { created_at: req.user.created_at, last_sign_in_at: req.user.last_sign_in_at, email: req.user.email },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -641,6 +641,29 @@ async function enrichWithWebSearch(query) {
   return query;
 }
 
+// Extract text from uploaded file
+async function extractTextFromFile(file) {
+  try {
+    if (file.mimetype === 'application/pdf') {
+      const data = await pdfParse(file.buffer);
+      return (data.text || '').trim().substring(0, 8000);
+    }
+    if (file.mimetype.startsWith('text/')) {
+      return file.buffer.toString('utf-8').substring(0, 8000);
+    }
+    // For images, try OCR.space
+    if (file.mimetype.startsWith('image/')) {
+      const text = await ocrImage(file.buffer, file.originalname, file.mimetype);
+      return text || '';
+    }
+    return '';
+  } catch (err) {
+    log(`Text extraction error: ${err.message}`, 'warn');
+    return '';
+  }
+}
+
+// ---------- Guest chat ----------
 app.post('/api/chat/guest', async (req, res) => {
   try {
     const { messages, image } = req.body;
@@ -718,7 +741,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     const { message } = req.body;
     const file = req.file;
 
-    const { data: conv } = await supabase.from('conversations').select('id')
+    const { data: conv } = await supabase.from('conversations').select('id, title')
       .eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
@@ -737,6 +760,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
 
     let fileMetadata = null;
     let imageData = null;
+    let extractedText = '';
     if (file) {
       const fileExt = file.originalname.split('.').pop();
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
@@ -751,24 +775,30 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         user_id: req.user.id, filename: file.originalname, storage_path: filePath,
         mime_type: file.mimetype, size: file.size,
       });
-      if (file.mimetype.startsWith('image/')) {
-        if (file.size > 4 * 1024 * 1024) {
-          log('Image too large, skipping vision', 'warn');
-        } else {
-          imageData = { base64: file.buffer.toString('base64'), mimeType: file.mimetype };
-        }
+      if (file.mimetype.startsWith('image/') && file.size < 4 * 1024 * 1024) {
+        imageData = { base64: file.buffer.toString('base64'), mimeType: file.mimetype };
       }
+      extractedText = await extractTextFromFile(file);
     }
 
     const messageData = { conversation_id: conversationId, role: 'user', content: message || '' };
     if (fileMetadata) messageData.files = [fileMetadata];
     await supabase.from('messages').insert(messageData);
 
+    // Auto-rename chat on first message
+    if (conv.title === 'New Chat' && message) {
+      const newTitle = message.substring(0, 50);
+      await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
+    }
+
     const { data: history } = await supabase.from('messages').select('*')
       .eq('conversation_id', conversationId).order('created_at', { ascending: true });
     const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
 
-    const enrichedPrompt = await enrichWithWebSearch(message || 'agriculture update');
+    let enrichedPrompt = await enrichWithWebSearch(message || 'agriculture update');
+    if (extractedText) {
+      enrichedPrompt += `\n\n[Content extracted from uploaded file]\n${extractedText}`;
+    }
     const withoutLast = aiMessages.slice(0, -1);
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
 
@@ -805,11 +835,7 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full });
       await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
     });
-  } catch (err) {
-    log(`Regenerate error: ${err.message}`, 'error');
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
@@ -853,10 +879,7 @@ app.post('/api/share/guest', async (req, res) => {
     const { error } = await supabase.from('guest_shares').insert({ token, messages }).select().single();
     if (error) throw error;
     res.json({ url: `${process.env.FRONTEND_URL}/share/${token}` });
-  } catch (err) {
-    log(`Guest share error: ${err.message}`, 'error');
-    res.status(500).json({ error: 'Failed to generate share link.' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Failed to generate share link.' }); }
 });
 
 app.get('/api/share/:token', async (req, res) => {
@@ -878,8 +901,6 @@ app.get('/api/share/:token', async (req, res) => {
 const frontendPath = path.join(__dirname, '../frontend');
 app.get('/share/*', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
   res.sendFile(path.join(frontendPath, 'index.html'));
 });
 app.use(express.static(frontendPath, {
@@ -894,6 +915,5 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
   log(`Primary: ${GROQ_API_KEY ? 'Groq' : 'none'} | Fallback: ${OPENROUTER_API_KEY ? 'OpenRouter' : 'none'}`, 'info');
-  log(`Groq text models: ${GROQ_TEXT_MODELS.join(', ')}`, 'info');
-  log(`Groq vision models: ${GROQ_VISION_MODELS.join(', ')}`, 'info');
+  log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'}`, 'info');
 });
