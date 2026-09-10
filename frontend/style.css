@@ -415,3 +415,40 @@ html.is-share-view body::before, body.share-view::before {
 @media (max-width: 480px) {
   .message.user.message-editing { width: 92%; max-width: 92%; min-width: 0; }
 }
+
+/* ===== Touch-device fixes: prevent hover-induced tap delay ===== */
+.icon-button svg, .icon-button-sm svg, .new-chat-btn svg, .send-button svg,
+.auth-btn svg, .chip svg, .modal-close svg, .account-tab svg,
+.context-menu button svg, .link-btn svg, .attachment-chip button svg,
+.version-controls button svg, .copy-secret-btn svg, .toggle-link svg {
+  pointer-events: none;
+}
+
+@media (hover: none) {
+  /* Neutralise hover states so first tap activates instantly */
+  .icon-button:hover { background: transparent; color: var(--text-muted); }
+  .chat-item:hover { background: transparent; color: var(--text-muted); }
+  .chat-item.active:hover { background: var(--surface-hover); color: var(--text); }
+  .chip:hover { background: var(--surface); border-color: var(--border); color: var(--text-muted); }
+  .auth-btn:hover { background: none; color: var(--text-muted); }
+  .new-chat-btn:hover { background: var(--accent-dim); color: var(--text); }
+  .send-button:not(:disabled):hover { background: var(--accent); }
+  .account-tab:hover { background: transparent; color: var(--text-muted); }
+  .account-tab.active:hover { background: var(--accent-dim); color: var(--text); }
+  .modal-close:hover { color: var(--text-muted); }
+  .modal-content .btn-primary:hover { background: var(--accent); }
+  .modal-content .btn-danger:hover { background: var(--danger); }
+  .link-btn:hover { text-decoration: none; }
+  .context-menu button:hover { background: none; }
+  .version-controls button:hover { background: none; color: var(--text-muted); }
+  .attachment-chip button:hover { color: var(--text-muted); }
+  .copy-secret-btn:hover { background: var(--accent); }
+
+  /* Add :active feedback for touch devices */
+  .icon-button:active { background: var(--surface-hover); color: var(--text); transform: scale(0.96); }
+  .chat-item:active { background: var(--surface-hover); color: var(--text); }
+  .chip:active { background: var(--surface-hover); border-color: var(--accent); color: var(--text); }
+  .auth-btn:active { background: var(--surface-hover); color: var(--text); }
+  .account-tab:active { background: var(--surface-hover); color: var(--text); }
+  .context-menu button:active { background: var(--surface-hover); }
+}
