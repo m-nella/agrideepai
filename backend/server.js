@@ -382,7 +382,7 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// ---------- Client ID (per-browser) ----------
+// ---------- Request helpers ----------
 const getClientId = (req) => {
   const id = (req.headers['x-client-id'] || '').toString().trim();
   return id ? id.slice(0, 80) : null;
@@ -562,7 +562,6 @@ async function trackSession(userId, email, req) {
     const hasAnyPrevious = !!(recent && recent.length > 0);
 
     if (existing) {
-      // Same device — refresh the row
       const { error: upErr } = await supabase.from('sessions').update({
         device: ua.substring(0, 120),
         ip,
@@ -580,7 +579,6 @@ async function trackSession(userId, email, req) {
         client_id: clientId || null,
       });
       if (insErr) log(`trackSession insert error: ${insErr.message}`, 'error');
-      // New device notification only if this isn't the very first-ever session
       if (hasAnyPrevious && email) {
         sendLoginNotification(email, ip, ua.substring(0, 120), new Date().toLocaleString())
           .catch(e => log(`Login notification failed: ${e.message}`, 'warn'));
@@ -620,7 +618,6 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
     await supabase.from('profiles').insert({ id: data.user.id, full_name: fullName });
     const { data: sd, error: se } = await supabase.auth.signInWithPassword({ email, password });
     if (se) throw se;
-    // Track the new session immediately so session-check passes on the next page load
     await trackSession(sd.user.id, sd.user.email, req);
     res.status(201).json({ user: sd.user, session: sd.session });
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -824,7 +821,6 @@ app.get('/api/auth/session-check', authenticate, async (req, res) => {
       if (error) log(`session-check error: ${error.message}`, 'warn');
       if (data && data.length > 0) return res.json({ valid: true });
     }
-    // Fallback: match by ip+ua (covers pre-client_id rows)
     const { data: byIpUa } = await supabase.from('sessions').select('id').eq('user_id', req.user.id).eq('ip', ip).eq('user_agent', ua).limit(1);
     if (byIpUa && byIpUa.length > 0) {
       if (clientId) await supabase.from('sessions').update({ client_id: clientId }).eq('id', byIpUa[0].id);
@@ -832,7 +828,6 @@ app.get('/api/auth/session-check', authenticate, async (req, res) => {
     }
     return res.json({ valid: false });
   } catch (err) {
-    // Never fail-closed on transient errors
     return res.json({ valid: true, error: err.message });
   }
 });
@@ -856,6 +851,24 @@ app.delete('/api/auth/sessions/all', authenticate, async (req, res) => {
     try { await supabase.auth.admin.signOut(req.token, 'others'); }
     catch (e) { log(`Supabase signOut(others) failed: ${e.message}`, 'warn'); }
     res.json({ message: 'All other sessions logged out', removed: idsToDelete.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Log out the CURRENT session (this browser) — MUST come before /sessions/:id
+app.delete('/api/auth/sessions/current', authenticate, async (req, res) => {
+  try {
+    const ua = getRequestUa(req);
+    const ip = getRequestIp(req);
+    const clientId = getClientId(req);
+    const { data: sessions } = await supabase.from('sessions').select('*').eq('user_id', req.user.id);
+    const list = sessions || [];
+    const mine = clientId
+      ? list.filter(s => s.client_id === clientId)
+      : list.filter(s => s.ip === ip && s.user_agent === ua);
+    if (mine[0]?.id) {
+      await supabase.from('sessions').delete().eq('id', mine[0].id).eq('user_id', req.user.id);
+    }
+    res.json({ message: 'Current session removed' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
