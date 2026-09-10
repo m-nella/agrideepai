@@ -28,53 +28,54 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
+  windowMs: 15 * 60 * 1000, max: 200,
   message: 'Too many requests, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
+  standardHeaders: true, legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
-// ---------- Supabase ----------
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
 // ============ AI PROVIDERS ============
-
-// --- Groq (PRIMARY) ---
+// --- Groq (PRIMARY) — Models updated Sep 2026 ---
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
+// Current Groq models (verified working Sep 2026)
 const GROQ_TEXT_MODELS = [
-  'llama-3.3-70b-versatile',
-  'llama-3.1-8b-instant',
-  'llama3-70b-8192',
-  'llama3-8b-8192',
+  'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'meta-llama/llama-4-scout-17b-16e-instruct',
+  'qwen/qwen3-32b',
+  'deepseek-r1-distill-llama-70b',
 ];
 const GROQ_VISION_MODELS = [
-  'llama-3.2-11b-vision-preview',
-  'llama-3.2-90b-vision-preview',
+  'meta-llama/llama-4-scout-17b-16e-instruct',
+  'meta-llama/llama-4-maverick-17b-128e-instruct',
 ];
 
 // --- OpenRouter (FALLBACK) ---
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+// Current OpenRouter free models (verified Sep 2026)
 const OPENROUTER_TEXT_MODELS = [
   'meta-llama/llama-3.3-70b-instruct:free',
-  'meta-llama/llama-3.1-8b-instruct:free',
-  'qwen/qwen-2.5-7b-instruct:free',
+  'qwen/qwen3-235b-a22b:free',
   'mistralai/mistral-7b-instruct:free',
-  'deepseek/deepseek-chat:free',
-  'google/gemma-2-9b-it:free',
+  'google/gemma-3-27b-it:free',
+  'deepseek/deepseek-r1:free',
+  'z-ai/glm-5.2:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
 ];
 const OPENROUTER_VISION_MODELS = [
-  'meta-llama/llama-3.2-11b-vision-instruct:free',
-  'meta-llama/llama-3.2-90b-vision-instruct:free',
+  'minimax/minimax-m3:free',
+  'thinkingmachines/inkling:free',
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
 ];
 
-// Track recently-failed OpenRouter models
 const openRouterCooldown = {};
 function markCooldown(model, seconds = 120) { openRouterCooldown[model] = Date.now() + seconds * 1000; }
 function isCoolingDown(model) { return openRouterCooldown[model] && Date.now() < openRouterCooldown[model]; }
@@ -682,7 +683,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Identity shortcut
     if (message && (isCreatorQuestion(message) || isGreeting(message))) {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
       const reply = isCreatorQuestion(message)
@@ -696,7 +696,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       return streamSimpleText(res, reply);
     }
 
-    // File upload
     let fileMetadata = null;
     let imageData = null;
     if (file) {
