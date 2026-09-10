@@ -382,7 +382,6 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// ---------- Request helpers ----------
 const getClientId = (req) => {
   const id = (req.headers['x-client-id'] || '').toString().trim();
   return id ? id.slice(0, 80) : null;
@@ -390,6 +389,15 @@ const getClientId = (req) => {
 const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
 const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 
+// Returns true if the WHOLE message is JUST a greeting word (e.g. "hi", "hello")
+// NOT if the message merely starts with one — fixes "Hi, what is your name?"
+function isGreetingOnly(text) {
+  const t = (text || '').toLowerCase().trim().replace(/[!?.,;:]/g, '').replace(/\s+/g, ' ');
+  const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
+    'muraho','mwaramutse','mwiriwe','amakuru','bite','salam','bonjour','salut','jambo','habari','hi bot','hello bot'];
+  return greetings.includes(t);
+}
+// Kept for backend greeting-shortcut logic (uses broader match)
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
@@ -437,46 +445,145 @@ async function tryIdentityShortcut(messages, res) {
   return false;
 }
 
-// ---------- Chat title generator ----------
+// ============ CHAT TITLE GENERATOR ============
+// Asks the AI to summarise what the user's message is ABOUT (topic/intent),
+// NOT to repeat the message. Handles greetings and creator questions as
+// fixed, well-known titles.
 async function generateChatTitle(userMessage) {
   const msg = (userMessage || '').trim();
   if (!msg) return 'New Chat';
-  if (isGreeting(msg)) return 'Greeting';
+
+  // Special-case: message that IS only a greeting → fixed title
+  if (isGreetingOnly(msg)) {
+    return /muraho|mwaramutse|mwiriwe|amakuru|bite|jambo|habari|bonjour|salut|salam/i.test(msg)
+      ? 'Greeting' : 'Greeting';
+  }
   if (isCreatorQuestion(msg)) return 'About AgriDeepAI';
-  const prompt = `You name chat conversations. Read the user's first message and reply with ONLY a short descriptive title (3 to 6 words) that captures what they are asking about. No quotes, no period at the end, no prefix like "Title:", just the title itself.\n\nUser message: ${msg.substring(0, 600)}`;
-  const tryParse = (raw) => {
+
+  // Prompt the AI to produce a topical title, not an echo
+  const prompt = `You write short titles for chat conversations, in the style of ChatGPT sidebar names.
+
+Read the USER MESSAGE below. Reply with ONLY the conversation title — never repeat the user's exact words.
+
+Strict rules:
+- 2 to 6 words. Title Case or sentence case.
+- Focus on the TOPIC or INTENT (what they are asking about), not a quote of their sentence.
+- No quotation marks, no trailing period, no prefix like "Title:" or "Chat:".
+- If the message is a greeting or small talk, reply exactly: Greeting
+- If the message asks who you are / who made you, reply exactly: About AgriDeepAI
+- If the message asks for the meaning/definition of something, use the pattern: Meaning of X
+- If the message asks how to do something, use the pattern: How to X
+- If the message describes a problem, use the pattern: X Problem or X Diagnosis
+
+Examples:
+USER: "Hi, what is your name?" → Greeting and Introduction
+USER: "What is the agriculture mean?" → Meaning of Agriculture
+USER: "How do I treat tomato blight?" → Tomato Blight Treatment
+USER: "My maize leaves are yellow with brown spots, what should I do?" → Maize Leaf Yellowing Diagnosis
+USER: "how to raise chickens for eggs" → Raising Chickens for Eggs
+USER: "Tell me about dairy cow feed" → Dairy Cow Feeding
+USER: "Hello" → Greeting
+USER: "Who created you?" → About AgriDeepAI
+
+USER MESSAGE:
+${msg.substring(0, 800)}
+
+Title:`;
+
+  const cleanTitle = (raw) => {
     let t = String(raw || '').trim();
-    t = t.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
-    if (/^(title|chat title)\s*[:\-]/i.test(t)) t = t.replace(/^(title|chat title)\s*[:\-]\s*/i, '').trim();
-    if (t.length === 0 || t.length > 90) return null;
+    // Remove quotes and stray punctuation
+    t = t.replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, '').replace(/\.+$/, '').trim();
+    // Remove "Title:" or "Chat:" prefix
+    if (/^(title|chat title|chat)\s*[:\-]\s*/i.test(t)) t = t.replace(/^(title|chat title|chat)\s*[:\-]\s*/i, '').trim();
+    // Sometimes the model prepends a newline — take the first non-empty line
+    const lines = t.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length > 1) {
+      const short = lines.find(l => l.length <= 60 && !/^(sure|here|the title)/i.test(l)) || lines[0];
+      t = short;
+    }
+    if (t.length === 0) return null;
+    // Reject obvious echoes of the user message
+    const msgNorm = msg.toLowerCase().replace(/\s+/g, ' ').trim();
+    const tNorm = t.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (tNorm === msgNorm) return null;
+    if (t.length > 80) t = t.substring(0, 80).trim();
     return t;
   };
+
+  // Try Groq first — use the bigger model, higher token budget so reasoning
+  // doesn't eat the whole answer
   if (groq) {
-    for (const model of ['openai/gpt-oss-20b', 'openai/gpt-oss-120b']) {
+    for (const model of ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']) {
       try {
         const completion = await groq.chat.completions.create({
-          model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 30,
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.4,
+          max_tokens: 400,
         });
-        const title = tryParse(completion.choices?.[0]?.message?.content);
-        if (title) return title.substring(0, 60);
-      } catch (err) { log(`Title gen (groq ${model}) error: ${err.message}`, 'warn'); }
+        const raw = completion.choices?.[0]?.message?.content;
+        const title = cleanTitle(raw);
+        if (title) {
+          log(`Title (groq ${model}): "${title}"`, 'debug');
+          return title;
+        }
+        log(`Title gen (groq ${model}) produced empty/unusable response: ${JSON.stringify(raw).slice(0, 120)}`, 'warn');
+      } catch (err) {
+        log(`Title gen (groq ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn');
+      }
     }
   }
+  // Try FHRouter
   if (FHROUTER_API_KEY) {
     for (const model of FHROUTER_TEXT_MODELS.slice(0, 2)) {
       try {
         const r = await axios.post(FHROUTER_URL, {
-          model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 30, stream: false,
+          model, messages: [{ role: 'user', content: prompt }], temperature: 0.4, max_tokens: 400, stream: false,
         }, {
           headers: { 'Authorization': `Bearer ${FHROUTER_API_KEY}`, 'Content-Type': 'application/json' },
-          timeout: 15000,
+          timeout: 20000,
         });
-        const title = tryParse(r.data?.choices?.[0]?.message?.content);
-        if (title) return title.substring(0, 60);
-      } catch (err) { log(`Title gen (fhrouter ${model}) error: ${err.message}`, 'warn'); }
+        const raw = r.data?.choices?.[0]?.message?.content;
+        const title = cleanTitle(raw);
+        if (title) {
+          log(`Title (fhrouter ${model}): "${title}"`, 'debug');
+          return title;
+        }
+      } catch (err) {
+        log(`Title gen (fhrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn');
+      }
     }
   }
-  return msg.substring(0, 42) + (msg.length > 42 ? '…' : '');
+  // Try OpenRouter
+  if (OPENROUTER_API_KEY) {
+    for (const model of OPENROUTER_TEXT_MODELS) {
+      try {
+        const r = await axios.post(OPENROUTER_URL, {
+          model, messages: [{ role: 'user', content: prompt }], temperature: 0.4, max_tokens: 400, stream: false,
+        }, {
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': process.env.FRONTEND_URL || 'https://agrideepai.agentdomains.co',
+            'X-Title': 'AgriDeepAI',
+          },
+          timeout: 20000,
+        });
+        const raw = r.data?.choices?.[0]?.message?.content;
+        const title = cleanTitle(raw);
+        if (title) {
+          log(`Title (openrouter ${model}): "${title}"`, 'debug');
+          return title;
+        }
+      } catch (err) {
+        log(`Title gen (openrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn');
+      }
+    }
+  }
+  // Last-resort fallback — use the first few words + ellipsis (NOT the whole text)
+  const firstWords = msg.split(/\s+/).slice(0, 5).join(' ');
+  return firstWords + (msg.split(/\s+/).length > 5 ? '…' : '');
 }
 
 async function sendEmail(to, subject, htmlContent) {
@@ -543,7 +650,6 @@ async function sendLoginNotification(email, ip, device, time) {
   } catch (err) { log(`Login notification error: ${err.message}`, 'error'); }
 }
 
-// Track a session — prefers client_id, falls back to ip+ua
 async function trackSession(userId, email, req) {
   try {
     const ua = getRequestUa(req);
@@ -809,7 +915,6 @@ app.get('/api/auth/sessions', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Lightweight check: is this browser's session still valid?
 app.get('/api/auth/session-check', authenticate, async (req, res) => {
   try {
     const ua = getRequestUa(req);
@@ -832,7 +937,6 @@ app.get('/api/auth/session-check', authenticate, async (req, res) => {
   }
 });
 
-// Log out all other sessions
 app.delete('/api/auth/sessions/all', authenticate, async (req, res) => {
   try {
     const ua = getRequestUa(req);
@@ -854,7 +958,6 @@ app.delete('/api/auth/sessions/all', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Log out the CURRENT session (this browser) — MUST come before /sessions/:id
 app.delete('/api/auth/sessions/current', authenticate, async (req, res) => {
   try {
     const ua = getRequestUa(req);
@@ -910,6 +1013,21 @@ async function extractTextFromFile(file) {
     return '';
   } catch (err) { log(`Text extraction error: ${err.message}`, 'warn'); return ''; }
 }
+
+// Public title endpoint — used by guest chats to generate a smart title
+app.post('/api/chat/title', async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'Message required' });
+    }
+    const title = await generateChatTitle(message);
+    res.json({ title });
+  } catch (err) {
+    log(`Title endpoint error: ${err.message}`, 'warn');
+    res.status(500).json({ error: 'Failed to generate title' });
+  }
+});
 
 app.post('/api/chat/guest', async (req, res) => {
   try {
@@ -991,7 +1109,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       const { error: aiErr } = await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply, versions: [reply], current_version_index: 0 });
       if (aiErr) log(`Identity reply insert error: ${aiErr.message}`, 'error');
       if (conv.title === 'New Chat' || !conv.title) {
-        const newTitle = isGreeting(message) ? 'Greeting' : 'About AgriDeepAI';
+        const newTitle = await generateChatTitle(message);
         await supabase.from('conversations').update({ title: newTitle, updated_at: new Date().toISOString() }).eq('id', conversationId);
       } else {
         await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
