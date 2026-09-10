@@ -70,7 +70,7 @@ const openRouterCooldown = {};
 const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 1000; };
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
 
-// ---------- OCR.space (free API for image/doc reading) ----------
+// ---------- OCR.space ----------
 const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY;
 async function ocrImage(buffer, filename, mimeType) {
   if (!OCR_SPACE_API_KEY) return null;
@@ -81,19 +81,11 @@ async function ocrImage(buffer, filename, mimeType) {
     formData.append('isOverlayRequired', 'false');
     formData.append('OCREngine', '2');
     const res = await axios.post('https://api.ocr.space/parse/image', formData, {
-      headers: {
-        ...formData.getHeaders(),
-        apikey: OCR_SPACE_API_KEY,
-      },
-      maxBodyLength: Infinity,
-      timeout: 30000,
+      headers: { ...formData.getHeaders(), apikey: OCR_SPACE_API_KEY },
+      maxBodyLength: Infinity, timeout: 30000,
     });
-    const text = res.data?.ParsedResults?.[0]?.ParsedText || '';
-    return text.trim();
-  } catch (err) {
-    log(`OCR.space error: ${err.message}`, 'warn');
-    return null;
-  }
+    return (res.data?.ParsedResults?.[0]?.ParsedText || '').trim();
+  } catch (err) { log(`OCR.space error: ${err.message}`, 'warn'); return null; }
 }
 
 // ---------- Diagnostic ----------
@@ -109,24 +101,21 @@ app.get('/api/debug/groq-models', async (req, res) => {
 // ---------- AI Streaming ----------
 async function getAIStream(chatMessages, imageData = null) {
   const errors = [];
-
   if (groq) {
     const models = imageData ? GROQ_VISION_MODELS : GROQ_TEXT_MODELS;
     for (const model of models) {
       try {
         const stream = await groq.chat.completions.create({
-          model, messages: chatMessages, temperature: 0.6,
-          max_tokens: 1500, stream: true,
+          model, messages: chatMessages, temperature: 0.6, max_tokens: 1500, stream: true,
         });
-        log(`✅ Using Groq model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
+        log(`✅ Using Groq: ${model}${imageData ? ' (vision)' : ''}`, 'info');
         return { stream, provider: 'groq', model };
       } catch (err) {
-        log(`⚠️ Groq ${model} failed: ${String(err.message).slice(0, 150)}`, 'warn');
+        log(`⚠️ Groq ${model}: ${String(err.message).slice(0, 120)}`, 'warn');
         errors.push(`groq:${model}`);
       }
     }
   }
-
   if (OPENROUTER_API_KEY) {
     const models = imageData ? OPENROUTER_VISION_MODELS : OPENROUTER_TEXT_MODELS;
     for (const model of models) {
@@ -155,18 +144,17 @@ async function getAIStream(chatMessages, imageData = null) {
           },
           responseType: 'stream', timeout: 45000,
         });
-        log(`✅ Using OpenRouter model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
+        log(`✅ Using OpenRouter: ${model}`, 'info');
         return { stream: response.data, provider: 'openrouter', model };
       } catch (err) {
         const status = err.response?.status;
-        log(`⚠️ OpenRouter ${model} failed: ${status || err.message}`, 'warn');
+        log(`⚠️ OpenRouter ${model}: ${status || err.message}`, 'warn');
         errors.push(`openrouter:${model}`);
         if (status === 429) markCooldown(model, 120);
         if (status === 404 || status === 400) markCooldown(model, 300);
       }
     }
   }
-
   throw new Error(`All AI providers failed. Tried: ${errors.join(', ')}`);
 }
 
@@ -227,7 +215,6 @@ async function streamAI(messages, res, imageData = null, onDone = null) {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
-
   try {
     const { stream, provider } = await getAIStream(messages, imageData);
     if (provider === 'groq') consumeGroqStream(stream, res, onDone);
@@ -290,17 +277,16 @@ If the user asks about anything NOT in the list above — for example:
 - Sports, politics, religion, personal gossip
 - General programming, unrelated tech, unrelated history
 - Fashion, relationships, personal advice unrelated to farming
-- Any topic that has NO connection to agriculture, livestock, or rural life
+- Any topic with NO connection to agriculture, livestock, or rural life
 
 You MUST politely refuse and redirect. Use a short reply like:
-
 "I'm AgriDeepAI, specialised in agriculture and livestock, so I can't help with that. If you have a question about crops, livestock, soil, farming, or agribusiness, I'd be glad to help."
 
-**Never** provide the actual off-topic answer. Never mix it in. Never apologise excessively. Just decline and offer help in your domain.
+**Never** provide the actual off-topic answer. Never mix it in. Just decline and offer help in your domain.
 
 ## IMAGES & DOCUMENTS
-- If an uploaded image or document is clearly NOT related to agriculture, livestock, farming, or rural life, tell the user politely: "This image/document doesn't appear to be related to agriculture or livestock. If you have a farming question, feel free to share it."
-- If the image/document IS related (e.g., a crop photo, a livestock photo, a soil sample, a farm document), analyse it carefully and help.
+- If an uploaded image or document is clearly NOT related to agriculture, livestock, farming, or rural life, tell the user politely: "This doesn't appear to be related to agriculture or livestock. If you have a farming question, feel free to share it."
+- If the image/document IS related (crop photo, livestock photo, soil sample, farm document), analyse it carefully and help.
 
 ## STYLE
 Warm, professional, concise. Use Markdown when it helps. For disease questions, ask for symptoms/age/weather first. Include brief disclaimers for chemicals and animal health.`;
@@ -308,8 +294,7 @@ Warm, professional, concise. Use Markdown when it helps. For disease questions, 
 // ---------- Multer ----------
 const storage = multer.memoryStorage();
 const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  storage, limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['image/jpeg','image/png','image/gif','image/webp','application/pdf','text/plain','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
     if (allowed.includes(file.mimetype)) cb(null, true);
@@ -329,7 +314,7 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// ---------- Verification stores ----------
+// ---------- Stores ----------
 function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 const verificationStore = {};
 const pendingLogins = {};
@@ -363,7 +348,7 @@ async function tryIdentityShortcut(messages, res) {
   const last = [...messages].reverse().find(m => m.role === 'user');
   if (!last) return false;
   if (isCreatorQuestion(last.content)) {
-    await streamSimpleText(res, `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you with agriculture or livestock today?`);
+    await streamSimpleText(res, `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`);
     return true;
   }
   if (isGreeting(last.content)) {
@@ -641,7 +626,6 @@ async function enrichWithWebSearch(query) {
   return query;
 }
 
-// Extract text from uploaded file
 async function extractTextFromFile(file) {
   try {
     if (file.mimetype === 'application/pdf') {
@@ -651,16 +635,12 @@ async function extractTextFromFile(file) {
     if (file.mimetype.startsWith('text/')) {
       return file.buffer.toString('utf-8').substring(0, 8000);
     }
-    // For images, try OCR.space
     if (file.mimetype.startsWith('image/')) {
       const text = await ocrImage(file.buffer, file.originalname, file.mimetype);
       return text || '';
     }
     return '';
-  } catch (err) {
-    log(`Text extraction error: ${err.message}`, 'warn');
-    return '';
-  }
+  } catch (err) { log(`Text extraction error: ${err.message}`, 'warn'); return ''; }
 }
 
 // ---------- Guest chat ----------
@@ -668,15 +648,12 @@ app.post('/api/chat/guest', async (req, res) => {
   try {
     const { messages, image } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) return res.status(400).json({ error: 'Messages required' });
-
     if (await tryIdentityShortcut(messages, res)) return;
-
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     const enrichedPrompt = await enrichWithWebSearch(lastUser.content);
     const withoutLast = messages.slice(0, messages.lastIndexOf(lastUser));
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
     const imageData = image ? { base64: image.base64, mimeType: image.mimeType } : null;
-
     await streamAI(chatMessages, res, imageData);
   } catch (err) {
     log(`Guest chat error: ${err.message}`, 'error');
@@ -740,7 +717,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     const conversationId = req.params.id;
     const { message } = req.body;
     const file = req.file;
-
     const { data: conv } = await supabase.from('conversations').select('id, title')
       .eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
@@ -785,7 +761,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     if (fileMetadata) messageData.files = [fileMetadata];
     await supabase.from('messages').insert(messageData);
 
-    // Auto-rename chat on first message
+    // Auto-rename if still 'New Chat'
     if (conv.title === 'New Chat' && message) {
       const newTitle = message.substring(0, 50);
       await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
@@ -796,9 +772,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
 
     let enrichedPrompt = await enrichWithWebSearch(message || 'agriculture update');
-    if (extractedText) {
-      enrichedPrompt += `\n\n[Content extracted from uploaded file]\n${extractedText}`;
-    }
+    if (extractedText) enrichedPrompt += `\n\n[Content from uploaded file]\n${extractedText}`;
     const withoutLast = aiMessages.slice(0, -1);
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
 
