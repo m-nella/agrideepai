@@ -6,6 +6,30 @@ const log = (msg, type = 'info') => console.log(`[FRONTEND] [${new Date().toISOS
 
 const IS_SHARE_VIEW = document.documentElement.classList.contains('is-share-view');
 
+// ============ CLIENT ID (per browser) ============
+// A stable per-browser identifier stored in localStorage. Sent to the backend
+// on every auth-related request so the server can tie sessions to this exact
+// browser and detect when this browser has been logged out remotely.
+const CLIENT_ID_KEY = 'agrideepai-client-id-v1';
+function getOrCreateClientId() {
+  try {
+    let id = window.localStorage.getItem(CLIENT_ID_KEY);
+    if (!id || !/^[a-zA-Z0-9_-]{8,80}$/.test(id)) {
+      // Simple, cryptographically-random-enough ID
+      const bytes = new Uint8Array(16);
+      (window.crypto || window.msCrypto).getRandomValues(bytes);
+      id = 'c_' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      window.localStorage.setItem(CLIENT_ID_KEY, id);
+    }
+    return id;
+  } catch (e) {
+    // localStorage unavailable (private mode, etc.) — regenerate each load
+    return 'c_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
+}
+const CLIENT_ID = getOrCreateClientId();
+log(`Client ID: ${CLIENT_ID}`, 'debug');
+
 function applyShareViewHiding() {
   document.body.classList.add('share-view');
   ['sidebar','topBar','composerArea','welcomeScreen'].forEach(id => {
@@ -50,6 +74,7 @@ const chatContainer = document.getElementById('chatContainer');
 
 const MAX_ATTACHMENTS = 5;
 const CODE_RESEND_SECONDS = 60;
+const SESSION_CHECK_THROTTLE_MS = 20000; // min interval between checks
 
 let state = {
   activeChatId: null, chats: [], messages: [],
@@ -59,6 +84,7 @@ let state = {
   messageVersions: {}, likedMessages: new Set(), dislikedMessages: new Set(),
   contextMenuTarget: null, isShareView: IS_SHARE_VIEW, shareMessages: [], copyTimeout: null,
   pendingAuth: null, shouldScrollToBottom: false,
+  lastSessionCheck: 0, isSigningOut: false,
 };
 
 // ============ SMART SCROLL ============
@@ -201,11 +227,18 @@ async function initSupabase() {
     });
     const { data: { session } } = await state.supabase.auth.getSession();
     if (session?.user) {
-      state.currentUser = session.user; updateAuthUI(); await loadCloudConversations();
+      state.currentUser = session.user;
+      // Check remote validity BEFORE loading conversations
+      const ok = await verifySessionValidity(true);
+      if (!ok) return;
+      updateAuthUI(); await loadCloudConversations();
     } else {
       const { data: refreshed } = await state.supabase.auth.refreshSession();
       if (refreshed.session?.user) {
-        state.currentUser = refreshed.session.user; updateAuthUI(); await loadCloudConversations();
+        state.currentUser = refreshed.session.user;
+        const ok = await verifySessionValidity(true);
+        if (!ok) return;
+        updateAuthUI(); await loadCloudConversations();
       } else {
         updateAuthUI(); renderChatList(); renderMessages();
       }
@@ -213,6 +246,75 @@ async function initSupabase() {
   } catch (err) {
     log(`Supabase init error: ${err.message}`, 'error');
     renderChatList(); renderMessages();
+  }
+}
+
+// ============ SESSION VALIDITY ============
+// Returns true if this browser's session still exists on the server.
+// When it does not (e.g. logged out from another device), forces local sign-out.
+async function verifySessionValidity(force = false) {
+  if (!state.supabase || !state.currentUser || state.isShareView) return true;
+  const now = Date.now();
+  if (!force && now - state.lastSessionCheck < SESSION_CHECK_THROTTLE_MS) return true;
+  state.lastSessionCheck = now;
+  try {
+    let session = (await state.supabase.auth.getSession()).data.session;
+    if (!session) return false;
+    const doFetch = (token) => fetch('/api/auth/session-check', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Client-Id': CLIENT_ID,
+      },
+      cache: 'no-store',
+    });
+    let res = await doFetch(session.access_token);
+    if (res.status === 401) {
+      // Try refreshing the token once
+      const { data } = await state.supabase.auth.refreshSession();
+      if (data.session?.access_token) {
+        res = await doFetch(data.session.access_token);
+      } else {
+        await forceSignOut('Session expired');
+        return false;
+      }
+    }
+    if (!res.ok) {
+      // Transient server issue — don't sign out
+      return true;
+    }
+    const data = await res.json().catch(() => ({ valid: true }));
+    if (data && data.valid === false) {
+      await forceSignOut('Signed out from another device');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    log(`verifySessionValidity error: ${e.message}`, 'warn');
+    return true; // never fail-closed on network errors
+  }
+}
+
+// Clears local session, closes modals, shows a toast, and reloads app state
+async function forceSignOut(reason = 'Signed out') {
+  if (state.isSigningOut) return;
+  state.isSigningOut = true;
+  try {
+    // Remove any lingering modals
+    document.querySelectorAll('.modal').forEach(m => m.remove());
+    document.querySelectorAll('.lightbox-overlay').forEach(m => m.remove());
+    if (state.supabase) {
+      try { await state.supabase.auth.signOut({ scope: 'local' }); } catch (e) {}
+    }
+    // Clear our auth storage key in case Supabase leaves residue
+    try { window.localStorage.removeItem('agrideepai-auth-v2'); } catch (e) {}
+    state.currentUser = null;
+    state.chats = []; state.messages = []; state.activeChatId = null;
+    state.lastSessionCheck = 0;
+    updateAuthUI(); renderChatList(); renderMessages();
+    showToast(reason, true);
+  } finally {
+    state.isSigningOut = false;
   }
 }
 
@@ -228,12 +330,18 @@ function updateAuthUI() {
   window.refreshIcons();
 }
 
+// Auth-aware fetch for /api/... endpoints — always sends X-Client-Id
 async function apiFetch(endpoint, options = {}) {
   if (!state.supabase) throw new Error('Not initialized');
   let session = (await state.supabase.auth.getSession()).data.session;
   if (!session) { try { const { data } = await state.supabase.auth.refreshSession(); session = data.session; } catch (e) {} }
   if (!session?.access_token) throw new Error('Not authenticated');
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, ...options.headers };
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${session.access_token}`,
+    'X-Client-Id': CLIENT_ID,
+    ...options.headers,
+  };
   let res = await fetch(endpoint, { ...options, headers });
   if (res.status === 401) {
     const { data } = await state.supabase.auth.refreshSession();
@@ -906,7 +1014,12 @@ async function sendMessage() {
       let token = session?.access_token;
       if (!token) { const { data } = await state.supabase.auth.refreshSession(); token = data.session?.access_token; }
       if (!token) throw new Error('Session expired');
-      response = await fetch(`/api/chat/conversations/${chat.id}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd, signal: state.abortController.signal });
+      response = await fetch(`/api/chat/conversations/${chat.id}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'X-Client-Id': CLIENT_ID },
+        body: fd,
+        signal: state.abortController.signal,
+      });
     } else {
       const cleanMessages = state.messages.filter(m => m.id !== assist.id);
       const payload = { messages: buildGuestPayload(cleanMessages) };
@@ -1039,7 +1152,11 @@ function renderAuthForm(mode) {
       if (resendBtn.disabled) return;
       statDiv.textContent = 'Resending...'; statDiv.style.display = 'block'; errDiv.style.display = 'none';
       try {
-        const rr = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: getToken() }) });
+        const rr = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+          body: JSON.stringify({ pendingToken: getToken() }),
+        });
         const rd = await rr.json();
         if (!rr.ok) throw new Error(rd.error || 'Failed to resend');
         setToken(rd.pendingToken);
@@ -1064,7 +1181,11 @@ function renderAuthForm(mode) {
       const fullName = document.getElementById('authFullName')?.value.trim() || email.split('@')[0];
       errDiv.style.display = 'none'; statDiv.textContent = 'Sending code...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
       try {
-        const res = await fetch('/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, fullName }) });
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+          body: JSON.stringify({ email, password, fullName }),
+        });
         const data = await res.json(); if (!res.ok) throw new Error(data.error);
         state.pendingAuth = data.pendingToken;
         document.getElementById('verifySection').style.display = 'block';
@@ -1076,10 +1197,15 @@ function renderAuthForm(mode) {
           if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
           statDiv.textContent = 'Verifying...';
           try {
-            const cr = await fetch('/api/auth/confirm-signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: state.pendingAuth, code }) });
+            const cr = await fetch('/api/auth/confirm-signup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+              body: JSON.stringify({ pendingToken: state.pendingAuth, code }),
+            });
             const cd = await cr.json(); if (!cr.ok) throw new Error(cd.error);
             await state.supabase.auth.setSession({ access_token: cd.session.access_token, refresh_token: cd.session.refresh_token });
             state.currentUser = cd.user; state.pendingAuth = null;
+            state.lastSessionCheck = Date.now();
             updateAuthUI(); closeAuthModal(); showToast('Account created!');
             await loadCloudConversations();
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
@@ -1091,7 +1217,11 @@ function renderAuthForm(mode) {
       if (!email || !password) { errDiv.textContent = 'Email and password required'; errDiv.style.display = 'block'; return; }
       errDiv.style.display = 'none'; statDiv.textContent = 'Checking password...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
       try {
-        const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+          body: JSON.stringify({ email, password }),
+        });
         const data = await res.json(); if (!res.ok) throw new Error(data.error);
         state.pendingAuth = data.pendingToken;
         statDiv.textContent = 'Verification code sent. Check your email.';
@@ -1103,7 +1233,11 @@ function renderAuthForm(mode) {
           if (!code) { errDiv.textContent = 'Enter code'; errDiv.style.display = 'block'; return; }
           statDiv.textContent = 'Verifying...';
           try {
-            const vr = await fetch('/api/auth/verify-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: state.pendingAuth, code }) });
+            const vr = await fetch('/api/auth/verify-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+              body: JSON.stringify({ pendingToken: state.pendingAuth, code }),
+            });
             const vd = await vr.json(); if (!vr.ok) throw new Error(vd.error);
             if (vd.requires2fa) {
               state.pendingAuth = vd.twoFactorToken;
@@ -1114,10 +1248,15 @@ function renderAuthForm(mode) {
                 const c2 = document.getElementById('twofaCode').value.trim();
                 if (!c2) { errDiv.textContent = 'Enter 2FA code'; errDiv.style.display = 'block'; return; }
                 try {
-                  const t2 = await fetch('/api/auth/2fa/validate-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ twoFactorToken: state.pendingAuth, code: c2 }) });
+                  const t2 = await fetch('/api/auth/2fa/validate-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+                    body: JSON.stringify({ twoFactorToken: state.pendingAuth, code: c2 }),
+                  });
                   const t2d = await t2.json(); if (!t2.ok) throw new Error(t2d.error);
                   await state.supabase.auth.setSession({ access_token: t2d.session.access_token, refresh_token: t2d.session.refresh_token });
                   state.currentUser = t2d.user; state.pendingAuth = null;
+                  state.lastSessionCheck = Date.now();
                   updateAuthUI(); closeAuthModal(); showToast('Signed in!');
                   await loadCloudConversations();
                 } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; }
@@ -1126,6 +1265,7 @@ function renderAuthForm(mode) {
             }
             await state.supabase.auth.setSession({ access_token: vd.session.access_token, refresh_token: vd.session.refresh_token });
             state.currentUser = vd.user; state.pendingAuth = null;
+            state.lastSessionCheck = Date.now();
             updateAuthUI(); closeAuthModal(); showToast('Signed in!');
             await loadCloudConversations();
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
@@ -1170,7 +1310,13 @@ async function openAccountModal() {
 
     if (id === 'logout') {
       content.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure?</p><button class="btn-primary" id="loConfirm" style="background:var(--danger);">Log out</button><button class="btn-primary" id="loCancel" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
-      content.querySelector('#loConfirm').onclick = async () => { await state.supabase.auth.signOut(); close(); showToast('Logged out'); };
+      content.querySelector('#loConfirm').onclick = async () => {
+        // Remove this session row server-side so session-check fails for this browser
+        try { await apiFetch('/api/auth/sessions/current', { method: 'DELETE' }).catch(() => {}); } catch (e) {}
+        await state.supabase.auth.signOut();
+        state.lastSessionCheck = 0;
+        close(); showToast('Logged out');
+      };
       content.querySelector('#loCancel').onclick = () => render('profile');
       return;
     }
@@ -1415,9 +1561,7 @@ async function openAccountModal() {
       });
     }
 
-    // --- SESSIONS tab handlers ---
     if (id === 'sessions') {
-      // Log out all other sessions
       document.getElementById('logoutAllBtn')?.addEventListener('click', async () => {
         const ok = await showCustomModal(
           'Log out all other sessions',
@@ -1438,7 +1582,6 @@ async function openAccountModal() {
         }
       });
 
-      // Log out a single session
       content.querySelectorAll('.session-logout-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const sid = btn.dataset.sessionId;
@@ -1497,6 +1640,19 @@ messageInput.addEventListener('input', () => { resizeComposer(); updateSendButto
 chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; updateSendButton(); sendMessage(); });
 document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
 shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
+
+// ============ AUTO SESSION CHECK ============
+// Check on tab refocus / visibility change. Throttled to avoid spamming.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') verifySessionValidity();
+});
+window.addEventListener('focus', () => { verifySessionValidity(); });
+window.addEventListener('online', () => { verifySessionValidity(true); });
+
+// Optional: periodic check every 60s while the tab is open
+setInterval(() => {
+  if (document.visibilityState === 'visible') verifySessionValidity();
+}, 60000);
 
 (async function init() {
   try {
