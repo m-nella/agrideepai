@@ -1,17 +1,14 @@
 // ============================================================
-// AGRIDEEPAI — Full Frontend (Final)
+// AGRIDEEPAI — Full Frontend
 // ============================================================
 
 const log = (msg, type = 'info') => console.log(`[FRONTEND] [${new Date().toISOString()}] [${type.toUpperCase()}] ${msg}`);
 
-// CRITICAL: apply share-view class IMMEDIATELY
 if (window.location.pathname.startsWith('/share/')) {
   document.body.classList.add('share-view');
-  // Force-hide anything left over
   document.documentElement.style.background = '#171b20';
 }
 
-// --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
 const openSidebarBtn = document.getElementById('openSidebarBtn');
 const sidebarToggle = document.getElementById('sidebarToggle');
@@ -45,7 +42,6 @@ let state = {
   contextMenuTarget: null, isShareView: false, shareMessages: [], copyTimeout: null,
 };
 
-// ============ LIGHTBOX ============
 function openLightbox(src, isImage = true) {
   const overlay = document.createElement('div');
   overlay.className = 'lightbox-overlay';
@@ -71,21 +67,11 @@ function openLightbox(src, isImage = true) {
   document.body.appendChild(overlay);
 }
 
-// ============ MODALS ============
 function showCustomModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel', isDanger = false) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal';
-    modal.innerHTML = `
-      <div class="modal-content">
-        <button class="modal-close" id="customModalClose">&times;</button>
-        <h2>${title}</h2>
-        <p style="margin:1rem 0;color:var(--text-muted);">${message}</p>
-        <div style="display:flex;gap:.5rem;margin-top:1rem;">
-          <button class="btn-primary ${isDanger ? 'btn-danger' : ''}" id="customModalConfirm" style="flex:1;">${confirmText}</button>
-          <button class="btn-primary" id="customModalCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">${cancelText}</button>
-        </div>
-      </div>`;
+    modal.innerHTML = `<div class="modal-content"><button class="modal-close" id="customModalClose">&times;</button><h2>${title}</h2><p style="margin:1rem 0;color:var(--text-muted);">${message}</p><div style="display:flex;gap:.5rem;margin-top:1rem;"><button class="btn-primary ${isDanger ? 'btn-danger' : ''}" id="customModalConfirm" style="flex:1;">${confirmText}</button><button class="btn-primary" id="customModalCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">${cancelText}</button></div></div>`;
     document.body.appendChild(modal);
     const close = () => { modal.remove(); resolve(false); };
     modal.querySelector('#customModalClose').onclick = close;
@@ -99,16 +85,7 @@ function showCustomPrompt(title, defaultValue = '') {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal';
-    modal.innerHTML = `
-      <div class="modal-content">
-        <button class="modal-close" id="customPromptClose">&times;</button>
-        <h2>${title}</h2>
-        <input type="text" id="customPromptInput" value="${defaultValue}" style="width:100%;margin-top:.5rem;" />
-        <div style="display:flex;gap:.5rem;margin-top:1rem;">
-          <button class="btn-primary" id="customPromptConfirm" style="flex:1;">Save</button>
-          <button class="btn-primary" id="customPromptCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button>
-        </div>
-      </div>`;
+    modal.innerHTML = `<div class="modal-content"><button class="modal-close" id="customPromptClose">&times;</button><h2>${title}</h2><input type="text" id="customPromptInput" value="${defaultValue}" style="width:100%;margin-top:.5rem;" /><div style="display:flex;gap:.5rem;margin-top:1rem;"><button class="btn-primary" id="customPromptConfirm" style="flex:1;">Save</button><button class="btn-primary" id="customPromptCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div></div>`;
     document.body.appendChild(modal);
     const input = modal.querySelector('#customPromptInput');
     input.focus(); input.select();
@@ -124,7 +101,6 @@ function showCustomPrompt(title, defaultValue = '') {
   });
 }
 
-// ============ CLEAN CONTENT ============
 function cleanContent(content) {
   if (!content) return content;
   const lines = content.split('\n');
@@ -137,7 +113,6 @@ function cleanContent(content) {
   return out.join('\n').trim();
 }
 
-// ============ SUPABASE INIT (with persistence) ============
 async function initSupabase() {
   log('Initializing Supabase...', 'info');
   try {
@@ -145,21 +120,11 @@ async function initSupabase() {
     const config = await res.json();
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: false,
-        storage: window.localStorage,
-        storageKey: 'agrideepai-auth-v1',
-      },
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storage: window.localStorage, storageKey: 'agrideepai-auth-v1' },
     });
-
     state.supabase.auth.onAuthStateChange(async (event, session) => {
-      log(`Auth state change: ${event}`, 'debug');
-      if (event === 'TOKEN_REFRESHED' && session) {
-        state.currentUser = session.user;
-        return;
-      }
+      log(`Auth: ${event}`, 'debug');
+      if (event === 'TOKEN_REFRESHED' && session) { state.currentUser = session.user; return; }
       if (session?.user) {
         state.currentUser = session.user;
         updateAuthUI();
@@ -171,15 +136,12 @@ async function initSupabase() {
         renderChatList(); renderMessages();
       }
     });
-
-    // Wait for initial session
     const { data: { session } } = await state.supabase.auth.getSession();
     if (session?.user) {
       state.currentUser = session.user;
       updateAuthUI();
       await loadCloudConversations();
     } else {
-      // Try refreshing in case token expired
       const { data: refreshed } = await state.supabase.auth.refreshSession();
       if (refreshed.session?.user) {
         state.currentUser = refreshed.session.user;
@@ -192,7 +154,6 @@ async function initSupabase() {
     }
   } catch (err) {
     log(`Supabase init error: ${err.message}`, 'error');
-    state.chats = []; state.messages = []; state.activeChatId = null;
     renderChatList(); renderMessages();
   }
 }
@@ -209,45 +170,26 @@ function updateAuthUI() {
   window.refreshIcons();
 }
 
-// ============ ROBUST API FETCH WITH AUTO-REFRESH ============
 async function apiFetch(endpoint, options = {}) {
   if (!state.supabase) throw new Error('Not initialized');
-
   let session = (await state.supabase.auth.getSession()).data.session;
   if (!session) {
-    try {
-      const { data } = await state.supabase.auth.refreshSession();
-      session = data.session;
-    } catch (e) {}
+    try { const { data } = await state.supabase.auth.refreshSession(); session = data.session; } catch (e) {}
   }
   if (!session?.access_token) throw new Error('Not authenticated');
-
-  const headers = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${session.access_token}`,
-    ...options.headers,
-  };
-
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, ...options.headers };
   let res = await fetch(endpoint, { ...options, headers });
-
-  // If 401, try refreshing and retrying once
   if (res.status === 401) {
-    log('Got 401, attempting refresh', 'warn');
     const { data } = await state.supabase.auth.refreshSession();
     if (data.session?.access_token) {
       const retryHeaders = { ...headers, Authorization: `Bearer ${data.session.access_token}` };
       res = await fetch(endpoint, { ...options, headers: retryHeaders });
     }
   }
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Request failed (${res.status})`);
-  }
+  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `Request failed (${res.status})`); }
   return res;
 }
 
-// ============ CLOUD CONVERSATIONS ============
 async function loadCloudConversations() {
   if (!state.currentUser) return;
   try {
@@ -280,7 +222,6 @@ function rebuildVersions() {
   });
 }
 
-// ============ RENDER CHAT LIST ============
 function renderChatList() {
   chatList.innerHTML = '';
   const pinned = state.chats.filter(c => c.pinned);
@@ -328,7 +269,6 @@ function appendChatItem(container, chat) {
   container.appendChild(div);
 }
 
-// ============ RENDER MESSAGES ============
 function renderMessages() {
   messageList.innerHTML = '';
 
@@ -386,11 +326,9 @@ function renderMessages() {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
-    // EDITING MODE
     if (state.editingMessageId === msg.id && msg.role === 'user') {
       const area = document.createElement('div');
       area.style.width = '100%';
-
       if (msg.files?.length) {
         const atts = document.createElement('div');
         atts.className = 'attachments-above';
@@ -414,19 +352,15 @@ function renderMessages() {
         area.appendChild(atts);
         window.refreshIcons();
       }
-
       const ta = document.createElement('textarea');
       ta.value = state.editingValue;
       ta.style.cssText = 'width:100%;padding:.5rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:.95rem;';
-
       const g = document.createElement('div');
       g.style.cssText = 'display:flex;gap:.5rem;margin-top:.5rem;justify-content:flex-end;';
-
       const cancel = document.createElement('button');
       cancel.textContent = 'Cancel';
       cancel.style.cssText = 'padding:.5rem 1.1rem;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-weight:500;font-size:.9rem;';
       cancel.onclick = () => { state.editingMessageId = null; renderMessages(); };
-
       const send = document.createElement('button');
       send.textContent = 'Send';
       send.style.cssText = 'padding:.5rem 1.4rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-weight:600;font-size:.9rem;cursor:pointer;box-shadow:0 2px 8px rgba(47,143,70,.35);';
@@ -446,7 +380,6 @@ function renderMessages() {
         renderMessages();
         await sendEditedUserMessage();
       };
-
       g.appendChild(cancel); g.appendChild(send);
       area.appendChild(ta); area.appendChild(g);
       msgDiv.appendChild(area);
@@ -456,7 +389,6 @@ function renderMessages() {
       return;
     }
 
-    // NORMAL DISPLAY
     if (msg.role === 'assistant') {
       const isLast = index === lastIndex;
       const thinking = isLast && state.isGenerating && msg.content === '';
@@ -531,7 +463,6 @@ function renderMessages() {
         edit.title = 'Edit';
         edit.onclick = (e) => { e.stopPropagation(); startEditing(msg); };
         ar.appendChild(edit);
-
         if (state.messageVersions[msg.id]?.versions.length > 1) {
           const v = state.messageVersions[msg.id];
           const vc = document.createElement('div');
@@ -606,7 +537,6 @@ function isNearBottom(container, threshold = 150) {
   return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
 }
 
-// ============ TOAST ============
 function showToast(message, isError = false) {
   document.querySelector('.agrideep-toast')?.remove();
   const toast = document.createElement('div');
@@ -628,7 +558,6 @@ function showToast(message, isError = false) {
   }, 2500);
 }
 
-// ============ LIKE / DISLIKE ============
 function toggleLike(msg) {
   if (state.likedMessages.has(msg.id)) state.likedMessages.delete(msg.id);
   else { state.likedMessages.add(msg.id); state.dislikedMessages.delete(msg.id); }
@@ -647,7 +576,6 @@ function startEditing(msg) {
   renderMessages();
 }
 
-// ============ SEND AFTER EDIT ============
 async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) return;
@@ -676,7 +604,6 @@ async function sendEditedUserMessage() {
   }
 }
 
-// ============ REGENERATE ============
 async function regenerateMessage(index) {
   const msg = state.messages[index];
   if (!msg || msg.role !== 'assistant') return;
@@ -712,7 +639,6 @@ async function regenerateMessage(index) {
   }
 }
 
-// ============ STREAM CONSUMER ============
 async function consumeStream(response, chat, versionData = null) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -750,7 +676,6 @@ async function consumeStream(response, chat, versionData = null) {
   else renderChatList();
 }
 
-// ============ SHARE ============
 async function shareConversation(messagesToShare = null) {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat && !messagesToShare) { showToast('No chat to share', true); return; }
@@ -774,13 +699,13 @@ async function shareConversation(messagesToShare = null) {
   } catch (err) { showToast('Failed to generate share link: ' + err.message, true); }
 }
 
-// ============ CHAT CRUD ============
 function createLocalChat(title = 'New Chat') {
   const chat = { id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5), title, messages: [], pinned: false, updatedAt: new Date().toISOString(), createdAt: new Date().toISOString() };
   state.chats.unshift(chat);
   renderChatList();
   return chat;
 }
+
 async function createChat(title = 'New Chat') {
   if (state.currentUser) {
     try {
@@ -793,6 +718,7 @@ async function createChat(title = 'New Chat') {
   }
   return createLocalChat(title);
 }
+
 async function selectChat(id) {
   state.activeChatId = id;
   if (state.currentUser && !id.startsWith('local_')) {
@@ -805,6 +731,7 @@ async function selectChat(id) {
   if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
   chatMenu.classList.add('hidden');
 }
+
 async function deleteChat(id) {
   const ok = await showCustomModal('Delete Chat', 'Are you sure? This cannot be undone.', 'Delete', 'Cancel', true);
   if (!ok) return;
@@ -815,6 +742,7 @@ async function deleteChat(id) {
   if (state.activeChatId === id) { state.activeChatId = null; state.messages = []; renderMessages(); }
   renderChatList(); chatMenu.classList.add('hidden');
 }
+
 async function renameChat(id) {
   const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
@@ -831,6 +759,7 @@ async function renameChat(id) {
   } else { chat.title = t; renderChatList(); }
   chatMenu.classList.add('hidden');
 }
+
 async function togglePin(id) {
   const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
@@ -845,6 +774,7 @@ async function togglePin(id) {
   } else { chat.pinned = !chat.pinned; renderChatList(); }
   chatMenu.classList.add('hidden');
 }
+
 function openChatMenu(e, chatId) {
   e.preventDefault();
   state.contextMenuTarget = chatId;
@@ -870,6 +800,7 @@ function openChatMenu(e, chatId) {
   });
   window.refreshIcons();
 }
+
 document.addEventListener('click', (e) => {
   if (!chatMenu.contains(e.target) && !e.target.closest('.chat-item .actions')) chatMenu.classList.add('hidden');
 });
@@ -886,13 +817,13 @@ function handleNewChat() {
   });
 }
 
-// ============ COMPOSER ============
 function resizeComposer() {
   messageInput.style.height = '0px';
   const sh = messageInput.scrollHeight;
   messageInput.style.height = Math.min(sh, 120) + 'px';
   messageInput.style.overflowY = sh > 120 ? 'auto' : 'hidden';
 }
+
 function updateSendButton() {
   const has = messageInput.value.trim().length > 0 || state.attachments.length > 0;
   const si = sendBtn.querySelector('.send-icon');
@@ -936,7 +867,6 @@ function renderAttachments() {
   window.refreshIcons();
 }
 
-// ============ SEND MESSAGE ============
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text && !state.attachments.length) return;
@@ -954,6 +884,19 @@ async function sendMessage() {
       chat = createLocalChat(title);
       state.activeChatId = chat.id;
     }
+  }
+
+  // ============ FIX: Rename chat if it was a New Chat ============
+  const wasNewChat = (chat.title === 'New Chat' || !chat.title) && text;
+  if (wasNewChat) {
+    const newTitle = text.substring(0, 42) + (text.length > 42 ? '…' : '');
+    chat.title = newTitle;
+    if (state.currentUser && !chat.id.startsWith('local_')) {
+      try {
+        await apiFetch(`/api/chat/conversations/${chat.id}`, { method: 'PUT', body: JSON.stringify({ title: newTitle }) });
+      } catch (e) { log('Title update failed: ' + e.message, 'warn'); }
+    }
+    renderChatList();
   }
 
   const localFiles = state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size, public_url: URL.createObjectURL(f) }));
@@ -983,15 +926,11 @@ async function sendMessage() {
       fd.append('message', text || '');
       atts.forEach(f => fd.append('file', f));
       const session = (await state.supabase.auth.getSession()).data.session;
-      const token = session?.access_token;
-      if (!token) {
-        // Refresh
-        const { data } = await state.supabase.auth.refreshSession();
-        if (!data.session?.access_token) throw new Error('Session expired. Please sign in again.');
-      }
-      const finalToken = (await state.supabase.auth.getSession()).data.session?.access_token;
+      let token = session?.access_token;
+      if (!token) { const { data } = await state.supabase.auth.refreshSession(); token = data.session?.access_token; }
+      if (!token) throw new Error('Session expired');
       response = await fetch(`/api/chat/conversations/${chat.id}/messages`, {
-        method: 'POST', headers: { Authorization: `Bearer ${finalToken}` },
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
         body: fd, signal: state.abortController.signal,
       });
     } else {
@@ -1045,7 +984,6 @@ function stopGeneration() {
   }
 }
 
-// ============ PASSWORD FIELD ============
 function createPasswordField(id, placeholder) {
   const w = document.createElement('div');
   w.style.cssText = 'position:relative;width:100%;';
@@ -1066,20 +1004,19 @@ function createPasswordField(id, placeholder) {
   return w;
 }
 
-// ============ AUTH MODAL ============
 function openAuthModal(mode = 'login') { authModal.classList.remove('hidden'); renderAuthForm(mode); }
 function closeAuthModal() { authModal.classList.add('hidden'); }
 modalClose.forEach(b => b.addEventListener('click', closeAuthModal));
 authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
 
-function renderAuthForm(mode, extra = {}) {
+function renderAuthForm(mode) {
   const isLogin = mode === 'login';
   authModalBody.innerHTML = `
     <h2>${isLogin ? 'Sign In' : 'Create Account'}</h2>
     <div id="authError" class="error-msg" style="display:none;"></div>
     <div id="authStatus" class="status-msg" style="display:none;"></div>
     <label>Email</label>
-    <input type="email" id="authEmail" placeholder="you@example.com" value="${extra.email || ''}" ${extra.email ? 'readonly' : ''} />
+    <input type="email" id="authEmail" placeholder="you@example.com" />
     <label>Password</label>
     <div id="authPasswordWrapper"></div>
     ${!isLogin ? `<label>Confirm Password</label><div id="authConfirmPasswordWrapper"></div>` : ''}
@@ -1123,7 +1060,6 @@ function renderAuthForm(mode, extra = {}) {
 
   submitBtn.onclick = async () => {
     if (!isLogin) {
-      // SIGNUP
       const email = emailInput.value.trim(), password = pwInput.value, confirm = confirmInput?.value || '';
       if (!email || !password) { errDiv.textContent = 'All fields required'; errDiv.style.display = 'block'; return; }
       if (password !== confirm) { errDiv.textContent = 'Passwords do not match'; errDiv.style.display = 'block'; return; }
@@ -1143,14 +1079,9 @@ function renderAuthForm(mode, extra = {}) {
             const cr = await fetch('/api/auth/confirm-signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code }) });
             const cd = await cr.json();
             if (!cr.ok) throw new Error(cd.error);
-            // Set session on supabase client
-            await state.supabase.auth.setSession({
-              access_token: cd.session.access_token,
-              refresh_token: cd.session.refresh_token,
-            });
+            await state.supabase.auth.setSession({ access_token: cd.session.access_token, refresh_token: cd.session.refresh_token });
             state.currentUser = cd.user;
-            updateAuthUI(); closeAuthModal();
-            showToast('Account created!');
+            updateAuthUI(); closeAuthModal(); showToast('Account created!');
             await loadCloudConversations();
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
@@ -1162,7 +1093,6 @@ function renderAuthForm(mode, extra = {}) {
       } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
       finally { submitBtn.disabled = false; }
     } else {
-      // LOGIN — step 1: send email code
       const email = emailInput.value.trim(), password = pwInput.value;
       if (!email || !password) { errDiv.textContent = 'Email and password required'; errDiv.style.display = 'block'; return; }
       errDiv.style.display = 'none'; statDiv.textContent = 'Checking password...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
@@ -1181,7 +1111,6 @@ function renderAuthForm(mode, extra = {}) {
             const vd = await vr.json();
             if (!vr.ok) throw new Error(vd.error);
             if (vd.requires2fa) {
-              // 2FA step
               document.getElementById('verifySection').style.display = 'none';
               document.getElementById('twofaSection').style.display = 'block';
               statDiv.textContent = 'Email verified. Enter your 2FA code.';
@@ -1192,10 +1121,7 @@ function renderAuthForm(mode, extra = {}) {
                   const t2 = await fetch('/api/auth/2fa/validate-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tempToken: vd.tempToken, code: c2 }) });
                   const t2d = await t2.json();
                   if (!t2.ok) throw new Error(t2d.error);
-                  await state.supabase.auth.setSession({
-                    access_token: t2d.session.access_token,
-                    refresh_token: t2d.session.refresh_token,
-                  });
+                  await state.supabase.auth.setSession({ access_token: t2d.session.access_token, refresh_token: t2d.session.refresh_token });
                   state.currentUser = t2d.user;
                   updateAuthUI(); closeAuthModal(); showToast('Signed in!');
                   await loadCloudConversations();
@@ -1203,11 +1129,7 @@ function renderAuthForm(mode, extra = {}) {
               };
               return;
             }
-            // No 2FA — complete login
-            await state.supabase.auth.setSession({
-              access_token: vd.session.access_token,
-              refresh_token: vd.session.refresh_token,
-            });
+            await state.supabase.auth.setSession({ access_token: vd.session.access_token, refresh_token: vd.session.refresh_token });
             state.currentUser = vd.user;
             updateAuthUI(); closeAuthModal(); showToast('Signed in!');
             await loadCloudConversations();
@@ -1224,7 +1146,6 @@ function renderAuthForm(mode, extra = {}) {
   };
 }
 
-// ============ ACCOUNT MODAL ============
 async function openAccountModal() {
   if (!state.currentUser) return;
   let profile = {};
@@ -1232,20 +1153,7 @@ async function openAccountModal() {
 
   const modal = document.createElement('div');
   modal.className = 'modal account-modal';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <button class="modal-close" id="accClose">&times;</button>
-      <div class="account-modal-layout">
-        <div class="account-tabs">
-          <div class="account-tab active" data-tab="profile"><i data-lucide="user"></i> Profile</div>
-          <div class="account-tab" data-tab="account"><i data-lucide="settings"></i> Account</div>
-          <div class="account-tab" data-tab="security"><i data-lucide="shield"></i> Security</div>
-          <div class="account-tab" data-tab="sessions"><i data-lucide="monitor"></i> Sessions</div>
-          <div class="account-tab logout-tab" data-tab="logout"><i data-lucide="log-out"></i> Log out</div>
-        </div>
-        <div class="account-content" id="accContent"></div>
-      </div>
-    </div>`;
+  modal.innerHTML = `<div class="modal-content"><button class="modal-close" id="accClose">&times;</button><div class="account-modal-layout"><div class="account-tabs"><div class="account-tab active" data-tab="profile"><i data-lucide="user"></i> Profile</div><div class="account-tab" data-tab="account"><i data-lucide="settings"></i> Account</div><div class="account-tab" data-tab="security"><i data-lucide="shield"></i> Security</div><div class="account-tab" data-tab="sessions"><i data-lucide="monitor"></i> Sessions</div><div class="account-tab logout-tab" data-tab="logout"><i data-lucide="log-out"></i> Log out</div></div><div class="account-content" id="accContent"></div></div></div>`;
   document.body.appendChild(modal);
   const close = () => modal.remove();
   modal.querySelector('#accClose').onclick = close;
@@ -1280,21 +1188,8 @@ async function openAccountModal() {
         const data = await res.json();
         const cur = data.current || {};
         const acc = data.account || {};
-        html = `<h2>Active Sessions</h2>
-          <div class="sessions-list">
-            <h3>Current device</h3>
-            <p><strong>Email:</strong> ${cur.email || state.currentUser.email}</p>
-            <p><strong>Browser:</strong> ${(cur.user_agent || '').substring(0, 80)}</p>
-            <p><strong>IP:</strong> ${cur.ip || 'Unknown'}</p>
-            <hr />
-            <h3>Account</h3>
-            <p><strong>Created:</strong> ${acc.created_at ? new Date(acc.created_at).toLocaleString() : '—'}</p>
-            <p><strong>Last sign in:</strong> ${acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleString() : '—'}</p>
-            <p style="font-size:.8rem;color:var(--text-muted);margin-top:.5rem;">Note: Supabase free tier does not allow listing all active devices. Sessions are managed automatically per device.</p>
-          </div>`;
-      } catch (e) {
-        html = `<h2>Active Sessions</h2><p>Unable to load: ${e.message}</p>`;
-      }
+        html = `<h2>Active Sessions</h2><div class="sessions-list"><h3>Current device</h3><p><strong>Email:</strong> ${cur.email || state.currentUser.email}</p><p><strong>Browser:</strong> ${(cur.user_agent || '').substring(0, 80)}</p><p><strong>IP:</strong> ${cur.ip || 'Unknown'}</p><hr /><h3>Account</h3><p><strong>Created:</strong> ${acc.created_at ? new Date(acc.created_at).toLocaleString() : '—'}</p><p><strong>Last sign in:</strong> ${acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleString() : '—'}</p></div>`;
+      } catch (e) { html = `<h2>Active Sessions</h2><p>Unable to load: ${e.message}</p>`; }
     }
     content.innerHTML = html;
     window.refreshIcons();
@@ -1359,7 +1254,6 @@ async function openAccountModal() {
   render('profile');
 }
 
-// ============ ATTACH BUTTON ============
 attachBtn.onclick = () => {
   const input = document.createElement('input');
   input.type = 'file';
@@ -1375,7 +1269,6 @@ attachBtn.onclick = () => {
   input.click();
 };
 
-// ============ SIDEBAR ============
 sidebarToggle.onclick = () => {
   sidebar.classList.toggle('collapsed');
   const c = sidebar.classList.contains('collapsed');
@@ -1387,7 +1280,6 @@ document.addEventListener('click', (e) => {
   if (window.innerWidth < 768 && sidebar.classList.contains('mobile-open') && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
 });
 
-// ============ OTHER LISTENERS ============
 newChatBtn.onclick = handleNewChat;
 sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
 messageInput.addEventListener('keydown', (e) => {
@@ -1398,7 +1290,6 @@ chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; up
 document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
 shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
 
-// ============ SHARE VIEW ============
 async function checkShareView() {
   const path = window.location.pathname;
   if (!path.startsWith('/share/')) return false;
@@ -1419,7 +1310,6 @@ async function checkShareView() {
   return true;
 }
 
-// ============ INIT ============
 (async function init() {
   const isShare = await checkShareView();
   if (!isShare) { await initSupabase(); updateSendButton(); }
