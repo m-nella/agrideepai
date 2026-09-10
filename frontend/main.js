@@ -7,15 +7,11 @@ const log = (msg, type = 'info') => console.log(`[FRONTEND] [${new Date().toISOS
 const IS_SHARE_VIEW = document.documentElement.classList.contains('is-share-view');
 
 // ============ CLIENT ID (per browser) ============
-// A stable per-browser identifier stored in localStorage. Sent to the backend
-// on every auth-related request so the server can tie sessions to this exact
-// browser and detect when this browser has been logged out remotely.
 const CLIENT_ID_KEY = 'agrideepai-client-id-v1';
 function getOrCreateClientId() {
   try {
     let id = window.localStorage.getItem(CLIENT_ID_KEY);
     if (!id || !/^[a-zA-Z0-9_-]{8,80}$/.test(id)) {
-      // Simple, cryptographically-random-enough ID
       const bytes = new Uint8Array(16);
       (window.crypto || window.msCrypto).getRandomValues(bytes);
       id = 'c_' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -23,7 +19,6 @@ function getOrCreateClientId() {
     }
     return id;
   } catch (e) {
-    // localStorage unavailable (private mode, etc.) — regenerate each load
     return 'c_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
 }
@@ -74,7 +69,7 @@ const chatContainer = document.getElementById('chatContainer');
 
 const MAX_ATTACHMENTS = 5;
 const CODE_RESEND_SECONDS = 60;
-const SESSION_CHECK_THROTTLE_MS = 20000; // min interval between checks
+const SESSION_CHECK_THROTTLE_MS = 20000;
 
 let state = {
   activeChatId: null, chats: [], messages: [],
@@ -228,7 +223,6 @@ async function initSupabase() {
     const { data: { session } } = await state.supabase.auth.getSession();
     if (session?.user) {
       state.currentUser = session.user;
-      // Check remote validity BEFORE loading conversations
       const ok = await verifySessionValidity(true);
       if (!ok) return;
       updateAuthUI(); await loadCloudConversations();
@@ -250,8 +244,6 @@ async function initSupabase() {
 }
 
 // ============ SESSION VALIDITY ============
-// Returns true if this browser's session still exists on the server.
-// When it does not (e.g. logged out from another device), forces local sign-out.
 async function verifySessionValidity(force = false) {
   if (!state.supabase || !state.currentUser || state.isShareView) return true;
   const now = Date.now();
@@ -262,27 +254,16 @@ async function verifySessionValidity(force = false) {
     if (!session) return false;
     const doFetch = (token) => fetch('/api/auth/session-check', {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-Client-Id': CLIENT_ID,
-      },
+      headers: { 'Authorization': `Bearer ${token}`, 'X-Client-Id': CLIENT_ID },
       cache: 'no-store',
     });
     let res = await doFetch(session.access_token);
     if (res.status === 401) {
-      // Try refreshing the token once
       const { data } = await state.supabase.auth.refreshSession();
-      if (data.session?.access_token) {
-        res = await doFetch(data.session.access_token);
-      } else {
-        await forceSignOut('Session expired');
-        return false;
-      }
+      if (data.session?.access_token) res = await doFetch(data.session.access_token);
+      else { await forceSignOut('Session expired'); return false; }
     }
-    if (!res.ok) {
-      // Transient server issue — don't sign out
-      return true;
-    }
+    if (!res.ok) return true;
     const data = await res.json().catch(() => ({ valid: true }));
     if (data && data.valid === false) {
       await forceSignOut('Signed out from another device');
@@ -291,22 +272,19 @@ async function verifySessionValidity(force = false) {
     return true;
   } catch (e) {
     log(`verifySessionValidity error: ${e.message}`, 'warn');
-    return true; // never fail-closed on network errors
+    return true;
   }
 }
 
-// Clears local session, closes modals, shows a toast, and reloads app state
 async function forceSignOut(reason = 'Signed out') {
   if (state.isSigningOut) return;
   state.isSigningOut = true;
   try {
-    // Remove any lingering modals
     document.querySelectorAll('.modal').forEach(m => m.remove());
     document.querySelectorAll('.lightbox-overlay').forEach(m => m.remove());
     if (state.supabase) {
       try { await state.supabase.auth.signOut({ scope: 'local' }); } catch (e) {}
     }
-    // Clear our auth storage key in case Supabase leaves residue
     try { window.localStorage.removeItem('agrideepai-auth-v2'); } catch (e) {}
     state.currentUser = null;
     state.chats = []; state.messages = []; state.activeChatId = null;
@@ -330,7 +308,6 @@ function updateAuthUI() {
   window.refreshIcons();
 }
 
-// Auth-aware fetch for /api/... endpoints — always sends X-Client-Id
 async function apiFetch(endpoint, options = {}) {
   if (!state.supabase) throw new Error('Not initialized');
   let session = (await state.supabase.auth.getSession()).data.session;
@@ -973,6 +950,11 @@ function renderAttachments() {
   window.refreshIcons();
 }
 
+// ==================================================================
+// FIXED: sendMessage() — no longer overrides the chat title on the
+// client for logged-in users. The backend generates the smart title
+// via generateChatTitle() and the reload after streaming picks it up.
+// ==================================================================
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text && !state.attachments.length) return;
@@ -981,14 +963,26 @@ async function sendMessage() {
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
     state.messages = [];
-    const title = (text || 'New Chat').substring(0, 42);
     if (state.currentUser) {
-      const cloud = await createChat(title); if (!cloud) return;
+      // Authenticated: create with placeholder title. Backend renames it.
+      const cloud = await createChat('New Chat');
+      if (!cloud) return;
       chat = cloud; state.activeChatId = chat.id;
     } else {
-      chat = createLocalChat(title); state.activeChatId = chat.id;
+      // Guest: no backend — client-side title using the message text.
+      const title = (text || 'New Chat').substring(0, 42);
+      chat = createLocalChat(title);
+      state.activeChatId = chat.id;
     }
   }
+
+  // Client-side title update ONLY for local (guest) chats.
+  if (chat.id.startsWith('local_') && (chat.title === 'New Chat' || !chat.title) && text) {
+    chat.title = text.substring(0, 42) + (text.length > 42 ? '…' : '');
+    renderChatList();
+  }
+  // For authenticated chats with title "New Chat", we DO NOT rename here.
+  // The backend generates the smart title and the post-stream reload picks it up.
 
   const localFiles = state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size, public_url: URL.createObjectURL(f) }));
   const userMsg = { id: 'user_' + Date.now().toString(36), role: 'user', content: text || '[File attached]', files: localFiles, created_at: new Date().toISOString() };
@@ -1311,7 +1305,6 @@ async function openAccountModal() {
     if (id === 'logout') {
       content.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure?</p><button class="btn-primary" id="loConfirm" style="background:var(--danger);">Log out</button><button class="btn-primary" id="loCancel" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
       content.querySelector('#loConfirm').onclick = async () => {
-        // Remove this session row server-side so session-check fails for this browser
         try { await apiFetch('/api/auth/sessions/current', { method: 'DELETE' }).catch(() => {}); } catch (e) {}
         await state.supabase.auth.signOut();
         state.lastSessionCheck = 0;
@@ -1642,14 +1635,11 @@ document.getElementById('shareModalClose').onclick = () => shareModal.classList.
 shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
 
 // ============ AUTO SESSION CHECK ============
-// Check on tab refocus / visibility change. Throttled to avoid spamming.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') verifySessionValidity();
 });
 window.addEventListener('focus', () => { verifySessionValidity(); });
 window.addEventListener('online', () => { verifySessionValidity(true); });
-
-// Optional: periodic check every 60s while the tab is open
 setInterval(() => {
   if (document.visibilityState === 'visible') verifySessionValidity();
 }, 60000);
