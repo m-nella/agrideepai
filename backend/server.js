@@ -53,9 +53,7 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 let workingModel = null;
 let modelDiscoveryDone = false;
-const MODEL_CANDIDATES = [
-  // Fallback hardcoded – will be replaced by discovered free models
-];
+const MODEL_CANDIDATES = [];
 
 async function discoverModels() {
   if (modelDiscoveryDone) return;
@@ -64,25 +62,25 @@ async function discoverModels() {
       headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}` }
     });
     const allModels = response.data.data || [];
+    // Prefer free models, especially vision models
     const freeModels = allModels
       .filter(m => m.id && m.id.includes(':free'))
       .map(m => m.id);
-    if (freeModels.length > 0) {
-      // Prefer llama-based models
-      const llamaModels = freeModels.filter(m => m.includes('llama'));
-      const otherModels = freeModels.filter(m => !m.includes('llama'));
-      MODEL_CANDIDATES.length = 0;
-      MODEL_CANDIDATES.push(...llamaModels, ...otherModels);
-      log(`Discovered ${freeModels.length} free models`, 'info');
-    }
+    // Prioritise vision models
+    const visionModels = freeModels.filter(m => m.includes('vision') || m.includes('gemini') || m.includes('claude'));
+    const otherModels = freeModels.filter(m => !visionModels.includes(m));
+    MODEL_CANDIDATES.length = 0;
+    MODEL_CANDIDATES.push(...visionModels, ...otherModels);
+    log(`Discovered ${MODEL_CANDIDATES.length} free models`, 'info');
     modelDiscoveryDone = true;
   } catch (err) {
     log(`Model discovery failed: ${err.message}`, 'error');
-    // Fallback to known working models
+    // Fallback to known working models (including vision)
     MODEL_CANDIDATES.push(
+      'meta-llama/llama-3.2-11b-vision-instruct:free',
+      'google/gemini-2-flash-lite-preview-02-05:free',
       'nvidia/nemotron-3-super-120b-a12b:free',
-      'google/gemma-4-31b-it:free',
-      'meta-llama/llama-3.2-3b-instruct:free'
+      'nex-agi/nex-n2.5-mini:free'
     );
   }
 }
@@ -121,17 +119,37 @@ async function getWorkingModel() {
   throw new Error('No working models available. Check your OpenRouter API key.');
 }
 
-async function callOpenRouter(messages, stream = true) {
+async function callOpenRouter(messages, stream = true, imageData = null) {
   const model = await getWorkingModel();
+  let requestBody = {
+    model: model,
+    messages: messages,
+    temperature: 0.7,
+    max_tokens: 512,
+    stream: stream,
+  };
+  // If image data is provided, we need to adjust the message format
+  if (imageData) {
+    // The last message should have content as an array of parts
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.role === 'user') {
+      const contentParts = [];
+      if (lastMsg.content) {
+        contentParts.push({ type: 'text', text: lastMsg.content });
+      }
+      contentParts.push({
+        type: 'image_url',
+        image_url: { url: `data:${imageData.mimeType};base64,${imageData.base64}` }
+      });
+      requestBody.messages[messages.length - 1] = {
+        role: 'user',
+        content: contentParts
+      };
+    }
+  }
   const response = await axios.post(
     OPENROUTER_URL,
-    {
-      model: model,
-      messages: messages,
-      temperature: 0.7,
-      max_tokens: 512,
-      stream: stream,
-    },
+    requestBody,
     {
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
@@ -752,7 +770,7 @@ Feel free to ask about:
 });
 
 // ---------- Authenticated chat endpoints ----------
-// (unchanged, using callOpenRouter)
+// (same as before, using callOpenRouter with image support)
 
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
@@ -898,6 +916,7 @@ Feel free to ask about:
 
     // Normal flow
     let fileMetadata = null;
+    let imageData = null;
     if (file) {
       const fileExt = file.originalname.split('.').pop();
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
@@ -920,6 +939,13 @@ Feel free to ask about:
         mime_type: file.mimetype,
         size: file.size,
       });
+      // Prepare image data for the LLM if it's an image
+      if (file.mimetype.startsWith('image/')) {
+        imageData = {
+          base64: file.buffer.toString('base64'),
+          mimeType: file.mimetype
+        };
+      }
     }
 
     const messageData = {
@@ -957,7 +983,8 @@ Feel free to ask about:
       { role: 'user', content: finalPrompt }
     ];
 
-    const response = await callOpenRouter(chatMessages, true);
+    // If there is an image, we need to adapt the last user message content to include the image
+    const response = await callOpenRouter(chatMessages, true, imageData);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
