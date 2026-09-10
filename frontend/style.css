@@ -18,24 +18,18 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-html, body {
-  height: 100%;
-  overscroll-behavior: none;
-  -webkit-text-size-adjust: 100%;
-}
+html, body { height: 100%; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
 html.is-share-view, html.is-share-view body { background: #171b20; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--background);
   color: var(--text);
-  height: 100vh;
-  height: 100dvh;
+  height: 100vh; height: 100dvh;
   overflow: hidden;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 #app { display: flex; height: 100vh; height: 100dvh; width: 100vw; overflow: hidden; }
 
-/* ===== Touch handling ===== */
 button, .icon-button, .icon-button-sm, .new-chat-btn, .auth-btn, .send-button,
 .modal-close, .chip, .chat-item, .account-tab, .context-menu button,
 .attachment-chip button, .version-controls button, .link-btn {
@@ -47,13 +41,10 @@ button, .icon-button, .icon-button-sm, .new-chat-btn, .auth-btn, .send-button,
   user-select: none;
 }
 button:active, .icon-button:active, .icon-button-sm:active,
-.new-chat-btn:active, .auth-btn:active, .send-button:active {
-  transform: scale(0.94);
-}
+.new-chat-btn:active, .auth-btn:active, .send-button:active { transform: scale(0.94); }
 
 input, textarea, select { font-size: var(--input-font) !important; }
 
-/* ===== Sidebar ===== */
 #sidebar {
   width: 280px; background: var(--surface);
   border-right: 1px solid var(--border);
@@ -111,7 +102,6 @@ input, textarea, select { font-size: var(--input-font) !important; }
 .auth-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .6rem 1rem; cursor: pointer; color: var(--text-muted); display: flex; align-items: center; gap: .5rem; font-size: .85rem; width: 100%; justify-content: center; min-height: 44px; }
 .auth-btn:hover { background: var(--surface-hover); color: var(--text); }
 
-/* ===== Main ===== */
 #mainContent { flex: 1; display: flex; flex-direction: column; background: var(--background); min-width: 0; overflow: hidden; }
 #topBar { display: flex; align-items: center; padding: .5rem 1rem; border-bottom: 1px solid var(--border); gap: .75rem; min-height: 56px; flex-shrink: 0; }
 #openSidebarBtn { display: none; }
@@ -177,7 +167,6 @@ input, textarea, select { font-size: var(--input-font) !important; }
 .user-message-attachment img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .user-message-attachment .file-icon { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--text-muted); }
 
-/* ===== Composer ===== */
 #composerArea { flex-shrink: 0; padding: .5rem 1rem .75rem; border-top: 1px solid var(--border); background: var(--background); padding-bottom: calc(.75rem + env(safe-area-inset-bottom)); }
 #composer { max-width: 900px; margin: 0 auto; }
 #attachmentPreview { display: flex; flex-wrap: wrap; gap: .4rem; padding: .25rem 0; }
@@ -198,13 +187,14 @@ input, textarea, select { font-size: var(--input-font) !important; }
   font-size: var(--input-font) !important;
   outline: none;
   color: var(--text);
-  max-height: 120px;
+  max-height: min(50vh, 400px);
   font-family: inherit;
-  min-height: 40px;
+  min-height: 44px;
   line-height: 1.4;
   white-space: pre-wrap;
   word-wrap: break-word;
   min-width: 0;
+  overflow-y: auto;
 }
 .composer-main textarea::placeholder {
   color: var(--text-muted);
@@ -225,7 +215,6 @@ input, textarea, select { font-size: var(--input-font) !important; }
 
 .footer-note { text-align: center; font-size: .7rem; color: var(--text-muted); margin-top: .4rem; }
 
-/* ===== Modals ===== */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; z-index: 1000; backdrop-filter: blur(4px); padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .modal.hidden { display: none; }
 .modal-content { background: var(--surface); padding: 1.5rem; border-radius: var(--radius-md); max-width: 420px; width: 92%; position: relative; max-height: 90vh; overflow-y: auto; border: 1px solid var(--border); }
@@ -247,12 +236,10 @@ input, textarea, select { font-size: var(--input-font) !important; }
 .modal-content .status-msg { color: var(--text-muted); font-size: .85rem; margin-top: .3rem; }
 .modal-content hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
-/* Countdown-aware resend button */
 .link-btn { background: none; border: none; color: var(--accent); cursor: pointer; margin-top: .5rem; font-size: .9rem; padding: .5rem; min-height: 40px; }
 .link-btn:hover { text-decoration: underline; }
 .link-btn:disabled { color: var(--text-muted); cursor: not-allowed; text-decoration: none; opacity: .7; }
 
-/* ===== Account Modal ===== */
 .account-modal .modal-content { max-width: 700px; width: 95%; padding: 1.5rem; }
 .account-modal-layout { display: flex; gap: 1.5rem; margin-top: .5rem; }
 .account-tabs { display: flex; flex-direction: column; gap: .2rem; min-width: 140px; border-right: 1px solid var(--border); padding-right: 1rem; }
@@ -272,7 +259,6 @@ input, textarea, select { font-size: var(--input-font) !important; }
 .twofa-setup img.qr-code { width: 200px; height: 200px; max-width: 80vw; border-radius: 8px; background: white; padding: 8px; }
 .twofa-setup input { width: 100%; max-width: 200px; text-align: center; letter-spacing: 4px; }
 
-/* ===== Context Menu ===== */
 .context-menu { position: fixed; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .3rem; min-width: 160px; z-index: 2000; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
 .context-menu.hidden { display: none; }
 .context-menu button { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .6rem .8rem; background: none; border: none; color: var(--text); cursor: pointer; border-radius: var(--radius-sm); font-size: .9rem; min-height: 44px; }
@@ -280,15 +266,9 @@ input, textarea, select { font-size: var(--input-font) !important; }
 .context-menu button.danger { color: var(--danger); }
 .context-menu button.danger:hover { background: rgba(232,93,93,.12); }
 
-/* ===== Lightbox ===== */
 .lightbox-overlay { animation: fadeIn .2s ease; }
 
-/* ===== SHARE VIEW (hardened: applies via html class set by inline <head> script) ===== */
-html.is-share-view body,
-body.share-view {
-  background: var(--background) !important;
-  overflow: hidden;
-}
+html.is-share-view body, body.share-view { background: var(--background) !important; overflow: hidden; }
 html.is-share-view #sidebar,
 html.is-share-view #topBar,
 html.is-share-view #composerArea,
@@ -304,49 +284,31 @@ body.share-view .welcome-logo,
 body.share-view .suggestion-chips,
 body.share-view .footer-note { display: none !important; }
 
-html.is-share-view #app,
-body.share-view #app { display: block; width: 100vw; height: 100dvh; }
-html.is-share-view #mainContent,
-body.share-view #mainContent { width: 100%; max-width: 100%; height: 100dvh; display: block; }
-html.is-share-view #chatContainer,
-body.share-view #chatContainer {
+html.is-share-view #app, body.share-view #app { display: block; width: 100vw; height: 100dvh; }
+html.is-share-view #mainContent, body.share-view #mainContent { width: 100%; max-width: 100%; height: 100dvh; display: block; }
+html.is-share-view #chatContainer, body.share-view #chatContainer {
   padding: 4.25rem 1rem 2rem;
-  max-width: 900px;
-  margin: 0 auto;
-  width: 100%;
-  height: 100dvh;
-  overflow-y: auto;
-  box-sizing: border-box;
+  max-width: 900px; margin: 0 auto; width: 100%;
+  height: 100dvh; overflow-y: auto; box-sizing: border-box;
 }
-html.is-share-view #messageList,
-body.share-view #messageList { display: flex !important; gap: 1.5rem; flex-direction: column; }
+html.is-share-view #messageList, body.share-view #messageList { display: flex !important; gap: 1.5rem; flex-direction: column; }
 
-html.is-share-view body::before,
-body.share-view::before {
+html.is-share-view body::before, body.share-view::before {
   content: "Shared Chat — AgriDeepAI";
-  display: block;
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  padding: .75rem 1rem;
-  background: var(--surface);
+  display: block; position: fixed; top: 0; left: 0; right: 0;
+  padding: .75rem 1rem; background: var(--surface);
   border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: .9rem;
-  text-align: center;
-  z-index: 50;
+  color: var(--text-muted); font-size: .9rem;
+  text-align: center; z-index: 50;
 }
 
-/* ===== Ultra-small phones (≤ 380px) ===== */
 @media (max-width: 380px) {
-  :root {
-    --input-font: 14px;
-    --body-font: 13px;
-  }
+  :root { --input-font: 14px; --body-font: 13px; }
   #chatContainer { padding: .5rem .5rem; }
   .message { max-width: 96%; padding: .5rem .75rem; }
   #composerArea { padding: .4rem .5rem .5rem; padding-bottom: calc(.5rem + env(safe-area-inset-bottom)); }
   .composer-main { padding-left: .5rem; gap: .3rem; }
-  .composer-main textarea { min-height: 38px; padding: .4rem .3rem; }
+  .composer-main textarea { min-height: 40px; padding: .4rem .3rem; max-height: min(50vh, 300px); }
   .send-button { min-width: 40px; min-height: 40px; width: 40px; height: 40px; }
   .icon-button { width: 40px; height: 40px; }
   .chip { padding: .4rem .7rem; }
@@ -356,7 +318,6 @@ body.share-view::before {
   .user-message-attachment { width: 60px; height: 60px; }
 }
 
-/* ===== Phone / tablet ===== */
 @media (max-width: 768px) {
   #sidebar { position: fixed; top: 0; left: 0; height: 100%; width: min(85vw, 320px); transform: translateX(-105%); transition: transform .22s ease; border-right: none; box-shadow: 4px 0 24px rgba(0,0,0,.5); z-index: 100; }
   #sidebar.mobile-open { transform: translateX(0); }
@@ -374,9 +335,9 @@ body.share-view::before {
   .account-content { max-height: none; }
   body.share-view #chatContainer, html.is-share-view #chatContainer { padding: 4.25rem .75rem 1rem; }
   .user-message-attachment { width: 64px; height: 64px; }
+  .composer-main textarea { max-height: min(45vh, 320px); }
 }
 
-/* ===== Landscape phone ===== */
 @media (max-width: 900px) and (orientation: landscape) {
   .message { max-width: 88%; }
   #composerArea { padding: .4rem 1rem .5rem; }
@@ -384,36 +345,31 @@ body.share-view::before {
   #welcomeScreen { padding: .5rem; }
   .welcome-logo { height: 50px; }
   #chatContainer { padding: .5rem 1rem; }
+  .composer-main textarea { max-height: min(40vh, 220px); }
 }
 
-/* ===== Desktop ===== */
 @media (min-width: 769px) {
   #sidebar.collapsed .brand-name,
   #sidebar.collapsed .new-chat-btn span,
   #sidebar.collapsed .auth-btn span { display: none; }
 }
 @media (min-width: 1440px) {
-  :root {
-    --input-font: 16px;
-    --body-font: 15px;
-  }
+  :root { --input-font: 16px; --body-font: 15px; }
   .message { max-width: min(900px, 75%); }
   #chatContainer { padding: 1.5rem 2rem; }
 }
 
-/* ===== Foldables ===== */
 @media (min-width: 1000px) and (max-height: 600px) {
   #welcomeScreen { gap: .4rem; }
   .welcome-logo { height: 50px; }
+  .composer-main textarea { max-height: min(35vh, 200px); }
 }
 
-/* Manual secret for 2FA */
 .manual-secret { margin-top: .75rem; width: 100%; }
 .secret-box { display: flex; align-items: center; gap: .4rem; background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .5rem .6rem; margin-top: .3rem; }
 .secret-box code { flex: 1; font-family: monospace; font-size: .75rem; word-break: break-all; color: var(--text); user-select: all; }
 .copy-secret-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: .3rem .6rem; font-size: .75rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .copy-secret-btn:hover { background: var(--accent-hover); }
 
-/* Session items */
 .session-item { padding: .5rem; border-radius: 6px; background: var(--surface-hover); margin-bottom: .4rem; font-size: .85rem; }
 .session-item p { margin: .15rem 0; word-break: break-word; }
