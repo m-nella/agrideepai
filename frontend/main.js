@@ -806,7 +806,7 @@ document.addEventListener('click', (e) => {
 });
 
 function handleNewChat() {
-  const empty = state.chats.find(c => c.messages.length === 0);
+  const empty = state.chats.find(c => !c.messages || c.messages.length === 0);
   if (empty) { selectChat(empty.id); return; }
   createChat('New Chat').then(chat => {
     if (chat) {
