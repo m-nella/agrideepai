@@ -14,7 +14,6 @@ const pdfParse = require('pdf-parse');
 const FormData = require('form-data');
 const jwt = require('jsonwebtoken');
 
-// ---------- Brevo ----------
 const brevo = require('@getbrevo/brevo');
 const defaultClient = brevo.ApiClient.instance;
 const apiKeyAuth = defaultClient.authentications['api-key'];
@@ -43,20 +42,16 @@ const signPending = (payload, ttl = 900) => jwt.sign(payload, JWT_SECRET, { expi
 const verifyPending = (token) => { try { return jwt.verify(token, JWT_SECRET); } catch { return null; } };
 
 // ============ AI PROVIDERS ============
-// --- Groq (primary) ---
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'groq/compound'];
-// Groq has no vision models on this account — skip and fall through to OpenRouter for images
 const GROQ_VISION_MODELS = [];
 
-// --- FHRouter (secondary — free, verified text-only) ---
 const FHROUTER_API_KEY = process.env.FHROUTER_API_KEY;
 const FHROUTER_URL = 'https://fhrouter.com/v1/chat/completions';
 const FHROUTER_TEXT_MODELS = ['deepseek-v4-flash', 'glm-5.3-flash', 'grok-4.6'];
-const FHROUTER_VISION_MODELS = []; // Free tier does not support vision (verified)
+const FHROUTER_VISION_MODELS = [];
 
-// --- OpenRouter (tertiary) ---
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TEXT_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3-235b-a22b:free', 'mistralai/mistral-7b-instruct:free'];
@@ -66,7 +61,6 @@ const openRouterCooldown = {};
 const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 1000; };
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
 
-// ---------- OCR.space ----------
 const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY;
 async function ocrImage(buffer, filename, mimeType) {
   if (!OCR_SPACE_API_KEY) return null;
@@ -84,7 +78,6 @@ async function ocrImage(buffer, filename, mimeType) {
   } catch (err) { log(`OCR.space error: ${err.message}`, 'warn'); return null; }
 }
 
-// ---------- Diagnostic ----------
 app.get('/api/debug/groq-models', async (req, res) => {
   if (!groq) return res.json({ error: 'GROQ_API_KEY not set' });
   try {
@@ -94,11 +87,9 @@ app.get('/api/debug/groq-models', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ---------- AI Streaming ----------
 async function getAIStream(chatMessages, imageData = null) {
   const errors = [];
 
-  // --- 1. Groq ---
   if (groq) {
     const models = imageData ? GROQ_VISION_MODELS : GROQ_TEXT_MODELS;
     for (const model of models) {
@@ -113,7 +104,6 @@ async function getAIStream(chatMessages, imageData = null) {
     }
   }
 
-  // --- 2. FHRouter ---
   if (FHROUTER_API_KEY) {
     const models = imageData ? FHROUTER_VISION_MODELS : FHROUTER_TEXT_MODELS;
     for (const model of models) {
@@ -123,10 +113,7 @@ async function getAIStream(chatMessages, imageData = null) {
         const response = await axios.post(FHROUTER_URL, {
           model, messages: chatMessages, temperature: 0.6, max_tokens: 1500, stream: true,
         }, {
-          headers: {
-            'Authorization': `Bearer ${FHROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Authorization': `Bearer ${FHROUTER_API_KEY}`, 'Content-Type': 'application/json' },
           responseType: 'stream', timeout: 45000,
         });
         log(`✅ Using FHRouter: ${model}`, 'info');
@@ -141,7 +128,6 @@ async function getAIStream(chatMessages, imageData = null) {
     }
   }
 
-  // --- 3. OpenRouter ---
   if (OPENROUTER_API_KEY) {
     const models = imageData ? OPENROUTER_VISION_MODELS : OPENROUTER_TEXT_MODELS;
     for (const model of models) {
@@ -205,7 +191,6 @@ function consumeGroqStream(stream, res, onDone) {
   })();
 }
 
-// Shared by FHRouter + OpenRouter — both use OpenAI-compatible SSE format
 function consumeOpenAICompatibleStream(stream, res, onDone) {
   let full = '';
   let buffer = '';
@@ -261,31 +246,29 @@ async function streamAI(messages, res, imageData = null, onDone = null) {
   }
 }
 
-// ---------- Tavily (fixed: Bearer auth, no api_key in body) ----------
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 async function tavilySearch(query) {
   if (!TAVILY_API_KEY) return null;
+  const q = (query || '').trim();
+  if (q.length < 3) return null;
   try {
     const r = await axios.post('https://api.tavily.com/search', {
-      query, search_depth: 'basic',
+      query: q, search_depth: 'basic',
       include_answer: true, include_raw_content: false, include_images: false, max_results: 4,
     }, {
-      headers: {
-        'Authorization': `Bearer ${TAVILY_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${TAVILY_API_KEY}`, 'Content-Type': 'application/json' },
       timeout: 8000,
     });
     return r.data;
   } catch (err) {
-    log(`Tavily error: ${err.response?.status || err.message}`, 'warn');
+    const detail = err.response?.data?.detail || err.response?.data?.error || err.response?.status || err.message;
+    log(`Tavily error: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`, 'warn');
     return null;
   }
 }
 
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
-// ============ SYSTEM PROMPT ============
 const SYSTEM_PROMPT = `You are **AgriDeepAI**, an expert AI assistant specialised in agriculture, livestock, and directly related sciences.
 
 ## IDENTITY (never violate)
@@ -319,7 +302,6 @@ Do NOT provide the off-topic answer.
 ## STYLE
 Warm, professional, concise. Markdown when it helps. Ask for symptoms/age/weather for disease questions. Include short disclaimers for chemicals and animal health.`;
 
-// ---------- Multer ----------
 const storage = multer.memoryStorage();
 const upload = multer({
   storage, limits: { fileSize: 10 * 1024 * 1024 },
@@ -330,7 +312,6 @@ const upload = multer({
   }
 });
 
-// ---------- Auth Middleware ----------
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
@@ -342,7 +323,6 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// ---------- Identity guards ----------
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
@@ -390,7 +370,6 @@ async function tryIdentityShortcut(messages, res) {
   return false;
 }
 
-// ---------- Email ----------
 async function sendEmail(to, subject, htmlContent) {
   const sendSmtpEmail = new brevo.SendSmtpEmail();
   sendSmtpEmail.subject = subject;
@@ -455,7 +434,6 @@ async function sendLoginNotification(email, ip, device, time) {
   } catch (err) { log(`Login notification error: ${err.message}`, 'error'); }
 }
 
-// ---------- Track session ----------
 async function trackSession(userId, email, req) {
   try {
     const ua = req.headers['user-agent'] || 'Unknown';
@@ -476,7 +454,6 @@ async function trackSession(userId, email, req) {
     });
     if (insErr) log(`trackSession insert error: ${insErr.message}`, 'error');
 
-    // Fire new-device notification only if this is NOT the very first-ever session
     if (isNewDevice && hasAnyPrevious && email) {
       sendLoginNotification(email, ip, ua.substring(0, 120), new Date().toLocaleString())
         .catch(e => log(`Login notification failed: ${e.message}`, 'warn'));
@@ -615,6 +592,17 @@ app.post('/api/auth/verify-code', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
 });
 
+// NEW: verify current password before sending code
+app.post('/api/auth/verify-current-password', authenticate, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password required' });
+    const { error } = await supabase.auth.signInWithPassword({ email: req.user.email, password });
+    if (error) return res.status(401).json({ error: 'Current password is incorrect' });
+    res.json({ valid: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/auth/change-password', authenticate, async (req, res) => {
   try {
     const { currentPassword, newPassword, grantedToken } = req.body;
@@ -625,6 +613,8 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
     if (si) return res.status(401).json({ error: 'Current password incorrect' });
     if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword))
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
+    if (newPassword === currentPassword)
+      return res.status(400).json({ error: 'New password must be different from current password' });
     await supabase.auth.updateUser({ password: newPassword });
     res.json({ message: 'Password changed successfully' });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -718,7 +708,6 @@ app.get('/api/config', (req, res) => res.json({
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
 }));
 
-// ============ CHAT ============
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT) {
   const history = messages.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content && String(m.content).trim()).map(m => ({ role: m.role, content: String(m.content || '') }));
   return [{ role: 'system', content: systemPrompt }, ...history];
@@ -798,15 +787,15 @@ app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) =
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('file'), async (req, res) => {
+app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('file', 5), async (req, res) => {
   try {
     const conversationId = req.params.id;
     const { message } = req.body;
-    const file = req.file;
+    const files = req.files || [];
     const { data: conv } = await supabase.from('conversations').select('id, title').eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    if (message && (isCreatorQuestion(message) || isGreeting(message))) {
+    if (message && files.length === 0 && (isCreatorQuestion(message) || isGreeting(message))) {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
       let reply;
       if (isCreatorQuestion(message)) reply = `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
@@ -815,27 +804,31 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         if (t.includes('muraho') || t.includes('mwaramutse') || t.includes('mwiriwe') || t.includes('amakuru') || t.includes('bite')) reply = `Muraho! Ni **AgriDeepAI**. Ni gute nashobora kugufasha ku bijyanye n'ubuhinzi cyangwa ubworozi uyu munsi?`;
         else reply = `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
       }
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply, versions: [reply], current_version_index: 0 });
+      const { error: aiErr } = await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply, versions: [reply], current_version_index: 0 });
+      if (aiErr) log(`Identity reply insert error: ${aiErr.message}`, 'error');
       await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
       return streamSimpleText(res, reply);
     }
 
-    let fileMetadata = null, imageData = null, extractedText = '';
-    if (file) {
+    let filesMeta = [], imageData = null, extractedText = '';
+    for (const file of files) {
       const fileExt = file.originalname.split('.').pop();
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
       const filePath = `${req.user.id}/${fileName}`;
-      await supabase.storage.from(storageBucket).upload(filePath, file.buffer, { contentType: file.mimetype });
+      const { error: upErr } = await supabase.storage.from(storageBucket).upload(filePath, file.buffer, { contentType: file.mimetype });
+      if (upErr) log(`Storage upload error: ${upErr.message}`, 'warn');
       const { data: pu } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
-      fileMetadata = { filename: file.originalname, storage_path: filePath, mime_type: file.mimetype, size: file.size, public_url: pu.publicUrl };
+      filesMeta.push({ filename: file.originalname, storage_path: filePath, mime_type: file.mimetype, size: file.size, public_url: pu.publicUrl });
       await supabase.from('files').insert({ user_id: req.user.id, filename: file.originalname, storage_path: filePath, mime_type: file.mimetype, size: file.size });
-      if (file.mimetype.startsWith('image/') && file.size < 4 * 1024 * 1024) imageData = { base64: file.buffer.toString('base64'), mimeType: file.mimetype };
-      extractedText = await extractTextFromFile(file);
+      if (!imageData && file.mimetype.startsWith('image/') && file.size < 4 * 1024 * 1024) imageData = { base64: file.buffer.toString('base64'), mimeType: file.mimetype };
+      const txt = await extractTextFromFile(file);
+      if (txt) extractedText += (extractedText ? '\n\n' : '') + txt;
     }
 
     const messageData = { conversation_id: conversationId, role: 'user', content: message || '' };
-    if (fileMetadata) messageData.files = [fileMetadata];
-    await supabase.from('messages').insert(messageData);
+    if (filesMeta.length > 0) messageData.files = filesMeta;
+    const { error: userMsgErr } = await supabase.from('messages').insert(messageData);
+    if (userMsgErr) log(`User message insert error: ${userMsgErr.message}`, 'error');
 
     if (conv.title === 'New Chat' && message) {
       const newTitle = message.substring(0, 50);
@@ -851,7 +844,8 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
 
     await streamAI(chatMessages, res, imageData, async (full) => {
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full, versions: [full], current_version_index: 0 });
+      const { error: aiMsgErr } = await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full, versions: [full], current_version_index: 0 });
+      if (aiMsgErr) log(`Assistant message insert error: ${aiMsgErr.message}`, 'error');
       await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
     });
   } catch (err) {
@@ -896,7 +890,6 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ============ SHARE ============
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -934,7 +927,6 @@ app.get('/api/share/:token', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error retrieving shared messages' }); }
 });
 
-// ============ SERVE FRONTEND ============
 const frontendPath = path.join(__dirname, '../frontend');
 
 app.get('/share/*', (req, res) => {
