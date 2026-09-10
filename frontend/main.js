@@ -1434,39 +1434,55 @@ async function openAccountModal() {
 
       let emailPendingToken = null;
       document.getElementById('changeEmailBtn').onclick = async () => {
-        const newEmail = document.getElementById('newEmail').value.trim();
-        if (!newEmail || newEmail === state.currentUser.email) { showToast('Different email required', true); return; }
-        try {
-          const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
-          const data = await res.json();
-          emailPendingToken = data.pendingToken;
-          showToast('Code sent.');
-          document.getElementById('emailVerify').style.display = 'block';
-          const resendBtn = document.getElementById('emailResendBtn');
-          attachCountdown(resendBtn);
-          resendBtn.onclick = async () => {
-            if (resendBtn.disabled) return;
-            if (!emailPendingToken) { showToast('Session expired. Try again.', true); return; }
-            try {
-              const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken }) });
-              const rd = await r.json();
-              emailPendingToken = rd.pendingToken;
-              showToast('New code sent.');
-              attachCountdown(resendBtn);
-            } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
-          };
-          document.getElementById('emailVerifyBtn').onclick = async () => {
-            const code = document.getElementById('emailCode').value.trim();
-            if (!code) { showToast('Enter code', true); return; }
-            try {
-              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken, code, action: 'change-email' }) });
-              const vd = await vr.json();
-              await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail, grantedToken: vd.grantedToken }) });
-              showToast('Email changed.'); close();
-            } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      };
+  const newEmail = document.getElementById('newEmail').value.trim().toLowerCase();
+  const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+  const currentEmail = (state.currentUser.email || '').toLowerCase();
+
+  if (!newEmail) { showToast('Please enter the new email address', true); return; }
+  if (!EMAIL_RE.test(newEmail) || newEmail.includes('..')) { showToast('Please enter a valid email address', true); return; }
+  if (newEmail === currentEmail) { showToast('New email must be different from your current email', true); return; }
+
+  try {
+    const res = await apiFetch('/api/auth/send-verification-code', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'change-email', newEmail }),
+    });
+    const data = await res.json();
+    emailPendingToken = data.pendingToken;
+    showToast(`Verification code sent to ${newEmail}`);
+    document.getElementById('emailVerify').style.display = 'block';
+    const notice = document.getElementById('emailVerifyNotice');
+    if (notice) notice.textContent = `Check the inbox of ${newEmail} for the 6-digit code.`;
+    const resendBtn = document.getElementById('emailResendBtn');
+    attachCountdown(resendBtn);
+    resendBtn.onclick = async () => {
+      if (resendBtn.disabled) return;
+      if (!emailPendingToken) { showToast('Session expired. Try again.', true); return; }
+      try {
+        const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken }) });
+        const rd = await r.json();
+        emailPendingToken = rd.pendingToken;
+        showToast(rd.targetEmail ? `New code sent to ${rd.targetEmail}` : 'New code sent.');
+        attachCountdown(resendBtn);
+      } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
+    };
+    document.getElementById('emailVerifyBtn').onclick = async () => {
+      const code = document.getElementById('emailCode').value.trim();
+      if (!code) { showToast('Enter the code', true); return; }
+      try {
+        const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken, code, action: 'change-email' }) });
+        const vd = await vr.json();
+        const cr = await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail, grantedToken: vd.grantedToken }) });
+        const cd = await cr.json();
+        showToast(`Email changed to ${cd.newEmail || newEmail}.`);
+        // Update local state so UI reflects the new email immediately
+        state.currentUser.email = cd.newEmail || newEmail;
+        updateAuthUI();
+        close();
+      } catch (e) { showToast(e.message, true); }
+    };
+  } catch (e) { showToast(e.message, true); }
+};
 
       let pwPendingToken = null;
       document.getElementById('changePwBtn').onclick = async () => {
