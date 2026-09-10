@@ -516,52 +516,6 @@ function renderMessages() {
             });
             if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
           }
-
-          // Version controls for assistant messages
-          if (state.messageVersions[msg.id] && state.messageVersions[msg.id].versions.length > 1) {
-            const vData = state.messageVersions[msg.id];
-            const versionControls = document.createElement('div');
-            versionControls.className = 'version-controls';
-            const prevBtn = document.createElement('button');
-            prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
-            prevBtn.title = 'Previous version';
-            prevBtn.disabled = vData.currentIndex === 0;
-            prevBtn.addEventListener('click', () => {
-              if (vData.currentIndex > 0) {
-                vData.currentIndex--;
-                msg.content = vData.versions[vData.currentIndex];
-                const chat = state.chats.find(c => c.id === state.activeChatId);
-                if (chat) {
-                  chat.messages = state.messages;
-                }
-                renderMessages();
-              }
-            });
-            versionControls.appendChild(prevBtn);
-
-            const label = document.createElement('span');
-            label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
-            versionControls.appendChild(label);
-
-            const nextBtn = document.createElement('button');
-            nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
-            nextBtn.title = 'Next version';
-            nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
-            nextBtn.addEventListener('click', () => {
-              if (vData.currentIndex < vData.versions.length - 1) {
-                vData.currentIndex++;
-                msg.content = vData.versions[vData.currentIndex];
-                const chat = state.chats.find(c => c.id === state.activeChatId);
-                if (chat) {
-                  chat.messages = state.messages;
-                }
-                renderMessages();
-              }
-            });
-            versionControls.appendChild(nextBtn);
-            msgDiv.appendChild(versionControls);
-            window.refreshIcons();
-          }
         }
       } else {
         // User message content
@@ -569,6 +523,29 @@ function renderMessages() {
         contentDiv.className = 'message-content';
         contentDiv.textContent = msg.content;
         msgDiv.appendChild(contentDiv);
+        // Show attachments as thumbnails inline
+        if (msg.files && msg.files.length > 0) {
+          const attachDiv = document.createElement('div');
+          attachDiv.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.3rem;';
+          msg.files.forEach(f => {
+            const wrap = document.createElement('div');
+            wrap.className = 'user-message-attachment';
+            if (f.mime_type && f.mime_type.startsWith('image/')) {
+              const img = document.createElement('img');
+              img.src = f.public_url || f.url;
+              img.alt = f.filename;
+              wrap.appendChild(img);
+            } else {
+              const icon = document.createElement('div');
+              icon.className = 'file-icon';
+              icon.innerHTML = `<i data-lucide="file-text" style="width:24px;height:24px;"></i>`;
+              wrap.appendChild(icon);
+            }
+            attachDiv.appendChild(wrap);
+          });
+          msgDiv.appendChild(attachDiv);
+          window.refreshIcons();
+        }
       }
 
       // ----- Actions Row (only after response complete) -----
@@ -654,7 +631,7 @@ function renderMessages() {
         }
 
         if (msg.role === 'assistant') {
-          // Like button
+          // Like button - with background colour
           const likeBtn = document.createElement('button');
           const isLiked = state.likedMessages.has(msg.id);
           likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
@@ -667,7 +644,7 @@ function renderMessages() {
           });
           actionsRow.appendChild(likeBtn);
 
-          // Dislike button
+          // Dislike button - with background colour
           const dislikeBtn = document.createElement('button');
           const isDisliked = state.dislikedMessages.has(msg.id);
           dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
@@ -1327,7 +1304,6 @@ function renderAttachments() {
       icon.style.height = '20px';
       chip.appendChild(icon);
     }
-    // File name hidden – only thumbnail/icon shows
     const removeBtn = document.createElement('button');
     removeBtn.innerHTML = `<i data-lucide="x" style="width:14px;height:14px;"></i>`;
     removeBtn.dataset.index = idx;
@@ -2185,9 +2161,7 @@ async function checkShareView() {
     const token = path.split('/share/')[1];
     if (token) {
       state.isShareView = true;
-      sidebar.style.display = 'none';
-      document.getElementById('composerArea').style.display = 'none';
-      document.getElementById('topBar').style.display = 'none';
+      document.body.classList.add('share-view');
       try {
         const res = await fetch(`/api/share/${token}`);
         if (!res.ok) throw new Error('Share not found');
