@@ -4,7 +4,6 @@
 
 const log = (msg, type = 'info') => console.log(`[FRONTEND] [${new Date().toISOString()}] [${type.toUpperCase()}] ${msg}`);
 
-// Share-view flag was set on <html> by an inline script in <head> before body renders
 const IS_SHARE_VIEW = document.documentElement.classList.contains('is-share-view');
 
 function applyShareViewHiding() {
@@ -26,7 +25,6 @@ if (IS_SHARE_VIEW) {
   else document.addEventListener('DOMContentLoaded', applyShareViewHiding, { once: true });
 }
 
-// --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
 const openSidebarBtn = document.getElementById('openSidebarBtn');
 const sidebarToggle = document.getElementById('sidebarToggle');
@@ -255,6 +253,29 @@ async function loadCloudMessages(chatId) {
   } catch (err) { log(`Load cloud messages error: ${err.message}`, 'error'); }
 }
 
+// Reload with retry — waits until the assistant reply appears in the DB
+async function reloadAfterSend(chatId, expectedMinCount, maxAttempts = 6) {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, 400));
+    try {
+      const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
+      const msgs = await res.json();
+      if (Array.isArray(msgs) && msgs.length >= expectedMinCount) {
+        state.messages = msgs;
+        rebuildVersions(); renderMessages();
+        const convRes = await apiFetch('/api/chat/conversations');
+        state.chats = await convRes.json();
+        renderChatList();
+        return true;
+      }
+    } catch (e) { /* retry */ }
+  }
+  // Fallback: force reload anyway
+  await loadCloudMessages(chatId);
+  await loadCloudConversations();
+  return false;
+}
+
 function rebuildVersions() {
   state.messageVersions = {};
   state.messages.forEach(msg => {
@@ -367,7 +388,15 @@ function renderMessages() {
       }
       const ta = document.createElement('textarea');
       ta.value = state.editingValue;
-      ta.style.cssText = 'width:100%;padding:.5rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:16px;';
+      ta.style.cssText = 'width:100%;padding:.6rem .8rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:16px;line-height:1.5;min-height:80px;max-height:none;overflow-y:auto;box-sizing:border-box;';
+      const autoGrow = () => {
+        ta.style.height = 'auto';
+        const maxH = Math.min(window.innerHeight * 0.6, 600);
+        const want = Math.min(ta.scrollHeight + 2, maxH);
+        ta.style.height = Math.max(want, 80) + 'px';
+        ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
+      };
+      ta.addEventListener('input', autoGrow);
       const g = document.createElement('div'); g.style.cssText = 'display:flex;gap:.5rem;margin-top:.5rem;justify-content:flex-end;';
       const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
       cancel.style.cssText = 'padding:.5rem 1.1rem;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-weight:500;font-size:.9rem;';
@@ -391,7 +420,7 @@ function renderMessages() {
       g.appendChild(cancel); g.appendChild(send);
       area.appendChild(ta); area.appendChild(g); msgDiv.appendChild(area);
       row.appendChild(msgDiv); messageList.appendChild(row);
-      setTimeout(() => ta.focus(), 50); return;
+      setTimeout(() => { ta.focus(); autoGrow(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 50); return;
     }
 
     if (msg.role === 'assistant') {
@@ -542,7 +571,6 @@ function startEditing(msg) {
   state.editingMessageId = msg.id; state.editingValue = msg.content; renderMessages();
 }
 
-// Build a clean payload for the guest endpoint: only non-empty user/assistant msgs
 function buildGuestPayload(messages) {
   return messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -558,7 +586,6 @@ async function sendEditedUserMessage() {
   renderMessages(); updateSendButton();
   state.abortController = new AbortController();
   try {
-    // Strip the empty assistant placeholder
     const cleanMessages = state.messages.filter(m => m.id !== assist.id);
     const payload = { messages: buildGuestPayload(cleanMessages) };
     const response = await fetch('/api/chat/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: state.abortController.signal });
@@ -627,11 +654,12 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
     if (v.versions.length === 0 || v.versions[v.versions.length - 1] !== last.content) { v.versions.push(last.content); v.currentIndex = v.versions.length - 1; }
     renderMessages();
   }
-  if (state.currentUser && !opts.skipCloudReload) {
-    await new Promise(r => setTimeout(r, 300));
-    await loadCloudMessages(chat.id);
-    await loadCloudConversations();
-  } else renderChatList();
+  // For authenticated sends: poll until DB reflects both messages, then reload
+  if (state.currentUser && !opts.skipCloudReload && !chat.id.startsWith('local_')) {
+    await reloadAfterSend(chat.id, state.messages.length);
+  } else if (!opts.skipCloudReload) {
+    renderChatList();
+  }
 }
 
 async function shareConversation(messagesToShare = null) {
@@ -759,8 +787,9 @@ function handleNewChat() {
 function resizeComposer() {
   messageInput.style.height = '0px';
   const sh = messageInput.scrollHeight;
-  messageInput.style.height = Math.min(sh, 120) + 'px';
-  messageInput.style.overflowY = sh > 120 ? 'auto' : 'hidden';
+  const maxH = Math.min(window.innerHeight * 0.5, 400);
+  messageInput.style.height = Math.min(sh, maxH) + 'px';
+  messageInput.style.overflowY = sh > maxH ? 'auto' : 'hidden';
 }
 
 function updateSendButton() {
@@ -802,7 +831,6 @@ async function sendMessage() {
 
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
-    // Ensure clean state when creating a new chat
     state.messages = [];
     const title = (text || 'New Chat').substring(0, 42);
     if (state.currentUser) {
@@ -848,7 +876,6 @@ async function sendMessage() {
       if (!token) throw new Error('Session expired');
       response = await fetch(`/api/chat/conversations/${chat.id}/messages`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd, signal: state.abortController.signal });
     } else {
-      // Guest path: strip the empty assistant placeholder
       const cleanMessages = state.messages.filter(m => m.id !== assist.id);
       const payload = { messages: buildGuestPayload(cleanMessages) };
       if (atts.length > 0) {
@@ -869,7 +896,6 @@ async function sendMessage() {
     } else {
       showToast('Error: ' + err.message, true);
       const last = state.messages[state.messages.length - 1];
-      // Only remove the assistant if NOTHING was received. Keep partial content.
       if (last?.role === 'assistant' && (!last.content || !last.content.trim())) {
         state.messages.pop(); chat.messages = state.messages; renderMessages();
       }
@@ -921,7 +947,8 @@ function renderAuthForm(mode) {
       <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
       <label>Password</label>
       <div id="authPasswordWrapper"></div>
-      ${!isLogin ? `<label>Confirm Password</label><div id="authConfirmPasswordWrapper"></div>` : ''}
+      ${!isLogin ? `<label>Confirm Password</label><div id="authConfirmPasswordWrapper"></div>
+        <div id="pwLiveStatus" style="font-size:.8rem;margin-top:.3rem;min-height:1.2em;"></div>` : ''}
       ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" autocomplete="name" />` : ''}
       <button class="btn-primary" id="authSubmitBtn" disabled>${isLogin ? 'Sign In' : 'Sign Up'}</button>
       <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
@@ -948,19 +975,32 @@ function renderAuthForm(mode) {
   const emailInput = document.getElementById('authEmail');
   const pwInput = document.getElementById('authPassword');
   const confirmInput = document.getElementById('authConfirmPassword');
+  const pwLiveStatus = document.getElementById('pwLiveStatus');
+
+  const pwIsStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
 
   const check = () => {
     const e = emailInput.value.trim(); const p = pwInput.value;
-    let v = e && p;
-    if (!isLogin) { const c = confirmInput?.value || ''; v = v && c && p === c; }
-    submitBtn.disabled = !v;
+    let valid = e.includes('@') && p.length > 0;
+    if (!isLogin) {
+      const c = confirmInput?.value || '';
+      const strong = pwIsStrong(p);
+      const match = c.length > 0 && p === c;
+      if (pwLiveStatus) {
+        if (!p && !c) { pwLiveStatus.textContent = ''; pwLiveStatus.style.color = ''; }
+        else if (!strong) { pwLiveStatus.textContent = 'Password must be 8+ chars with letters and numbers'; pwLiveStatus.style.color = 'var(--danger)'; }
+        else if (!match) { pwLiveStatus.textContent = 'Passwords do not match'; pwLiveStatus.style.color = 'var(--danger)'; }
+        else { pwLiveStatus.textContent = '✓ Passwords match'; pwLiveStatus.style.color = 'var(--accent)'; }
+      }
+      valid = valid && strong && match;
+    }
+    submitBtn.disabled = !valid;
   };
   emailInput.addEventListener('input', check); pwInput.addEventListener('input', check);
   if (confirmInput) confirmInput.addEventListener('input', check);
   check();
   toggleLink.onclick = () => renderAuthForm(isLogin ? 'signup' : 'login');
 
-  // Helper: wire up resend button once a code has been sent
   const wireResend = (resendBtn, endpoint, getToken, setToken) => {
     attachCountdown(resendBtn);
     resendBtn.onclick = async () => {
@@ -981,7 +1021,6 @@ function renderAuthForm(mode) {
       } catch (e) {
         errDiv.textContent = e.message; errDiv.style.display = 'block';
         statDiv.style.display = 'none';
-        // Give the user a chance to retry soon
         resendBtn.disabled = false;
         if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; }
         resendBtn.textContent = resendBtn.dataset.originalText || 'Resend code';
@@ -994,6 +1033,7 @@ function renderAuthForm(mode) {
       const email = emailInput.value.trim(), password = pwInput.value, confirm = confirmInput?.value || '';
       if (!email || !password) { errDiv.textContent = 'All fields required'; errDiv.style.display = 'block'; return; }
       if (password !== confirm) { errDiv.textContent = 'Passwords do not match'; errDiv.style.display = 'block'; return; }
+      if (!pwIsStrong(password)) { errDiv.textContent = 'Password must be 8+ chars with letters and numbers'; errDiv.style.display = 'block'; return; }
       const fullName = document.getElementById('authFullName')?.value.trim() || email.split('@')[0];
       errDiv.style.display = 'none'; statDiv.textContent = 'Sending code...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
       try {
@@ -1131,6 +1171,7 @@ async function openAccountModal() {
           <div id="curPwWrap"></div>
           <label>New Password</label>
           <div id="newPwWrap"></div>
+          <div id="pwLiveStatus" style="font-size:.8rem;margin-top:.3rem;min-height:1.2em;"></div>
           <button class="btn-primary" id="changePwBtn">Change Password</button>
           <div id="pwVerify" style="display:none;margin-top:.5rem;">
             <label>Verification code</label>
@@ -1189,7 +1230,21 @@ async function openAccountModal() {
       document.getElementById('newPwWrap').appendChild(createPasswordField('newPw', 'New password'));
       window.refreshIcons();
 
-      // --- Change Email flow (with resend + countdown) ---
+      const pwLiveStatus = document.getElementById('pwLiveStatus');
+      const pwIsStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
+      const updatePwLive = () => {
+        const cur = document.getElementById('curPw')?.value || '';
+        const np = document.getElementById('newPw')?.value || '';
+        if (!cur && !np) { pwLiveStatus.textContent = ''; return; }
+        if (!np) { pwLiveStatus.textContent = ''; return; }
+        if (!pwIsStrong(np)) { pwLiveStatus.textContent = 'New password must be 8+ chars with letters and numbers'; pwLiveStatus.style.color = 'var(--danger)'; return; }
+        if (np === cur) { pwLiveStatus.textContent = 'New password must be different from current password'; pwLiveStatus.style.color = 'var(--danger)'; return; }
+        pwLiveStatus.textContent = '✓ Password looks good';
+        pwLiveStatus.style.color = 'var(--accent)';
+      };
+      document.getElementById('curPw').addEventListener('input', updatePwLive);
+      document.getElementById('newPw').addEventListener('input', updatePwLive);
+
       let emailPendingToken = null;
       document.getElementById('changeEmailBtn').onclick = async () => {
         const newEmail = document.getElementById('newEmail').value.trim();
@@ -1225,12 +1280,24 @@ async function openAccountModal() {
         } catch (e) { showToast(e.message, true); }
       };
 
-      // --- Change Password flow (with resend + countdown) ---
+      // ---- Change Password: VERIFY CURRENT FIRST before sending code ----
       let pwPendingToken = null;
       document.getElementById('changePwBtn').onclick = async () => {
-        const cur = document.getElementById('curPw').value, np = document.getElementById('newPw').value;
+        const cur = document.getElementById('curPw').value;
+        const np = document.getElementById('newPw').value;
         if (!cur || !np) { showToast('Fill both fields', true); return; }
-        if (np.length < 8) { showToast('Min 8 chars', true); return; }
+        if (!pwIsStrong(np)) { showToast('New password must be 8+ chars with letters and numbers', true); return; }
+        if (np === cur) { showToast('New password must be different from current password', true); return; }
+        // STEP 1: Verify current password BEFORE sending the code
+        try {
+          const vres = await apiFetch('/api/auth/verify-current-password', { method: 'POST', body: JSON.stringify({ password: cur }) });
+          const vd = await vres.json();
+          if (!vd.valid) throw new Error('Current password is incorrect');
+        } catch (e) {
+          showToast(e.message || 'Current password is incorrect', true);
+          return; // Do NOT send code
+        }
+        // STEP 2: Current password verified — now send the code
         try {
           const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
           const data = await res.json();
@@ -1262,7 +1329,6 @@ async function openAccountModal() {
         } catch (e) { showToast(e.message, true); }
       };
 
-      // --- Delete Account flow (new) ---
       let delPendingToken = null;
       document.getElementById('deleteAccountBtn').onclick = async () => {
         const ok = await showCustomModal('Delete Account', 'This will permanently delete your account and all chats. Continue?', 'Continue', 'Cancel', true);
@@ -1326,7 +1392,6 @@ async function openAccountModal() {
   render('profile');
 }
 
-// ============ ATTACH ============
 attachBtn.onclick = () => {
   const input = document.createElement('input');
   input.type = 'file';
@@ -1342,7 +1407,6 @@ attachBtn.onclick = () => {
   input.click();
 };
 
-// ============ SIDEBAR ============
 sidebarToggle.onclick = () => {
   sidebar.classList.toggle('collapsed');
   const c = sidebar.classList.contains('collapsed');
@@ -1354,7 +1418,6 @@ document.addEventListener('click', (e) => {
   if (window.innerWidth < 768 && sidebar.classList.contains('mobile-open') && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
 });
 
-// ============ MAIN LISTENERS ============
 newChatBtn.onclick = handleNewChat;
 sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
 messageInput.addEventListener('keydown', (e) => {
@@ -1365,7 +1428,6 @@ chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; up
 document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
 shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
 
-// ============ SHARE VIEW ============
 async function checkShareView() {
   const path = window.location.pathname;
   if (!path.startsWith('/share/')) return false;
