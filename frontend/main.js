@@ -1,11 +1,13 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Final)
+// AGRIDEEPAI — Full Frontend
 // ============================================================
 
-const log = (msg, type = 'info') => {
-  const timestamp = new Date().toISOString();
-  console.log(`[FRONTEND] [${timestamp}] [${type.toUpperCase()}] ${msg}`);
-};
+const log = (msg, type = 'info') => console.log(`[FRONTEND] [${new Date().toISOString()}] [${type.toUpperCase()}] ${msg}`);
+
+// CRITICAL: apply share-view class IMMEDIATELY (before anything else renders)
+if (window.location.pathname.startsWith('/share/')) {
+  document.body.classList.add('share-view');
+}
 
 // --- DOM refs ---
 const sidebar = document.getElementById('sidebar');
@@ -30,31 +32,18 @@ const shareLinkDisplay = document.getElementById('shareLinkDisplay');
 const copyShareLink = document.getElementById('copyShareLink');
 const chatMenu = document.getElementById('chatMenu');
 
-// --- Constants ---
 const MAX_ATTACHMENTS = 5;
 
-// --- State ---
 let state = {
-  activeChatId: null,
-  chats: [],
-  messages: [],
-  isGenerating: false,
-  abortController: null,
-  supabase: null,
-  currentUser: null,
-  attachments: [],
-  editingMessageId: null,
-  editingValue: '',
-  messageVersions: {},
-  likedMessages: new Set(),
-  dislikedMessages: new Set(),
-  contextMenuTarget: null,
-  isShareView: false,
-  shareMessages: [],
-  copyTimeout: null,
+  activeChatId: null, chats: [], messages: [],
+  isGenerating: false, abortController: null,
+  supabase: null, currentUser: null,
+  attachments: [], editingMessageId: null, editingValue: '',
+  messageVersions: {}, likedMessages: new Set(), dislikedMessages: new Set(),
+  contextMenuTarget: null, isShareView: false, shareMessages: [], copyTimeout: null,
 };
 
-// --- Lightbox ---
+// ============ LIGHTBOX ============
 function openLightbox(src, isImage = true) {
   const overlay = document.createElement('div');
   overlay.className = 'lightbox-overlay';
@@ -71,8 +60,7 @@ function openLightbox(src, isImage = true) {
     overlay.appendChild(img);
   } else {
     const link = document.createElement('a');
-    link.href = src;
-    link.target = '_blank';
+    link.href = src; link.target = '_blank';
     link.style.cssText = 'color:#fff;font-size:1.2rem;text-decoration:underline;';
     link.textContent = 'Open file in new tab';
     overlay.appendChild(link);
@@ -81,29 +69,27 @@ function openLightbox(src, isImage = true) {
   document.body.appendChild(overlay);
 }
 
-// --- Custom Modal helpers ---
+// ============ MODALS ============
 function showCustomModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel', isDanger = false) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal';
-    modal.id = 'customModal';
     modal.innerHTML = `
       <div class="modal-content">
         <button class="modal-close" id="customModalClose">&times;</button>
         <h2>${title}</h2>
-        <p style="margin: 1rem 0; color: var(--text-muted);">${message}</p>
-        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+        <p style="margin:1rem 0;color:var(--text-muted);">${message}</p>
+        <div style="display:flex;gap:.5rem;margin-top:1rem;">
           <button class="btn-primary ${isDanger ? 'btn-danger' : ''}" id="customModalConfirm" style="flex:1;">${confirmText}</button>
-          <button class="btn-primary" id="customModalCancel" style="flex:1; background: transparent; border: 1px solid var(--border); color: var(--text);">${cancelText}</button>
+          <button class="btn-primary" id="customModalCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">${cancelText}</button>
         </div>
-      </div>
-    `;
+      </div>`;
     document.body.appendChild(modal);
-    const closeModal = () => { modal.remove(); resolve(false); };
-    modal.querySelector('#customModalClose').addEventListener('click', closeModal);
-    modal.querySelector('#customModalCancel').addEventListener('click', closeModal);
-    modal.querySelector('#customModalConfirm').addEventListener('click', () => { modal.remove(); resolve(true); });
-    modal.addEventListener('click', (e) => { if (e.target === modal) { modal.remove(); resolve(false); } });
+    const close = () => { modal.remove(); resolve(false); };
+    modal.querySelector('#customModalClose').onclick = close;
+    modal.querySelector('#customModalCancel').onclick = close;
+    modal.querySelector('#customModalConfirm').onclick = () => { modal.remove(); resolve(true); };
+    modal.onclick = (e) => { if (e.target === modal) close(); };
   });
 }
 
@@ -111,51 +97,45 @@ function showCustomPrompt(title, defaultValue = '') {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal';
-    modal.id = 'customPromptModal';
     modal.innerHTML = `
       <div class="modal-content">
         <button class="modal-close" id="customPromptClose">&times;</button>
         <h2>${title}</h2>
-        <input type="text" id="customPromptInput" value="${defaultValue}" style="width:100%; margin-top: 0.5rem;" />
-        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+        <input type="text" id="customPromptInput" value="${defaultValue}" style="width:100%;margin-top:.5rem;" />
+        <div style="display:flex;gap:.5rem;margin-top:1rem;">
           <button class="btn-primary" id="customPromptConfirm" style="flex:1;">Save</button>
-          <button class="btn-primary" id="customPromptCancel" style="flex:1; background: transparent; border: 1px solid var(--border); color: var(--text);">Cancel</button>
+          <button class="btn-primary" id="customPromptCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button>
         </div>
-      </div>
-    `;
+      </div>`;
     document.body.appendChild(modal);
     const input = modal.querySelector('#customPromptInput');
-    input.focus();
-    input.select();
-    const closeModal = () => { modal.remove(); resolve(null); };
-    modal.querySelector('#customPromptClose').addEventListener('click', closeModal);
-    modal.querySelector('#customPromptCancel').addEventListener('click', closeModal);
-    modal.querySelector('#customPromptConfirm').addEventListener('click', () => {
-      const val = input.value.trim(); modal.remove(); resolve(val || null);
-    });
-    modal.addEventListener('click', (e) => { if (e.target === modal) { modal.remove(); resolve(null); } });
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { const val = input.value.trim(); modal.remove(); resolve(val || null); }
-      if (e.key === 'Escape') { modal.remove(); resolve(null); }
-    });
+    input.focus(); input.select();
+    const close = () => { modal.remove(); resolve(null); };
+    modal.querySelector('#customPromptClose').onclick = close;
+    modal.querySelector('#customPromptCancel').onclick = close;
+    modal.querySelector('#customPromptConfirm').onclick = () => { const v = input.value.trim(); modal.remove(); resolve(v || null); };
+    modal.onclick = (e) => { if (e.target === modal) close(); };
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { const v = input.value.trim(); modal.remove(); resolve(v || null); }
+      if (e.key === 'Escape') close();
+    };
   });
 }
 
-// --- Clean content ---
+// ============ CLEAN CONTENT ============
 function cleanContent(content) {
   if (!content) return content;
   const lines = content.split('\n');
-  let result = [];
-  let skip = false;
+  const out = []; let skip = false;
   for (const line of lines) {
     if (/^sources:/i.test(line.trim())) { skip = true; continue; }
     if (skip && line.trim() === '') { skip = false; continue; }
-    if (!skip) result.push(line);
+    if (!skip) out.push(line);
   }
-  return result.join('\n').trim();
+  return out.join('\n').trim();
 }
 
-// --- Supabase init ---
+// ============ SUPABASE INIT ============
 async function initSupabase() {
   log('Initializing Supabase...', 'info');
   try {
@@ -163,7 +143,6 @@ async function initSupabase() {
     const config = await res.json();
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
-
     state.supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
         state.currentUser = session.user;
@@ -171,15 +150,11 @@ async function initSupabase() {
         loadCloudConversations();
       } else {
         state.currentUser = null;
+        state.chats = []; state.messages = []; state.activeChatId = null;
         updateAuthUI();
-        state.chats = [];
-        state.messages = [];
-        state.activeChatId = null;
-        renderChatList();
-        renderMessages();
+        renderChatList(); renderMessages();
       }
     });
-
     const { data: { session } } = await state.supabase.auth.getSession();
     if (session) {
       state.currentUser = session.user;
@@ -187,27 +162,19 @@ async function initSupabase() {
       await loadCloudConversations();
     } else {
       updateAuthUI();
-      state.chats = [];
-      state.messages = [];
-      state.activeChatId = null;
-      renderChatList();
-      renderMessages();
+      renderChatList(); renderMessages();
     }
   } catch (err) {
     log(`Supabase init error: ${err.message}`, 'error');
-    state.chats = [];
-    state.messages = [];
-    state.activeChatId = null;
-    renderChatList();
-    renderMessages();
+    state.chats = []; state.messages = []; state.activeChatId = null;
+    renderChatList(); renderMessages();
   }
 }
 
-// --- Auth UI ---
 function updateAuthUI() {
   if (state.currentUser) {
-    const displayName = state.currentUser.email?.split('@')[0] || 'User';
-    authSidebarBtn.innerHTML = `<i data-lucide="user"></i><span>${displayName}</span>`;
+    const name = state.currentUser.email?.split('@')[0] || 'User';
+    authSidebarBtn.innerHTML = `<i data-lucide="user"></i><span>${name}</span>`;
     authSidebarBtn.onclick = () => openAccountModal();
   } else {
     authSidebarBtn.innerHTML = `<i data-lucide="log-in"></i><span>Sign In</span>`;
@@ -216,7 +183,6 @@ function updateAuthUI() {
   window.refreshIcons();
 }
 
-// --- API helper ---
 async function apiFetch(endpoint, options = {}) {
   const session = await state.supabase.auth.getSession();
   const token = session.data.session?.access_token;
@@ -226,30 +192,19 @@ async function apiFetch(endpoint, options = {}) {
     ...options.headers,
   };
   const res = await fetch(endpoint, { ...options, headers });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Request failed');
-  }
+  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || 'Request failed'); }
   return res;
 }
 
-// --- Cloud conversations ---
 async function loadCloudConversations() {
   if (!state.currentUser) return;
   try {
     const res = await apiFetch('/api/chat/conversations');
     state.chats = await res.json();
     renderChatList();
-    if (state.activeChatId) {
-      const exists = state.chats.some(c => c.id === state.activeChatId);
-      if (!exists) state.activeChatId = null;
-    }
-    if (state.activeChatId) {
-      await loadCloudMessages(state.activeChatId);
-    } else {
-      state.messages = [];
-      renderMessages();
-    }
+    if (state.activeChatId && !state.chats.some(c => c.id === state.activeChatId)) state.activeChatId = null;
+    if (state.activeChatId) await loadCloudMessages(state.activeChatId);
+    else { state.messages = []; renderMessages(); }
   } catch (err) { log(`Load cloud conversations error: ${err.message}`, 'error'); }
 }
 
@@ -259,8 +214,7 @@ async function loadCloudMessages(chatId) {
     const res = await apiFetch(`/api/chat/conversations/${chatId}/messages`);
     state.messages = await res.json();
     rebuildVersions();
-    renderMessages();
-    renderChatList();
+    renderMessages(); renderChatList();
   } catch (err) { log(`Load cloud messages error: ${err.message}`, 'error'); }
 }
 
@@ -268,38 +222,30 @@ function rebuildVersions() {
   state.messageVersions = {};
   state.messages.forEach(msg => {
     if (msg.versions && msg.versions.length > 0) {
-      state.messageVersions[msg.id] = {
-        versions: msg.versions,
-        currentIndex: msg.currentVersionIndex || 0
-      };
-      if (msg.versions.length > 0) {
-        msg.content = msg.versions[msg.currentVersionIndex || 0] || '';
-      }
+      state.messageVersions[msg.id] = { versions: msg.versions, currentIndex: msg.currentVersionIndex || 0 };
+      msg.content = msg.versions[msg.currentVersionIndex || 0] || '';
     }
   });
 }
 
-// --- Render chat list ---
+// ============ RENDER CHAT LIST ============
 function renderChatList() {
   chatList.innerHTML = '';
   const pinned = state.chats.filter(c => c.pinned);
   const unpinned = state.chats.filter(c => !c.pinned);
-
   if (pinned.length > 0) {
-    const pinContainer = document.createElement('div');
-    pinContainer.className = 'pinned-section';
-    const pinLabel = document.createElement('div');
-    pinLabel.className = 'pinned-label';
-    pinLabel.textContent = 'Pinned';
-    pinContainer.appendChild(pinLabel);
-    pinned.forEach(chat => appendChatItem(pinContainer, chat));
-    chatList.appendChild(pinContainer);
+    const c = document.createElement('div');
+    c.className = 'pinned-section';
+    const lbl = document.createElement('div');
+    lbl.className = 'pinned-label';
+    lbl.textContent = 'Pinned';
+    c.appendChild(lbl);
+    pinned.forEach(ch => appendChatItem(c, ch));
+    chatList.appendChild(c);
   }
-  if (unpinned.length > 0) {
-    unpinned.forEach(chat => appendChatItem(chatList, chat));
-  }
+  unpinned.forEach(ch => appendChatItem(chatList, ch));
   if (state.chats.length === 0) {
-    chatList.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:1.5rem 0;font-size:0.9rem;">No chats yet</div>';
+    chatList.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:1.5rem 0;font-size:.9rem;">No chats yet</div>';
   }
   window.refreshIcons();
 }
@@ -308,59 +254,55 @@ function appendChatItem(container, chat) {
   const div = document.createElement('div');
   div.className = `chat-item${chat.id === state.activeChatId ? ' active' : ''}`;
   div.dataset.id = chat.id;
-  const titleSpan = document.createElement('span');
-  titleSpan.className = 'title';
-  titleSpan.textContent = chat.title || 'New Chat';
+  const title = document.createElement('span');
+  title.className = 'title';
+  title.textContent = chat.title || 'New Chat';
   if (chat.pinned) {
-    const pinIcon = document.createElement('i');
-    pinIcon.setAttribute('data-lucide', 'pin');
-    pinIcon.style.width = '14px';
-    pinIcon.style.height = '14px';
-    pinIcon.style.marginRight = '4px';
-    pinIcon.style.color = 'var(--accent)';
-    titleSpan.prepend(pinIcon);
+    const icon = document.createElement('i');
+    icon.setAttribute('data-lucide', 'pin');
+    icon.style.cssText = 'width:14px;height:14px;margin-right:4px;color:var(--accent);';
+    title.prepend(icon);
   }
-  div.appendChild(titleSpan);
+  div.appendChild(title);
   const actions = document.createElement('div');
   actions.className = 'actions';
-  const moreBtn = document.createElement('button');
-  moreBtn.innerHTML = `<i data-lucide="more-horizontal" style="width:16px;height:16px;"></i>`;
-  moreBtn.title = 'More options';
-  moreBtn.addEventListener('click', (e) => { e.stopPropagation(); openChatMenu(e, chat.id); });
-  actions.appendChild(moreBtn);
+  const more = document.createElement('button');
+  more.innerHTML = `<i data-lucide="more-horizontal" style="width:16px;height:16px;"></i>`;
+  more.title = 'More options';
+  more.onclick = (e) => { e.stopPropagation(); openChatMenu(e, chat.id); };
+  actions.appendChild(more);
   div.appendChild(actions);
-  div.addEventListener('click', () => selectChat(chat.id));
+  div.onclick = () => selectChat(chat.id);
   container.appendChild(div);
 }
 
-// --- Render messages ---
+// ============ RENDER MESSAGES ============
 function renderMessages() {
   messageList.innerHTML = '';
 
-  // --- Share view ---
   if (state.isShareView) {
-    if (!state.shareMessages || state.shareMessages.length === 0) {
+    if (!state.shareMessages?.length) {
       messageList.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:2rem;">No messages in this share.</p>';
       return;
     }
-    state.shareMessages.forEach((msg) => {
+    state.shareMessages.forEach(msg => {
       const row = document.createElement('div');
       row.className = `message-row ${msg.role}`;
       if (msg.role === 'assistant') {
-        const header = document.createElement('div');
-        header.className = 'assistant-header-row';
-        header.innerHTML = '<img src="/logo.png" alt="agrideepai" class="assistant-avatar" /> <span class="assistant-name">agrideepai</span>';
-        row.appendChild(header);
+        const h = document.createElement('div');
+        h.className = 'assistant-header-row';
+        h.innerHTML = '<img src="/logo.png" alt="agrideepai" class="assistant-avatar" /> <span class="assistant-name">agrideepai</span>';
+        row.appendChild(h);
       }
-      const msgDiv = document.createElement('div');
-      msgDiv.className = `message ${msg.role}`;
-      const contentDiv = document.createElement('div');
-      contentDiv.className = 'message-content';
+      const div = document.createElement('div');
+      div.className = `message ${msg.role}`;
+      const c = document.createElement('div');
+      c.className = 'message-content';
       let html = marked.parse(cleanContent(msg.content) || '');
       html = html.replace(/<hr\s*\/?>/g, '');
-      contentDiv.innerHTML = html;
-      msgDiv.appendChild(contentDiv);
-      row.appendChild(msgDiv);
+      c.innerHTML = html;
+      div.appendChild(c);
+      row.appendChild(div);
       messageList.appendChild(row);
     });
     welcomeScreen.style.display = 'none';
@@ -368,7 +310,6 @@ function renderMessages() {
     return;
   }
 
-  // --- Normal chat ---
   if (!state.messages.length) {
     welcomeScreen.style.display = 'flex';
     messageList.style.display = 'none';
@@ -384,288 +325,228 @@ function renderMessages() {
     row.className = `message-row ${msg.role}`;
 
     if (msg.role === 'assistant') {
-      const header = document.createElement('div');
-      header.className = 'assistant-header-row';
-      header.innerHTML = '<img src="/logo.png" alt="agrideepai" class="assistant-avatar" /> <span class="assistant-name">agrideepai</span>';
-      row.appendChild(header);
+      const h = document.createElement('div');
+      h.className = 'assistant-header-row';
+      h.innerHTML = '<img src="/logo.png" alt="agrideepai" class="assistant-avatar" /> <span class="assistant-name">agrideepai</span>';
+      row.appendChild(h);
     }
 
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
-    // ----- Editing mode (user message) -----
+    // ----- EDITING MODE -----
     if (state.editingMessageId === msg.id && msg.role === 'user') {
-      const editArea = document.createElement('div');
-      editArea.style.cssText = 'width:100%;';
+      const area = document.createElement('div');
+      area.style.width = '100%';
 
-      // Show attachments during editing too (above the textarea)
-      if (msg.files && msg.files.length > 0) {
-        const attachDiv = document.createElement('div');
-        attachDiv.className = 'attachments-above';
+      if (msg.files?.length) {
+        const atts = document.createElement('div');
+        atts.className = 'attachments-above';
         msg.files.forEach(f => {
-          const wrap = document.createElement('div');
-          wrap.className = 'user-message-attachment';
-          if (f.mime_type && f.mime_type.startsWith('image/') && f.public_url) {
+          const w = document.createElement('div');
+          w.className = 'user-message-attachment';
+          if (f.mime_type?.startsWith('image/') && f.public_url) {
             const img = document.createElement('img');
-            img.src = f.public_url;
-            img.alt = f.filename;
-            img.addEventListener('click', () => openLightbox(f.public_url, true));
-            wrap.appendChild(img);
+            img.src = f.public_url; img.alt = f.filename;
+            img.onclick = () => openLightbox(f.public_url, true);
+            w.appendChild(img);
           } else if (f.public_url) {
-            const icon = document.createElement('div');
-            icon.className = 'file-icon';
-            icon.innerHTML = `<i data-lucide="file-text" style="width:24px;height:24px;"></i>`;
-            icon.addEventListener('click', () => openLightbox(f.public_url, false));
-            wrap.appendChild(icon);
+            const ic = document.createElement('div');
+            ic.className = 'file-icon';
+            ic.innerHTML = `<i data-lucide="file-text" style="width:24px;height:24px;"></i>`;
+            ic.onclick = () => openLightbox(f.public_url, false);
+            w.appendChild(ic);
           }
-          attachDiv.appendChild(wrap);
+          atts.appendChild(w);
         });
-        editArea.appendChild(attachDiv);
+        area.appendChild(atts);
         window.refreshIcons();
       }
 
-      const textarea = document.createElement('textarea');
-      textarea.value = state.editingValue;
-      textarea.style.cssText = 'width:100%;padding:0.5rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:0.95rem;';
+      const ta = document.createElement('textarea');
+      ta.value = state.editingValue;
+      ta.style.cssText = 'width:100%;padding:.5rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:.95rem;';
 
-      const btnGroup = document.createElement('div');
-      btnGroup.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.5rem;justify-content:flex-end;';
+      const g = document.createElement('div');
+      g.style.cssText = 'display:flex;gap:.5rem;margin-top:.5rem;justify-content:flex-end;';
 
-      const cancelBtn = document.createElement('button');
-      cancelBtn.textContent = 'Cancel';
-      cancelBtn.style.cssText = 'padding:0.45rem 1.1rem;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-weight:500;font-size:0.9rem;transition:background 0.2s;';
-      cancelBtn.addEventListener('mouseenter', () => cancelBtn.style.background = 'var(--surface-hover)');
-      cancelBtn.addEventListener('mouseleave', () => cancelBtn.style.background = 'transparent');
-      cancelBtn.addEventListener('click', () => { state.editingMessageId = null; renderMessages(); });
+      const cancel = document.createElement('button');
+      cancel.textContent = 'Cancel';
+      cancel.style.cssText = 'padding:.45rem 1.1rem;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-weight:500;font-size:.9rem;';
+      cancel.onmouseenter = () => cancel.style.background = 'var(--surface-hover)';
+      cancel.onmouseleave = () => cancel.style.background = 'transparent';
+      cancel.onclick = () => { state.editingMessageId = null; renderMessages(); };
 
-      const sendEditBtn = document.createElement('button');
-      sendEditBtn.textContent = 'Send';
-      sendEditBtn.style.cssText = `
-        padding:0.45rem 1.4rem;
-        background:var(--accent);
-        color:#fff;
-        border:none;
-        border-radius:10px;
-        font-weight:600;
-        font-size:0.9rem;
-        cursor:pointer;
-        box-shadow:0 2px 8px rgba(47,143,70,0.35);
-        transition:background 0.2s, box-shadow 0.2s, transform 0.15s;
-      `;
-      sendEditBtn.addEventListener('mouseenter', () => { sendEditBtn.style.background = 'var(--accent-hover)'; sendEditBtn.style.boxShadow = '0 4px 14px rgba(47,143,70,0.45)'; });
-      sendEditBtn.addEventListener('mouseleave', () => { sendEditBtn.style.background = 'var(--accent)'; sendEditBtn.style.boxShadow = '0 2px 8px rgba(47,143,70,0.35)'; });
-      sendEditBtn.addEventListener('mousedown', () => sendEditBtn.style.transform = 'scale(0.97)');
-      sendEditBtn.addEventListener('mouseup', () => sendEditBtn.style.transform = 'scale(1)');
-
-      sendEditBtn.addEventListener('click', async () => {
-        const newContent = textarea.value.trim();
+      const send = document.createElement('button');
+      send.textContent = 'Send';
+      send.style.cssText = 'padding:.45rem 1.4rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-weight:600;font-size:.9rem;cursor:pointer;box-shadow:0 2px 8px rgba(47,143,70,.35);transition:all .2s;';
+      send.onmouseenter = () => { send.style.background = 'var(--accent-hover)'; send.style.boxShadow = '0 4px 14px rgba(47,143,70,.45)'; };
+      send.onmouseleave = () => { send.style.background = 'var(--accent)'; send.style.boxShadow = '0 2px 8px rgba(47,143,70,.35)'; };
+      send.onmousedown = () => send.style.transform = 'scale(0.97)';
+      send.onmouseup = () => send.style.transform = 'scale(1)';
+      send.onclick = async () => {
+        const newContent = ta.value.trim();
         if (!newContent) return;
-        if (!state.messageVersions[msg.id]) {
-          state.messageVersions[msg.id] = { versions: [msg.content], currentIndex: 0 };
-        }
-        const vData = state.messageVersions[msg.id];
-        if (vData.versions[vData.versions.length - 1] !== newContent) {
-          vData.versions.push(newContent);
-          vData.currentIndex = vData.versions.length - 1;
-        } else {
-          vData.currentIndex = vData.versions.length - 1;
-        }
+        if (!state.messageVersions[msg.id]) state.messageVersions[msg.id] = { versions: [msg.content], currentIndex: 0 };
+        const v = state.messageVersions[msg.id];
+        if (v.versions[v.versions.length - 1] !== newContent) { v.versions.push(newContent); v.currentIndex = v.versions.length - 1; }
+        else v.currentIndex = v.versions.length - 1;
         msg.content = newContent;
-        const idx = state.messages.indexOf(msg);
-        state.messages = state.messages.slice(0, idx + 1);
+        const i = state.messages.indexOf(msg);
+        state.messages = state.messages.slice(0, i + 1);
         state.editingMessageId = null;
         const chat = state.chats.find(c => c.id === state.activeChatId);
         if (chat) chat.messages = state.messages;
         renderMessages();
         await sendEditedUserMessage();
-      });
+      };
 
-      btnGroup.appendChild(cancelBtn);
-      btnGroup.appendChild(sendEditBtn);
-      editArea.appendChild(textarea);
-      editArea.appendChild(btnGroup);
-      msgDiv.appendChild(editArea);
+      g.appendChild(cancel); g.appendChild(send);
+      area.appendChild(ta); area.appendChild(g);
+      msgDiv.appendChild(area);
       row.appendChild(msgDiv);
       messageList.appendChild(row);
-      setTimeout(() => textarea.focus(), 50);
+      setTimeout(() => ta.focus(), 50);
       return;
     }
 
-    // ----- Normal display -----
+    // ----- NORMAL DISPLAY -----
     if (msg.role === 'assistant') {
-      const isLastMessage = (index === lastIndex);
-      const isThinking = isLastMessage && state.isGenerating && msg.content === '';
-      if (isThinking) {
-        const thinkingDiv = document.createElement('div');
-        thinkingDiv.className = 'thinking-indicator';
-        thinkingDiv.innerHTML = `<div class="spinner"></div><span>Thinking...</span>`;
-        msgDiv.appendChild(thinkingDiv);
+      const isLast = index === lastIndex;
+      const thinking = isLast && state.isGenerating && msg.content === '';
+      if (thinking) {
+        const t = document.createElement('div');
+        t.className = 'thinking-indicator';
+        t.innerHTML = `<div class="spinner"></div><span>Thinking...</span>`;
+        msgDiv.appendChild(t);
       } else if (msg.content) {
-        const cleaned = cleanContent(msg.content);
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
-        let html = marked.parse(cleaned || '');
+        const c = document.createElement('div');
+        c.className = 'message-content';
+        let html = marked.parse(cleanContent(msg.content) || '');
         html = html.replace(/<hr\s*\/?>/g, '');
-        contentDiv.innerHTML = html;
-        msgDiv.appendChild(contentDiv);
-        if (msg.files && msg.files.length > 0) {
-          const fileDiv = document.createElement('div');
-          fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
-          msg.files.forEach(f => {
-            if (f.public_url) {
-              const link = document.createElement('a');
-              link.href = f.public_url;
-              link.target = '_blank';
-              link.textContent = '📎 ' + (f.filename || 'File');
-              fileDiv.appendChild(link);
-              fileDiv.appendChild(document.createTextNode(' '));
-            }
-          });
-          if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
-        }
+        c.innerHTML = html;
+        msgDiv.appendChild(c);
       }
     } else {
-      // User message — attachments ABOVE the text
-      if (msg.files && msg.files.length > 0) {
-        const attachDiv = document.createElement('div');
-        attachDiv.className = 'attachments-above';
+      // User — attachments ABOVE text
+      if (msg.files?.length) {
+        const atts = document.createElement('div');
+        atts.className = 'attachments-above';
         msg.files.forEach(f => {
-          const wrap = document.createElement('div');
-          wrap.className = 'user-message-attachment';
-          if (f.mime_type && f.mime_type.startsWith('image/') && f.public_url) {
+          const w = document.createElement('div');
+          w.className = 'user-message-attachment';
+          if (f.mime_type?.startsWith('image/') && f.public_url) {
             const img = document.createElement('img');
-            img.src = f.public_url;
-            img.alt = f.filename;
-            img.addEventListener('click', () => openLightbox(f.public_url, true));
-            wrap.appendChild(img);
+            img.src = f.public_url; img.alt = f.filename;
+            img.onclick = () => openLightbox(f.public_url, true);
+            w.appendChild(img);
           } else if (f.public_url) {
-            const icon = document.createElement('div');
-            icon.className = 'file-icon';
-            icon.innerHTML = `<i data-lucide="file-text" style="width:24px;height:24px;"></i>`;
-            icon.addEventListener('click', () => openLightbox(f.public_url, false));
-            wrap.appendChild(icon);
+            const ic = document.createElement('div');
+            ic.className = 'file-icon';
+            ic.innerHTML = `<i data-lucide="file-text" style="width:24px;height:24px;"></i>`;
+            ic.onclick = () => openLightbox(f.public_url, false);
+            w.appendChild(ic);
           }
-          attachDiv.appendChild(wrap);
+          atts.appendChild(w);
         });
-        msgDiv.appendChild(attachDiv);
+        msgDiv.appendChild(atts);
         window.refreshIcons();
       }
-
-      const contentDiv = document.createElement('div');
-      contentDiv.className = 'message-content';
-      contentDiv.textContent = msg.content;
-      msgDiv.appendChild(contentDiv);
+      const c = document.createElement('div');
+      c.className = 'message-content';
+      c.textContent = msg.content;
+      msgDiv.appendChild(c);
     }
 
-    const showActions = (msg.role === 'user') || (msg.role === 'assistant' && msg.content && !(state.isGenerating && index === lastIndex && msg.content === ''));
+    const showActions = (msg.role === 'user') ||
+      (msg.role === 'assistant' && msg.content && !(state.isGenerating && index === lastIndex && msg.content === ''));
 
     if (state.editingMessageId !== msg.id && showActions) {
-      const actionsRow = document.createElement('div');
-      actionsRow.className = 'message-actions-row';
+      const ar = document.createElement('div');
+      ar.className = 'message-actions-row';
 
       // Copy
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'icon-button-sm';
-      copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
-      copyBtn.title = 'Copy';
-      copyBtn.addEventListener('click', async (e) => {
+      const copy = document.createElement('button');
+      copy.className = 'icon-button-sm';
+      copy.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
+      copy.title = 'Copy';
+      copy.onclick = async (e) => {
         e.stopPropagation();
         await navigator.clipboard.writeText(msg.content);
-        copyBtn.classList.add('copied');
+        copy.classList.add('copied');
         showToast('Copied!');
         if (state.copyTimeout) clearTimeout(state.copyTimeout);
-        state.copyTimeout = setTimeout(() => copyBtn.classList.remove('copied'), 1500);
-      });
-      actionsRow.appendChild(copyBtn);
+        state.copyTimeout = setTimeout(() => copy.classList.remove('copied'), 1500);
+      };
+      ar.appendChild(copy);
 
       if (msg.role === 'user') {
-        const editBtn = document.createElement('button');
-        editBtn.className = 'icon-button-sm';
-        editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
-        editBtn.title = 'Edit';
-        editBtn.addEventListener('click', (e) => { e.stopPropagation(); startEditing(msg); });
-        actionsRow.appendChild(editBtn);
+        const edit = document.createElement('button');
+        edit.className = 'icon-button-sm';
+        edit.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
+        edit.title = 'Edit';
+        edit.onclick = (e) => { e.stopPropagation(); startEditing(msg); };
+        ar.appendChild(edit);
 
-        // Version controls for user messages
-        if (state.messageVersions[msg.id] && state.messageVersions[msg.id].versions.length > 1) {
-          const vData = state.messageVersions[msg.id];
-          const versionControls = document.createElement('div');
-          versionControls.className = 'version-controls';
-          const prevBtn = document.createElement('button');
-          prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
-          prevBtn.title = 'Previous version';
-          prevBtn.disabled = vData.currentIndex === 0;
-          prevBtn.addEventListener('click', () => {
-            if (vData.currentIndex > 0) {
-              vData.currentIndex--;
-              msg.content = vData.versions[vData.currentIndex];
-              renderMessages();
-            }
-          });
-          versionControls.appendChild(prevBtn);
-          const label = document.createElement('span');
-          label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
-          versionControls.appendChild(label);
-          const nextBtn = document.createElement('button');
-          nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
-          nextBtn.title = 'Next version';
-          nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
-          nextBtn.addEventListener('click', () => {
-            if (vData.currentIndex < vData.versions.length - 1) {
-              vData.currentIndex++;
-              msg.content = vData.versions[vData.currentIndex];
-              renderMessages();
-            }
-          });
-          versionControls.appendChild(nextBtn);
-          actionsRow.appendChild(versionControls);
-          window.refreshIcons();
+        if (state.messageVersions[msg.id]?.versions.length > 1) {
+          const v = state.messageVersions[msg.id];
+          const vc = document.createElement('div');
+          vc.className = 'version-controls';
+          const prev = document.createElement('button');
+          prev.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
+          prev.disabled = v.currentIndex === 0;
+          prev.onclick = () => { if (v.currentIndex > 0) { v.currentIndex--; msg.content = v.versions[v.currentIndex]; renderMessages(); } };
+          vc.appendChild(prev);
+          const lbl = document.createElement('span');
+          lbl.textContent = `${v.currentIndex + 1} / ${v.versions.length}`;
+          vc.appendChild(lbl);
+          const next = document.createElement('button');
+          next.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
+          next.disabled = v.currentIndex === v.versions.length - 1;
+          next.onclick = () => { if (v.currentIndex < v.versions.length - 1) { v.currentIndex++; msg.content = v.versions[v.currentIndex]; renderMessages(); } };
+          vc.appendChild(next);
+          ar.appendChild(vc);
         }
       }
 
       if (msg.role === 'assistant') {
-        // Like
-        const likeBtn = document.createElement('button');
-        likeBtn.className = 'icon-button-sm';
-        const isLiked = state.likedMessages.has(msg.id);
-        likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
-        likeBtn.title = isLiked ? 'Liked' : 'Like';
-        if (isLiked) likeBtn.classList.add('liked');
-        likeBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleLike(msg); });
-        actionsRow.appendChild(likeBtn);
+        // LIKE — className set FIRST, then classList.add
+        const like = document.createElement('button');
+        like.className = 'icon-button-sm';
+        if (state.likedMessages.has(msg.id)) like.classList.add('liked');
+        like.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
+        like.title = 'Like';
+        like.onclick = (e) => { e.stopPropagation(); toggleLike(msg); };
+        ar.appendChild(like);
 
-        // Dislike
-        const dislikeBtn = document.createElement('button');
-        dislikeBtn.className = 'icon-button-sm';
-        const isDisliked = state.dislikedMessages.has(msg.id);
-        dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
-        dislikeBtn.title = isDisliked ? 'Disliked' : 'Dislike';
-        if (isDisliked) dislikeBtn.classList.add('disliked');
-        dislikeBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleDislike(msg); });
-        actionsRow.appendChild(dislikeBtn);
+        // DISLIKE
+        const dislike = document.createElement('button');
+        dislike.className = 'icon-button-sm';
+        if (state.dislikedMessages.has(msg.id)) dislike.classList.add('disliked');
+        dislike.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
+        dislike.title = 'Dislike';
+        dislike.onclick = (e) => { e.stopPropagation(); toggleDislike(msg); };
+        ar.appendChild(dislike);
 
         // Regenerate
-        const regenBtn = document.createElement('button');
-        regenBtn.className = 'icon-button-sm';
-        regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
-        regenBtn.title = 'Regenerate';
-        regenBtn.addEventListener('click', (e) => { e.stopPropagation(); regenerateMessage(index); });
-        actionsRow.appendChild(regenBtn);
+        const regen = document.createElement('button');
+        regen.className = 'icon-button-sm';
+        regen.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
+        regen.title = 'Regenerate';
+        regen.onclick = (e) => { e.stopPropagation(); regenerateMessage(index); };
+        ar.appendChild(regen);
 
         // Share
-        const shareBtn = document.createElement('button');
-        shareBtn.className = 'icon-button-sm';
-        shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
-        shareBtn.title = 'Share this message';
-        shareBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          shareConversation([{ role: msg.role, content: msg.content }]);
-        });
-        actionsRow.appendChild(shareBtn);
+        const share = document.createElement('button');
+        share.className = 'icon-button-sm';
+        share.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
+        share.title = 'Share this message';
+        share.onclick = (e) => { e.stopPropagation(); shareConversation([{ role: msg.role, content: msg.content }]); };
+        ar.appendChild(share);
       }
 
       row.appendChild(msgDiv);
-      row.appendChild(actionsRow);
+      row.appendChild(ar);
       messageList.appendChild(row);
     } else {
       row.appendChild(msgDiv);
@@ -675,7 +556,7 @@ function renderMessages() {
 
   window.refreshIcons();
   const container = document.getElementById('chatContainer');
-  if (state.shouldScrollToBottom || isNearBottom(container)) {
+  if (container && (state.shouldScrollToBottom || isNearBottom(container))) {
     container.scrollTop = container.scrollHeight;
     state.shouldScrollToBottom = false;
   }
@@ -685,34 +566,29 @@ function isNearBottom(container, threshold = 150) {
   return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
 }
 
-// --- Toast ---
+// ============ TOAST ============
 function showToast(message, isError = false) {
-  const existing = document.querySelector('.agrideep-toast');
-  if (existing) existing.remove();
+  document.querySelector('.agrideep-toast')?.remove();
   const toast = document.createElement('div');
   toast.className = 'agrideep-toast';
   toast.textContent = message;
   const bg = isError ? '#e85d5d' : '#2f8f46';
   Object.assign(toast.style, {
-    position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
-    background: bg, color: '#fff', padding: '0.5rem 1.2rem', borderRadius: '10px',
-    fontSize: '0.9rem', fontWeight: '500', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-    zIndex: '9999', opacity: '0', transition: 'opacity 0.3s, transform 0.3s',
+    position: 'fixed', bottom: '80px', left: '50%',
+    background: bg, color: '#fff', padding: '.5rem 1.2rem', borderRadius: '10px',
+    fontSize: '.9rem', fontWeight: '500', boxShadow: '0 8px 24px rgba(0,0,0,.4)',
+    zIndex: '9999', opacity: '0', transition: 'opacity .3s, transform .3s',
     transform: 'translateX(-50%) translateY(10px)',
   });
   document.body.appendChild(toast);
-  requestAnimationFrame(() => {
-    toast.style.opacity = '1';
-    toast.style.transform = 'translateX(-50%) translateY(0)';
-  });
+  requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateX(-50%) translateY(0)'; });
   setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateX(-50%) translateY(10px)';
+    toast.style.opacity = '0'; toast.style.transform = 'translateX(-50%) translateY(10px)';
     setTimeout(() => toast.remove(), 300);
   }, 2500);
 }
 
-// --- Like / Dislike toggle ---
+// ============ LIKE / DISLIKE ============
 function toggleLike(msg) {
   if (state.likedMessages.has(msg.id)) state.likedMessages.delete(msg.id);
   else { state.likedMessages.add(msg.id); state.dislikedMessages.delete(msg.id); }
@@ -724,7 +600,6 @@ function toggleDislike(msg) {
   renderMessages();
 }
 
-// --- Start editing ---
 function startEditing(msg) {
   if (msg.role !== 'user') return;
   state.editingMessageId = msg.id;
@@ -732,82 +607,26 @@ function startEditing(msg) {
   renderMessages();
 }
 
-// --- Send after editing ---
+// ============ SEND AFTER EDIT ============
 async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) return;
-
-  const assistantMsg = {
-    id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-    role: 'assistant', content: '', files: [], created_at: new Date().toISOString(),
-  };
-  state.messages.push(assistantMsg);
+  const assist = { id: 'assist_' + Date.now().toString(36), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
+  state.messages.push(assist);
   chat.messages = state.messages;
-
-  state.isGenerating = true;
-  state.shouldScrollToBottom = true;
-  renderMessages();
-  updateSendButton();
+  state.isGenerating = true; state.shouldScrollToBottom = true;
+  renderMessages(); updateSendButton();
   state.abortController = new AbortController();
-
   try {
-    const payload = {
-      messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
-    };
+    const payload = { messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })) };
     const response = await fetch('/api/chat/guest', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload), signal: state.abortController.signal,
     });
-    if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'AI request failed'); }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let full = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      for (const line of chunk.split('\n')) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.text) {
-              full += parsed.text;
-              const last = state.messages[state.messages.length - 1];
-              if (last && last.role === 'assistant') { last.content = full; chat.messages = state.messages; renderMessages(); }
-            }
-          } catch (e) {}
-        }
-      }
-    }
-
-    const last = state.messages[state.messages.length - 1];
-    if (last && last.role === 'assistant') {
-      if (!state.messageVersions[last.id]) state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
-      const vData = state.messageVersions[last.id];
-      if (vData.versions.length === 0 || vData.versions[vData.versions.length - 1] !== last.content) {
-        vData.versions.push(last.content);
-        vData.currentIndex = vData.versions.length - 1;
-      }
-      renderMessages();
-    }
-
-    if (state.currentUser) {
-      await loadCloudMessages(chat.id);
-      await loadCloudConversations();
-    } else renderChatList();
+    if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'AI failed'); }
+    await consumeStream(response, chat);
   } catch (err) {
-    if (err.name !== 'AbortError') {
-      showToast('Error: ' + err.message, true);
-      const last = state.messages[state.messages.length - 1];
-      if (last && last.role === 'assistant' && last.content === '') {
-        state.messages.pop();
-        chat.messages = state.messages;
-        renderMessages();
-      }
-    }
+    if (err.name !== 'AbortError') showToast('Error: ' + err.message, true);
   } finally {
     state.isGenerating = false;
     sendBtn.classList.remove('generating');
@@ -817,78 +636,32 @@ async function sendEditedUserMessage() {
   }
 }
 
-// --- Regenerate ---
+// ============ REGENERATE ============
 async function regenerateMessage(index) {
   const msg = state.messages[index];
   if (!msg || msg.role !== 'assistant') return;
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) return;
-
-  const contextMessages = state.messages.slice(0, index);
-  if (contextMessages.length === 0 || contextMessages[contextMessages.length - 1].role !== 'user') {
-    showToast('Cannot regenerate: no user message before this response', true); return;
-  }
-
+  const ctx = state.messages.slice(0, index);
+  if (!ctx.length || ctx[ctx.length - 1].role !== 'user') { showToast('Cannot regenerate', true); return; }
   if (!state.messageVersions[msg.id]) state.messageVersions[msg.id] = { versions: [], currentIndex: 0 };
-  const vData = state.messageVersions[msg.id];
-  vData.versions.push('');
-  vData.currentIndex = vData.versions.length - 1;
-  msg.content = '';
-
-  state.isGenerating = true;
-  state.shouldScrollToBottom = true;
-  renderMessages();
-  updateSendButton();
+  const v = state.messageVersions[msg.id];
+  v.versions.push(''); v.currentIndex = v.versions.length - 1; msg.content = '';
+  state.isGenerating = true; state.shouldScrollToBottom = true;
+  renderMessages(); updateSendButton();
   state.abortController = new AbortController();
-
   try {
-    const payload = { messages: contextMessages.map(m => ({ role: m.role, content: m.content })) };
+    const payload = { messages: ctx.map(m => ({ role: m.role, content: m.content })) };
     const response = await fetch('/api/chat/guest', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload), signal: state.abortController.signal,
     });
-    if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'AI request failed'); }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let full = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      for (const line of chunk.split('\n')) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.text) {
-              full += parsed.text;
-              vData.versions[vData.versions.length - 1] = full;
-              msg.content = full;
-              renderMessages();
-            }
-          } catch (e) {}
-        }
-      }
-    }
-
-    if (vData.versions.length > 0) {
-      vData.versions[vData.versions.length - 1] = full;
-      msg.content = full;
-      renderMessages();
-    }
+    if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'AI failed'); }
+    await consumeStream(response, chat, v);
   } catch (err) {
     if (err.name !== 'AbortError') {
       showToast('Regenerate failed: ' + err.message, true);
-      if (vData.versions.length > 0 && vData.versions[vData.versions.length - 1] === '') {
-        vData.versions.pop();
-        if (vData.versions.length > 0) {
-          vData.currentIndex = vData.versions.length - 1;
-          msg.content = vData.versions[vData.currentIndex];
-        } else msg.content = '';
-        renderMessages();
-      }
+      if (v.versions.length && v.versions[v.versions.length - 1] === '') { v.versions.pop(); msg.content = v.versions[v.currentIndex] || ''; renderMessages(); }
     }
   } finally {
     state.isGenerating = false;
@@ -899,17 +672,50 @@ async function regenerateMessage(index) {
   }
 }
 
-// --- Share ---
+// ============ STREAM CONSUMER ============
+async function consumeStream(response, chat, versionData = null) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let full = '';
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.text) {
+          full += parsed.text;
+          const last = state.messages[state.messages.length - 1];
+          if (last && last.role === 'assistant') { last.content = full; chat.messages = state.messages; renderMessages(); }
+          if (versionData) { versionData.versions[versionData.versions.length - 1] = full; }
+        }
+      } catch (e) {}
+    }
+  }
+  const last = state.messages[state.messages.length - 1];
+  if (last && last.role === 'assistant') {
+    if (!state.messageVersions[last.id]) state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
+    const v = state.messageVersions[last.id];
+    if (v.versions.length === 0 || v.versions[v.versions.length - 1] !== last.content) { v.versions.push(last.content); v.currentIndex = v.versions.length - 1; }
+    renderMessages();
+  }
+  if (state.currentUser) { await loadCloudMessages(chat.id); await loadCloudConversations(); }
+  else renderChatList();
+}
+
+// ============ SHARE ============
 async function shareConversation(messagesToShare = null) {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat && !messagesToShare) { showToast('No chat to share', true); return; }
-
-  let messages;
-  if (messagesToShare) messages = messagesToShare;
-  else messages = state.messages.map(m => ({ role: m.role, content: m.content }));
-
-  if (!messages || messages.length === 0) { showToast('Nothing to share', true); return; }
-
+  let messages = messagesToShare || state.messages.map(m => ({ role: m.role, content: m.content }));
+  if (!messages.length) { showToast('Nothing to share', true); return; }
   try {
     let response;
     if (state.currentUser && !messagesToShare) {
@@ -920,29 +726,21 @@ async function shareConversation(messagesToShare = null) {
         body: JSON.stringify({ messages }),
       });
     }
-    if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'Failed to generate share link'); }
+    if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'Failed'); }
     const data = await response.json();
     shareLinkDisplay.textContent = data.url;
     shareModal.classList.remove('hidden');
-    copyShareLink.onclick = () => {
-      navigator.clipboard.writeText(data.url).then(() => showToast('Link copied!'));
-    };
-  } catch (err) {
-    showToast('Failed to generate share link: ' + err.message, true);
-  }
+    copyShareLink.onclick = () => navigator.clipboard.writeText(data.url).then(() => showToast('Link copied!'));
+  } catch (err) { showToast('Failed to generate share link: ' + err.message, true); }
 }
 
-// --- Chat CRUD ---
+// ============ CHAT CRUD ============
 function createLocalChat(title = 'New Chat') {
-  const chat = {
-    id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-    title, messages: [], pinned: false, updatedAt: new Date().toISOString(), createdAt: new Date().toISOString(),
-  };
+  const chat = { id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5), title, messages: [], pinned: false, updatedAt: new Date().toISOString(), createdAt: new Date().toISOString() };
   state.chats.unshift(chat);
   renderChatList();
   return chat;
 }
-
 async function createChat(title = 'New Chat') {
   if (state.currentUser) {
     try {
@@ -952,240 +750,159 @@ async function createChat(title = 'New Chat') {
       renderChatList();
       return chat;
     } catch (err) { showToast('Failed to create chat', true); return null; }
-  } else return createLocalChat(title);
+  }
+  return createLocalChat(title);
 }
-
 async function selectChat(id) {
   state.activeChatId = id;
-  if (state.currentUser) {
-    await loadCloudMessages(id);
-    renderChatList();
-  } else {
+  if (state.currentUser) { await loadCloudMessages(id); renderChatList(); }
+  else {
     const chat = state.chats.find(c => c.id === id);
-    if (chat) {
-      state.messages = chat.messages || [];
-      rebuildVersions();
-      renderMessages();
-      renderChatList();
-    }
+    if (chat) { state.messages = chat.messages || []; rebuildVersions(); renderMessages(); renderChatList(); }
   }
   if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
   chatMenu.classList.add('hidden');
 }
-
 async function deleteChat(id) {
-  const confirmed = await showCustomModal('Delete Chat', 'Are you sure you want to delete this chat? This action cannot be undone.', 'Delete', 'Cancel', true);
-  if (!confirmed) return;
+  const ok = await showCustomModal('Delete Chat', 'Are you sure? This cannot be undone.', 'Delete', 'Cancel', true);
+  if (!ok) return;
   if (state.currentUser) {
-    try {
-      await apiFetch(`/api/chat/conversations/${id}`, { method: 'DELETE' });
-      state.chats = state.chats.filter(c => c.id !== id);
-      if (state.activeChatId === id) { state.activeChatId = null; state.messages = []; renderMessages(); }
-      renderChatList();
-    } catch (err) { showToast('Failed to delete', true); }
-  } else {
-    state.chats = state.chats.filter(c => c.id !== id);
-    if (state.activeChatId === id) { state.activeChatId = null; state.messages = []; renderMessages(); }
-    renderChatList();
+    try { await apiFetch(`/api/chat/conversations/${id}`, { method: 'DELETE' }); } catch (err) { showToast('Failed', true); return; }
   }
-  chatMenu.classList.add('hidden');
+  state.chats = state.chats.filter(c => c.id !== id);
+  if (state.activeChatId === id) { state.activeChatId = null; state.messages = []; renderMessages(); }
+  renderChatList(); chatMenu.classList.add('hidden');
 }
-
 async function renameChat(id) {
   const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
-  const newTitle = await showCustomPrompt('Rename Chat', chat.title);
-  if (!newTitle || !newTitle.trim()) return;
+  const t = await showCustomPrompt('Rename Chat', chat.title);
+  if (!t) return;
   if (state.currentUser) {
-    try {
-      const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ title: newTitle.trim() }) });
-      const updated = await res.json();
-      const idx = state.chats.findIndex(c => c.id === id);
-      if (idx !== -1) state.chats[idx] = updated;
-      renderChatList();
-    } catch (err) { showToast('Failed to rename', true); }
-  } else {
-    chat.title = newTitle.trim();
-    chat.updatedAt = new Date().toISOString();
-    renderChatList();
-  }
+    try { const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ title: t }) }); const u = await res.json(); const i = state.chats.findIndex(c => c.id === id); if (i !== -1) state.chats[i] = u; renderChatList(); } catch (err) { showToast('Failed', true); }
+  } else { chat.title = t; renderChatList(); }
   chatMenu.classList.add('hidden');
 }
-
 async function togglePin(id) {
   const chat = state.chats.find(c => c.id === id);
   if (!chat) return;
   if (state.currentUser) {
-    try {
-      const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ pinned: !chat.pinned }) });
-      const updated = await res.json();
-      const idx = state.chats.findIndex(c => c.id === id);
-      if (idx !== -1) state.chats[idx] = updated;
-      renderChatList();
-    } catch (err) { showToast('Failed to update pin', true); }
-  } else {
-    chat.pinned = !chat.pinned;
-    chat.updatedAt = new Date().toISOString();
-    renderChatList();
-  }
+    try { const res = await apiFetch(`/api/chat/conversations/${id}`, { method: 'PUT', body: JSON.stringify({ pinned: !chat.pinned }) }); const u = await res.json(); const i = state.chats.findIndex(c => c.id === id); if (i !== -1) state.chats[i] = u; renderChatList(); } catch (err) { showToast('Failed', true); }
+  } else { chat.pinned = !chat.pinned; renderChatList(); }
   chatMenu.classList.add('hidden');
 }
-
 function openChatMenu(e, chatId) {
   e.preventDefault();
   state.contextMenuTarget = chatId;
   const rect = e.target.getBoundingClientRect();
-  const menuWidth = 180;
-  let left = Math.min(rect.left, window.innerWidth - menuWidth - 10);
+  const w = 180;
+  let left = Math.min(rect.left, window.innerWidth - w - 10);
   let top = rect.bottom + 5;
   if (top + 200 > window.innerHeight) top = rect.top - 200;
   chatMenu.style.left = left + 'px';
   chatMenu.style.top = top + 'px';
   chatMenu.classList.remove('hidden');
-  const buttons = chatMenu.querySelectorAll('button');
-  buttons.forEach(btn => {
+  chatMenu.querySelectorAll('button').forEach(btn => {
     btn.onclick = null;
-    const action = btn.dataset.action;
-    if (action === 'pin') {
-      const chat = state.chats.find(c => c.id === chatId);
-      btn.textContent = chat?.pinned ? 'Unpin' : 'Pin';
-      btn.innerHTML = `<i data-lucide="${chat?.pinned ? 'pin-off' : 'pin'}"></i> ${chat?.pinned ? 'Unpin' : 'Pin'}`;
+    const a = btn.dataset.action;
+    if (a === 'pin') {
+      const c = state.chats.find(x => x.id === chatId);
+      btn.textContent = c?.pinned ? 'Unpin' : 'Pin';
+      btn.innerHTML = `<i data-lucide="${c?.pinned ? 'pin-off' : 'pin'}"></i> ${c?.pinned ? 'Unpin' : 'Pin'}`;
       btn.onclick = () => { chatMenu.classList.add('hidden'); togglePin(chatId); };
-    } else if (action === 'share') {
-      btn.onclick = () => { chatMenu.classList.add('hidden'); shareConversation(); };
-    } else if (action === 'rename') {
-      btn.onclick = () => { chatMenu.classList.add('hidden'); renameChat(chatId); };
-    } else if (action === 'delete') {
-      btn.onclick = () => { chatMenu.classList.add('hidden'); deleteChat(chatId); };
-    }
+    } else if (a === 'share') { btn.onclick = () => { chatMenu.classList.add('hidden'); shareConversation(); }; }
+    else if (a === 'rename') { btn.onclick = () => { chatMenu.classList.add('hidden'); renameChat(chatId); }; }
+    else if (a === 'delete') { btn.onclick = () => { chatMenu.classList.add('hidden'); deleteChat(chatId); }; }
   });
   window.refreshIcons();
 }
-
 document.addEventListener('click', (e) => {
   if (!chatMenu.contains(e.target) && !e.target.closest('.chat-item .actions')) chatMenu.classList.add('hidden');
 });
 
 function handleNewChat() {
-  const emptyChat = state.chats.find(chat => chat.messages.length === 0);
-  if (emptyChat) { selectChat(emptyChat.id); return; }
+  const empty = state.chats.find(c => c.messages.length === 0);
+  if (empty) { selectChat(empty.id); return; }
   createChat('New Chat').then(chat => {
     if (chat) {
-      state.activeChatId = chat.id;
-      state.messages = [];
-      state.editingMessageId = null;
-      state.messageVersions = {};
-      renderMessages();
-      renderChatList();
-      messageInput.focus();
+      state.activeChatId = chat.id; state.messages = []; state.editingMessageId = null; state.messageVersions = {};
+      renderMessages(); renderChatList(); messageInput.focus();
       if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
     }
   });
 }
 
-// --- Composer ---
+// ============ COMPOSER ============
 function resizeComposer() {
   messageInput.style.height = '0px';
-  const maxHeight = 120;
   const sh = messageInput.scrollHeight;
-  messageInput.style.height = Math.min(sh, maxHeight) + 'px';
-  messageInput.style.overflowY = sh > maxHeight ? 'auto' : 'hidden';
+  messageInput.style.height = Math.min(sh, 120) + 'px';
+  messageInput.style.overflowY = sh > 120 ? 'auto' : 'hidden';
 }
-
 function updateSendButton() {
-  const hasContent = messageInput.value.trim().length > 0 || state.attachments.length > 0;
-  const sendIcon = sendBtn.querySelector('.send-icon');
-  const stopIcon = sendBtn.querySelector('.stop-icon');
+  const has = messageInput.value.trim().length > 0 || state.attachments.length > 0;
+  const si = sendBtn.querySelector('.send-icon');
+  const sti = sendBtn.querySelector('.stop-icon');
   if (!state.isGenerating) {
-    if (sendIcon) sendIcon.style.display = 'inline';
-    if (stopIcon) stopIcon.style.display = 'none';
-    sendBtn.disabled = !hasContent;
-    sendBtn.style.opacity = hasContent ? '1' : '0.3';
+    if (si) si.style.display = 'inline';
+    if (sti) sti.style.display = 'none';
+    sendBtn.disabled = !has;
+    sendBtn.style.opacity = has ? '1' : '0.3';
     sendBtn.classList.remove('generating');
   } else {
-    if (sendIcon) sendIcon.style.display = 'none';
-    if (stopIcon) stopIcon.style.display = 'inline';
+    if (si) si.style.display = 'none';
+    if (sti) sti.style.display = 'inline';
     sendBtn.disabled = false;
     sendBtn.style.opacity = '1';
     sendBtn.classList.add('generating');
   }
 }
 
-// --- Attachments preview ---
 function renderAttachments() {
   attachmentPreview.innerHTML = '';
   state.attachments.forEach((file, idx) => {
     const chip = document.createElement('div');
     chip.className = 'attachment-chip';
-    const isImage = file.type && file.type.startsWith('image/');
-    if (isImage) {
+    if (file.type?.startsWith('image/')) {
       const img = document.createElement('img');
       img.src = URL.createObjectURL(file);
-      img.addEventListener('click', () => openLightbox(img.src, true));
+      img.onclick = () => openLightbox(img.src, true);
       chip.appendChild(img);
     } else {
-      const icon = document.createElement('i');
-      icon.setAttribute('data-lucide', 'file-text');
-      chip.appendChild(icon);
+      const ic = document.createElement('i');
+      ic.setAttribute('data-lucide', 'file-text');
+      chip.appendChild(ic);
     }
-    const removeBtn = document.createElement('button');
-    removeBtn.innerHTML = `<i data-lucide="x" style="width:14px;height:14px;"></i>`;
-    removeBtn.dataset.index = idx;
-    removeBtn.addEventListener('click', (e) => {
-      const idx = parseInt(e.currentTarget.dataset.index);
-      state.attachments.splice(idx, 1);
-      renderAttachments();
-      updateSendButton();
-    });
-    chip.appendChild(removeBtn);
+    const rm = document.createElement('button');
+    rm.innerHTML = `<i data-lucide="x" style="width:14px;height:14px;"></i>`;
+    rm.onclick = (e) => { e.stopPropagation(); state.attachments.splice(idx, 1); renderAttachments(); updateSendButton(); };
+    chip.appendChild(rm);
     attachmentPreview.appendChild(chip);
   });
   window.refreshIcons();
 }
 
-// --- Send message ---
+// ============ SEND MESSAGE ============
 async function sendMessage() {
   const text = messageInput.value.trim();
-  const hasText = text.length > 0;
-  const hasAttachments = state.attachments.length > 0;
-  if (!hasText && !hasAttachments) return;
+  if (!text && !state.attachments.length) return;
   if (state.isGenerating) return;
 
   let chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat) {
-    const title = text.substring(0, 42) + (text.length > 42 ? '…' : '') || 'New Chat';
-    const newChat = {
-      id: 'local_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-      title, messages: [], pinned: false, updatedAt: new Date().toISOString(), createdAt: new Date().toISOString(),
-    };
+    const title = (text || 'New Chat').substring(0, 42);
+    const newChat = { id: 'local_' + Date.now().toString(36), title, messages: [], pinned: false, updatedAt: new Date().toISOString(), createdAt: new Date().toISOString() };
     state.chats.unshift(newChat);
     state.activeChatId = newChat.id;
     if (state.currentUser) {
-      const cloudChat = await createChat(title);
-      if (cloudChat) {
-        state.activeChatId = cloudChat.id;
-        state.chats = state.chats.filter(c => c.id !== newChat.id);
-        renderChatList();
-        chat = cloudChat;
-      } else return;
-    } else {
-      renderChatList();
-      chat = newChat;
-    }
+      const cloud = await createChat(title);
+      if (cloud) { state.activeChatId = cloud.id; state.chats = state.chats.filter(c => c.id !== newChat.id); renderChatList(); chat = cloud; }
+      else return;
+    } else { renderChatList(); chat = newChat; }
   }
 
-  // Build file metadata with local blob URL for guests, real URL for logged-in (populated after upload)
-  const localFiles = state.attachments.map(f => ({
-    filename: f.name, mime_type: f.type, size: f.size,
-    public_url: URL.createObjectURL(f),
-  }));
-
-  const userMsg = {
-    id: 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-    role: 'user', content: text || '[File attached]',
-    files: localFiles,
-    created_at: new Date().toISOString(),
-  };
+  const localFiles = state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size, public_url: URL.createObjectURL(f) }));
+  const userMsg = { id: 'user_' + Date.now().toString(36), role: 'user', content: text || '[File attached]', files: localFiles, created_at: new Date().toISOString() };
   state.messages.push(userMsg);
   chat.messages = state.messages;
   renderMessages();
@@ -1193,44 +910,37 @@ async function sendMessage() {
   messageInput.value = '';
   const atts = [...state.attachments];
   state.attachments = [];
-  renderAttachments();
-  resizeComposer();
-  updateSendButton();
+  renderAttachments(); resizeComposer(); updateSendButton();
   messageInput.disabled = true;
 
-  const assistantMsg = { id: 'assist_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
-  state.messages.push(assistantMsg);
+  const assist = { id: 'assist_' + Date.now().toString(36), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
+  state.messages.push(assist);
   chat.messages = state.messages;
 
-  state.isGenerating = true;
-  state.shouldScrollToBottom = true;
-  renderMessages();
-  updateSendButton();
+  state.isGenerating = true; state.shouldScrollToBottom = true;
+  renderMessages(); updateSendButton();
   state.abortController = new AbortController();
 
   try {
     let response;
     if (state.currentUser) {
-      const formData = new FormData();
-      formData.append('message', text || '');
-      formData.append('search', 'true');
-      atts.forEach(f => formData.append('file', f));
+      const fd = new FormData();
+      fd.append('message', text || '');
+      atts.forEach(f => fd.append('file', f));
       const session = await state.supabase.auth.getSession();
       const token = session.data.session?.access_token;
       response = await fetch(`/api/chat/conversations/${chat.id}/messages`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}` },
-        body: formData, signal: state.abortController.signal,
+        body: fd, signal: state.abortController.signal,
       });
     } else {
-      const payload = {
-        messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
-      };
+      const payload = { messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })) };
       if (atts.length > 0) {
         const first = atts[0];
-        const b64 = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result.split(',')[1]);
-          reader.readAsDataURL(first);
+        const b64 = await new Promise(resolve => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result.split(',')[1]);
+          r.readAsDataURL(first);
         });
         payload.image = { base64: b64, mimeType: first.type, filename: first.name };
       }
@@ -1239,59 +949,16 @@ async function sendMessage() {
         body: JSON.stringify(payload), signal: state.abortController.signal,
       });
     }
-
-    if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'AI request failed'); }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let full = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      for (const line of chunk.split('\n')) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.text) {
-              full += parsed.text;
-              const last = state.messages[state.messages.length - 1];
-              if (last && last.role === 'assistant') { last.content = full; chat.messages = state.messages; renderMessages(); }
-            }
-          } catch (e) {}
-        }
-      }
-    }
-
-    const last = state.messages[state.messages.length - 1];
-    if (last && last.role === 'assistant') {
-      if (!state.messageVersions[last.id]) state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
-      const vData = state.messageVersions[last.id];
-      if (vData.versions.length === 0 || vData.versions[vData.versions.length - 1] !== last.content) {
-        vData.versions.push(last.content);
-        vData.currentIndex = vData.versions.length - 1;
-      }
-      renderMessages();
-    }
-
-    if (state.currentUser) {
-      await loadCloudMessages(chat.id);
-      await loadCloudConversations();
-    } else renderChatList();
+    if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'AI failed'); }
+    await consumeStream(response, chat);
   } catch (err) {
     if (err.name === 'AbortError') {
       const last = state.messages[state.messages.length - 1];
-      if (last && last.role === 'assistant') { last.status = 'stopped'; renderMessages(); }
+      if (last?.role === 'assistant') { last.status = 'stopped'; renderMessages(); }
     } else {
       showToast('Error: ' + err.message, true);
       const last = state.messages[state.messages.length - 1];
-      if (last && last.role === 'assistant' && last.content === '') {
-        state.messages.pop();
-        chat.messages = state.messages;
-        renderMessages();
-      }
+      if (last?.role === 'assistant' && last.content === '') { state.messages.pop(); chat.messages = state.messages; renderMessages(); }
     }
   } finally {
     state.isGenerating = false;
@@ -1315,34 +982,31 @@ function stopGeneration() {
   }
 }
 
-// --- Password toggle ---
+// ============ PASSWORD FIELD ============
 function createPasswordField(id, placeholder) {
-  const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'position:relative; width:100%;';
+  const w = document.createElement('div');
+  w.style.cssText = 'position:relative;width:100%;';
   const input = document.createElement('input');
-  input.type = 'password';
-  input.id = id;
-  input.placeholder = placeholder;
-  input.style.cssText = 'width:100%; padding-right: 40px;';
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.innerHTML = `<i data-lucide="eye" style="width:18px; height:18px;"></i>`;
-  toggle.style.cssText = 'position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-muted); cursor:pointer;';
-  toggle.onclick = () => {
-    const isPassword = input.type === 'password';
-    input.type = isPassword ? 'text' : 'password';
-    toggle.innerHTML = `<i data-lucide="${isPassword ? 'eye-off' : 'eye'}" style="width:18px; height:18px;"></i>`;
+  input.type = 'password'; input.id = id; input.placeholder = placeholder;
+  input.style.cssText = 'width:100%;padding-right:40px;';
+  const t = document.createElement('button');
+  t.type = 'button';
+  t.innerHTML = `<i data-lucide="eye" style="width:18px;height:18px;"></i>`;
+  t.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;';
+  t.onclick = () => {
+    const isPw = input.type === 'password';
+    input.type = isPw ? 'text' : 'password';
+    t.innerHTML = `<i data-lucide="${isPw ? 'eye-off' : 'eye'}" style="width:18px;height:18px;"></i>`;
     window.refreshIcons();
   };
-  wrapper.appendChild(input);
-  wrapper.appendChild(toggle);
-  return wrapper;
+  w.appendChild(input); w.appendChild(t);
+  return w;
 }
 
-// --- Auth Modal ---
+// ============ AUTH MODAL ============
 function openAuthModal(mode = 'login') { authModal.classList.remove('hidden'); renderAuthForm(mode); }
 function closeAuthModal() { authModal.classList.add('hidden'); }
-modalClose.forEach(btn => btn.addEventListener('click', closeAuthModal));
+modalClose.forEach(b => b.addEventListener('click', closeAuthModal));
 authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
 
 function renderAuthForm(mode) {
@@ -1359,143 +1023,113 @@ function renderAuthForm(mode) {
     ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" />` : ''}
     <button class="btn-primary" id="authSubmitBtn" disabled>${isLogin ? 'Sign In' : 'Sign Up'}</button>
     <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
-    ${!isLogin ? `<div id="verifySection" style="display:none; margin-top:1rem;">
-      <p>We sent a verification code to your email. Enter it below:</p>
+    ${!isLogin ? `<div id="verifySection" style="display:none;margin-top:1rem;">
+      <p>We sent a verification code to your email.</p>
       <input type="text" id="verifyCode" placeholder="6-digit code" />
       <button class="btn-primary" id="verifyBtn">Verify & Create Account</button>
-      <button id="resendVerifyBtn" style="background:none;border:none;color:var(--accent);cursor:pointer;margin-top:0.5rem;">Resend code</button>
-    </div>` : ''}
-  `;
+      <button id="resendVerifyBtn" style="background:none;border:none;color:var(--accent);cursor:pointer;margin-top:.5rem;">Resend code</button>
+    </div>` : ''}`;
   document.getElementById('authPasswordWrapper').appendChild(createPasswordField('authPassword', '••••••••'));
   if (!isLogin) document.getElementById('authConfirmPasswordWrapper').appendChild(createPasswordField('authConfirmPassword', 'Confirm password'));
   window.refreshIcons();
 
   const submitBtn = document.getElementById('authSubmitBtn');
   const toggleLink = document.getElementById('authToggle');
-  const errorDiv = document.getElementById('authError');
-  const statusDiv = document.getElementById('authStatus');
+  const errDiv = document.getElementById('authError');
+  const statDiv = document.getElementById('authStatus');
   const emailInput = document.getElementById('authEmail');
-  const passwordInput = document.getElementById('authPassword');
+  const pwInput = document.getElementById('authPassword');
   const confirmInput = document.getElementById('authConfirmPassword');
   const verifySection = document.getElementById('verifySection');
 
-  function checkFields() {
-    const email = emailInput.value.trim();
-    const password = passwordInput.value;
-    let valid = email && password;
-    if (!isLogin) {
-      const confirm = confirmInput ? confirmInput.value : '';
-      valid = valid && confirm && password === confirm;
-    }
-    submitBtn.disabled = !valid;
-  }
-  emailInput.addEventListener('input', checkFields);
-  passwordInput.addEventListener('input', checkFields);
-  if (confirmInput) confirmInput.addEventListener('input', checkFields);
-  checkFields();
+  const check = () => {
+    const e = emailInput.value.trim(); const p = pwInput.value;
+    let v = e && p;
+    if (!isLogin) { const c = confirmInput?.value || ''; v = v && c && p === c; }
+    submitBtn.disabled = !v;
+  };
+  emailInput.addEventListener('input', check);
+  pwInput.addEventListener('input', check);
+  if (confirmInput) confirmInput.addEventListener('input', check);
+  check();
+  toggleLink.onclick = () => renderAuthForm(isLogin ? 'signup' : 'login');
 
-  toggleLink.addEventListener('click', () => renderAuthForm(isLogin ? 'signup' : 'login'));
-
-  submitBtn.addEventListener('click', async () => {
+  submitBtn.onclick = async () => {
     if (!isLogin) {
-      const email = emailInput.value.trim();
-      const password = passwordInput.value;
-      const confirm = confirmInput ? confirmInput.value : '';
-      if (!email || !password) { errorDiv.textContent = 'Email and password required.'; errorDiv.style.display = 'block'; return; }
-      if (password !== confirm) { errorDiv.textContent = 'Passwords do not match.'; errorDiv.style.display = 'block'; return; }
+      const email = emailInput.value.trim(), password = pwInput.value, confirm = confirmInput?.value || '';
+      if (!email || !password) { errDiv.textContent = 'All fields required'; errDiv.style.display = 'block'; return; }
+      if (password !== confirm) { errDiv.textContent = 'Passwords do not match'; errDiv.style.display = 'block'; return; }
       const fullName = document.getElementById('authFullName')?.value.trim() || email.split('@')[0];
-      errorDiv.style.display = 'none'; statusDiv.textContent = 'Sending code...'; statusDiv.style.display = 'block'; submitBtn.disabled = true;
+      errDiv.style.display = 'none'; statDiv.textContent = 'Sending code...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
       try {
         const res = await fetch('/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, fullName }) });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to send code.');
-        verifySection.style.display = 'block';
-        statusDiv.textContent = 'Verification code sent. Check your email.';
-        const verifyBtn = document.getElementById('verifyBtn');
-        const resendBtn = document.getElementById('resendVerifyBtn');
-        const codeInput = document.getElementById('verifyCode');
-        verifyBtn.onclick = async () => {
-          const code = codeInput.value.trim();
-          if (!code) { errorDiv.textContent = 'Enter the code.'; errorDiv.style.display = 'block'; return; }
-          errorDiv.style.display = 'none';
-          statusDiv.textContent = 'Verifying and creating account...';
+        if (!res.ok) throw new Error(data.error);
+        verifySection.style.display = 'block'; statDiv.textContent = 'Verification code sent.';
+        document.getElementById('verifyBtn').onclick = async () => {
+          const code = document.getElementById('verifyCode').value.trim();
+          if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
+          statDiv.textContent = 'Verifying...';
           try {
-            const confirmRes = await fetch('/api/auth/confirm-signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code }) });
-            const confirmData = await confirmRes.json();
-            if (!confirmRes.ok) throw new Error(confirmData.error || 'Verification failed.');
-            state.currentUser = confirmData.user;
-            updateAuthUI();
-            closeAuthModal();
-            showToast('Account created and verified! You are now signed in.');
+            const cr = await fetch('/api/auth/confirm-signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code }) });
+            const cd = await cr.json();
+            if (!cr.ok) throw new Error(cd.error);
+            state.currentUser = cd.user; updateAuthUI(); closeAuthModal();
+            showToast('Account created!');
             await loadCloudConversations();
-          } catch (err) { errorDiv.textContent = err.message; errorDiv.style.display = 'block'; statusDiv.style.display = 'none'; }
+          } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
-        resendBtn.onclick = async () => {
-          statusDiv.textContent = 'Resending code...'; statusDiv.style.display = 'block';
-          try {
-            const res2 = await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-            if (!res2.ok) throw new Error('Failed to resend.');
-            showToast('New code sent.'); statusDiv.textContent = 'New code sent. Check your email.';
-          } catch (err) { errorDiv.textContent = err.message; errorDiv.style.display = 'block'; }
-          finally { statusDiv.style.display = 'none'; }
+        document.getElementById('resendVerifyBtn').onclick = async () => {
+          statDiv.textContent = 'Resending...';
+          await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+          statDiv.textContent = 'New code sent.';
         };
-      } catch (err) { errorDiv.textContent = err.message; errorDiv.style.display = 'block'; statusDiv.style.display = 'none'; }
+      } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
       finally { submitBtn.disabled = false; }
     } else {
-      const email = emailInput.value.trim();
-      const password = passwordInput.value;
-      if (!email || !password) { errorDiv.textContent = 'Email and password required.'; errorDiv.style.display = 'block'; return; }
-      errorDiv.style.display = 'none'; statusDiv.textContent = 'Signing in...'; statusDiv.style.display = 'block'; submitBtn.disabled = true;
+      const email = emailInput.value.trim(), password = pwInput.value;
+      if (!email || !password) { errDiv.textContent = 'Email and password required'; errDiv.style.display = 'block'; return; }
+      errDiv.style.display = 'none'; statDiv.textContent = 'Signing in...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
       try {
-        const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Login failed');
+        const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
         if (data.requires2fa) {
-          statusDiv.textContent = 'Please enter your 2FA code';
           authModalBody.innerHTML = `<h2>Two-Factor Authentication</h2>
             <p style="margin-bottom:1rem;">Enter the code from your authenticator app.</p>
-            <label>Code</label>
-            <input type="text" id="twofaCode" placeholder="6-digit code" />
-            <button class="btn-primary" id="twofaSubmitBtn">Verify</button>
+            <label>Code</label><input type="text" id="twofaCode" placeholder="6-digit code" />
+            <button class="btn-primary" id="twofaBtn">Verify</button>
             <div id="twofaError" class="error-msg" style="display:none;"></div>`;
           window.refreshIcons();
-          document.getElementById('twofaSubmitBtn').addEventListener('click', async () => {
+          document.getElementById('twofaBtn').onclick = async () => {
             const code = document.getElementById('twofaCode').value.trim();
-            if (!code) { document.getElementById('twofaError').textContent = 'Enter the code.'; document.getElementById('twofaError').style.display = 'block'; return; }
+            if (!code) { document.getElementById('twofaError').textContent = 'Enter code'; document.getElementById('twofaError').style.display = 'block'; return; }
             try {
-              const verifyRes = await fetch('/api/auth/2fa/validate-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tempToken: data.tempToken, code }) });
-              const verifyData = await verifyRes.json();
-              if (!verifyRes.ok) throw new Error(verifyData.error || 'Invalid code');
-              state.currentUser = verifyData.user; updateAuthUI(); closeAuthModal();
-              showToast('Signed in successfully!'); await loadCloudConversations();
-            } catch (err) { document.getElementById('twofaError').textContent = err.message; document.getElementById('twofaError').style.display = 'block'; }
-          });
+              const vr = await fetch('/api/auth/2fa/validate-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tempToken: data.tempToken, code }) });
+              const vd = await vr.json();
+              if (!vr.ok) throw new Error(vd.error);
+              state.currentUser = vd.user; updateAuthUI(); closeAuthModal(); showToast('Signed in!'); await loadCloudConversations();
+            } catch (e) { document.getElementById('twofaError').textContent = e.message; document.getElementById('twofaError').style.display = 'block'; }
+          };
           return;
         }
-        state.currentUser = data.user; updateAuthUI(); closeAuthModal();
-        showToast('Signed in successfully!'); await loadCloudConversations();
-      } catch (err) { errorDiv.textContent = err.message; errorDiv.style.display = 'block'; statusDiv.style.display = 'none'; }
+        state.currentUser = data.user; updateAuthUI(); closeAuthModal(); showToast('Signed in!'); await loadCloudConversations();
+      } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
       finally { submitBtn.disabled = false; }
     }
-  });
+  };
 }
 
-// --- Account Modal ---
+// ============ ACCOUNT MODAL ============
 async function openAccountModal() {
   if (!state.currentUser) return;
   let profile = {};
-  try {
-    const res = await apiFetch('/api/auth/me');
-    const data = await res.json();
-    profile = data.profile || {};
-  } catch (e) {}
-
+  try { const res = await apiFetch('/api/auth/me'); const d = await res.json(); profile = d.profile || {}; } catch (e) {}
   const modal = document.createElement('div');
   modal.className = 'modal account-modal';
-  modal.id = 'accountModal';
   modal.innerHTML = `
-    <div class="modal-content account-modal-content">
-      <button class="modal-close" id="accountModalClose">&times;</button>
+    <div class="modal-content">
+      <button class="modal-close" id="accClose">&times;</button>
       <div class="account-modal-layout">
         <div class="account-tabs">
           <div class="account-tab active" data-tab="profile"><i data-lucide="user"></i> Profile</div>
@@ -1504,216 +1138,154 @@ async function openAccountModal() {
           <div class="account-tab" data-tab="sessions"><i data-lucide="monitor"></i> Sessions</div>
           <div class="account-tab logout-tab" data-tab="logout"><i data-lucide="log-out"></i> Log out</div>
         </div>
-        <div class="account-content" id="accountContent"></div>
+        <div class="account-content" id="accContent"></div>
       </div>
-    </div>
-  `;
+    </div>`;
   document.body.appendChild(modal);
-  const closeModal = () => modal.remove();
-  modal.querySelector('#accountModalClose').addEventListener('click', closeModal);
-  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+  const close = () => modal.remove();
+  modal.querySelector('#accClose').onclick = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
   const tabs = modal.querySelectorAll('.account-tab');
-  const contentArea = modal.querySelector('#accountContent');
+  const content = modal.querySelector('#accContent');
 
-  function renderTab(tabId) {
-    tabs.forEach(t => t.classList.remove('active'));
-    const activeTab = modal.querySelector(`[data-tab="${tabId}"]`);
-    if (activeTab) activeTab.classList.add('active');
-
-    if (tabId === 'logout') {
-      contentArea.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure you want to sign out?</p><button class="btn-primary" id="logoutConfirmBtn" style="background:var(--danger);">Log out</button><button class="btn-primary" id="logoutCancelBtn" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
-      contentArea.querySelector('#logoutConfirmBtn').addEventListener('click', async () => {
-        await state.supabase.auth.signOut();
-        closeModal(); showToast('Logged out');
-        state.chats = []; state.messages = []; state.activeChatId = null;
-        renderChatList(); renderMessages();
-      });
-      contentArea.querySelector('#logoutCancelBtn').addEventListener('click', () => renderTab('profile'));
+  const render = (id) => {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === id));
+    if (id === 'logout') {
+      content.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure?</p><button class="btn-primary" id="loConfirm" style="background:var(--danger);">Log out</button><button class="btn-primary" id="loCancel" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
+      content.querySelector('#loConfirm').onclick = async () => { await state.supabase.auth.signOut(); close(); showToast('Logged out'); state.chats = []; state.messages = []; state.activeChatId = null; renderChatList(); renderMessages(); };
+      content.querySelector('#loCancel').onclick = () => render('profile');
       return;
     }
-
     let html = '';
-    if (tabId === 'profile') {
-      html = `<h2>Profile</h2><div class="profile-info"><p><strong>Name:</strong> ${profile.full_name || state.currentUser.email}</p><p><strong>Email:</strong> ${state.currentUser.email}</p><p><strong>Member since:</strong> ${new Date(state.currentUser.created_at).toLocaleDateString()}</p></div>`;
-    } else if (tabId === 'account') {
-      html = `<h2>Account Settings</h2><div class="account-section"><label>Email</label><input type="email" id="changeEmailInput" value="${state.currentUser.email}" /><button class="btn-primary" id="changeEmailBtn">Change Email</button><div id="emailVerification" style="display:none; margin-top:0.5rem;"><label>Verification code</label><input type="text" id="emailCodeInput" placeholder="6-digit code" /><button class="btn-primary" id="emailVerifyBtn">Verify & Change</button></div><hr /><label>Current Password</label><div id="currentPasswordWrapper"></div><label>New Password</label><div id="newPasswordWrapper"></div><button class="btn-primary" id="changePasswordBtn">Change Password</button><div id="passwordVerification" style="display:none; margin-top:0.5rem;"><label>Verification code</label><input type="text" id="passwordCodeInput" placeholder="6-digit code" /><button class="btn-primary" id="passwordVerifyBtn">Verify & Change</button></div></div>`;
-    } else if (tabId === 'security') {
-      const twofaEnabled = profile.two_factor_enabled || false;
-      html = `<h2>Security</h2><div class="security-section"><h3>Two-Factor Authentication</h3><p>${twofaEnabled ? '2FA is currently enabled.' : '2FA is disabled.'}</p><div id="twofaSetupArea">${twofaEnabled ? `<button class="btn-primary btn-danger" id="disable2faBtn">Disable 2FA</button>` : `<button class="btn-primary" id="enable2faBtn">Enable 2FA</button><div id="twofaSetup" style="display:none; margin-top:1rem;"><div class="twofa-setup"><p>Scan this QR code with your authenticator app (e.g., Google Authenticator).</p><div id="qrCodeContainer"></div><label>Enter the 6-digit code:</label><input type="text" id="twofaSetupCode" placeholder="123456" /><button class="btn-primary" id="twofaSetupVerifyBtn">Verify & Enable</button></div></div>`}</div></div>`;
-    } else if (tabId === 'sessions') {
-      html = `<h2>Active Sessions</h2><div class="sessions-list"><p>You are logged in on this device.</p><p style="font-size:0.8rem;color:var(--text-muted);">No other sessions detected.</p></div>`;
-    }
-    contentArea.innerHTML = html;
+    if (id === 'profile') html = `<h2>Profile</h2><div class="profile-info"><p><strong>Name:</strong> ${profile.full_name || state.currentUser.email}</p><p><strong>Email:</strong> ${state.currentUser.email}</p><p><strong>Member since:</strong> ${new Date(state.currentUser.created_at).toLocaleDateString()}</p></div>`;
+    else if (id === 'account') html = `<h2>Account Settings</h2><div class="account-section"><label>Email</label><input type="email" id="newEmail" value="${state.currentUser.email}" /><button class="btn-primary" id="changeEmailBtn">Change Email</button><div id="emailVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="emailCode" /><button class="btn-primary" id="emailVerifyBtn">Verify & Change</button></div><hr /><label>Current Password</label><div id="curPwWrap"></div><label>New Password</label><div id="newPwWrap"></div><button class="btn-primary" id="changePwBtn">Change Password</button><div id="pwVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="pwCode" /><button class="btn-primary" id="pwVerifyBtn">Verify & Change</button></div></div>`;
+    else if (id === 'security') { const en = profile.two_factor_enabled; html = `<h2>Security</h2><div class="security-section"><h3>Two-Factor Authentication</h3><p>${en ? 'Enabled.' : 'Disabled.'}</p>${en ? `<button class="btn-primary btn-danger" id="dis2fa">Disable 2FA</button>` : `<button class="btn-primary" id="en2fa">Enable 2FA</button><div id="twofaSetup" style="display:none;margin-top:1rem;"><div class="twofa-setup"><p>Scan with your authenticator app:</p><div id="qrCode"></div><label>Enter 6-digit code:</label><input type="text" id="twofaCodeIn" /><button class="btn-primary" id="verify2faBtn">Verify & Enable</button></div></div>`}</div>`; }
+    else if (id === 'sessions') html = `<h2>Active Sessions</h2><p>You are logged in on this device.</p>`;
+    content.innerHTML = html;
     window.refreshIcons();
 
-    if (tabId === 'account') {
-      document.getElementById('currentPasswordWrapper').appendChild(createPasswordField('currentPasswordInput', 'Current password'));
-      document.getElementById('newPasswordWrapper').appendChild(createPasswordField('newPasswordInput', 'New password'));
+    if (id === 'account') {
+      document.getElementById('curPwWrap').appendChild(createPasswordField('curPw', 'Current password'));
+      document.getElementById('newPwWrap').appendChild(createPasswordField('newPw', 'New password'));
       window.refreshIcons();
-
-      document.getElementById('changeEmailBtn').addEventListener('click', async () => {
-        const newEmail = document.getElementById('changeEmailInput').value.trim();
-        if (!newEmail || newEmail === state.currentUser.email) { showToast('Please enter a different email.', true); return; }
+      document.getElementById('changeEmailBtn').onclick = async () => {
+        const newEmail = document.getElementById('newEmail').value.trim();
+        if (!newEmail || newEmail === state.currentUser.email) { showToast('Different email required', true); return; }
         try {
           await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
-          showToast('Verification code sent to your email.');
-          document.getElementById('emailVerification').style.display = 'block';
-          document.getElementById('emailVerifyBtn').addEventListener('click', async () => {
-            const code = document.getElementById('emailCodeInput').value.trim();
-            if (!code) { showToast('Enter code.', true); return; }
+          showToast('Code sent.'); document.getElementById('emailVerify').style.display = 'block';
+          document.getElementById('emailVerifyBtn').onclick = async () => {
+            const code = document.getElementById('emailCode').value.trim();
             try {
               await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-email' }) });
               await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail }) });
-              showToast('Email changed! Please verify the new email.');
-              closeModal();
-            } catch (err) { showToast(err.message, true); }
-          });
-        } catch (err) { showToast(err.message, true); }
-      });
-
-      document.getElementById('changePasswordBtn').addEventListener('click', async () => {
-        const current = document.getElementById('currentPasswordInput').value;
-        const newPw = document.getElementById('newPasswordInput').value;
-        if (!current || !newPw) { showToast('Please fill in both password fields.', true); return; }
-        if (newPw.length < 8) { showToast('New password must be at least 8 characters.', true); return; }
+              showToast('Email changed.'); close();
+            } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      };
+      document.getElementById('changePwBtn').onclick = async () => {
+        const cur = document.getElementById('curPw').value, np = document.getElementById('newPw').value;
+        if (!cur || !np) { showToast('Fill both fields', true); return; }
+        if (np.length < 8) { showToast('Min 8 chars', true); return; }
         try {
           await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
-          showToast('Verification code sent to your email.');
-          document.getElementById('passwordVerification').style.display = 'block';
-          document.getElementById('passwordVerifyBtn').addEventListener('click', async () => {
-            const code = document.getElementById('passwordCodeInput').value.trim();
-            if (!code) { showToast('Enter code.', true); return; }
+          showToast('Code sent.'); document.getElementById('pwVerify').style.display = 'block';
+          document.getElementById('pwVerifyBtn').onclick = async () => {
+            const code = document.getElementById('pwCode').value.trim();
             try {
               await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-password' }) });
-              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: current, newPassword: newPw }) });
-              showToast('Password changed successfully.');
-              closeModal();
-            } catch (err) { showToast(err.message, true); }
-          });
-        } catch (err) { showToast(err.message, true); }
+              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: np }) });
+              showToast('Password changed.'); close();
+            } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      };
+    }
+    if (id === 'security') {
+      document.getElementById('en2fa')?.addEventListener('click', async () => {
+        try {
+          const res = await apiFetch('/api/auth/2fa/enable', { method: 'POST' });
+          const d = await res.json();
+          document.getElementById('qrCode').innerHTML = `<img src="${d.qrCodeDataUrl}" class="qr-code" />`;
+          document.getElementById('twofaSetup').style.display = 'block';
+          document.getElementById('verify2faBtn').onclick = async () => {
+            const code = document.getElementById('twofaCodeIn').value.trim();
+            try { await apiFetch('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }); showToast('2FA enabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      });
+      document.getElementById('dis2fa')?.addEventListener('click', async () => {
+        try { await apiFetch('/api/auth/2fa/disable', { method: 'POST' }); showToast('2FA disabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
       });
     }
-
-    if (tabId === 'security') {
-      const enableBtn = document.getElementById('enable2faBtn');
-      const disableBtn = document.getElementById('disable2faBtn');
-      if (enableBtn) {
-        enableBtn.addEventListener('click', async () => {
-          try {
-            const res = await apiFetch('/api/auth/2fa/enable', { method: 'POST' });
-            const data = await res.json();
-            document.getElementById('qrCodeContainer').innerHTML = `<img src="${data.qrCodeDataUrl}" alt="QR Code" class="qr-code" />`;
-            document.getElementById('twofaSetup').style.display = 'block';
-            document.getElementById('twofaSetupVerifyBtn').addEventListener('click', async () => {
-              const code = document.getElementById('twofaSetupCode').value.trim();
-              if (!code) { showToast('Enter the code.', true); return; }
-              try {
-                await apiFetch('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) });
-                showToast('2FA enabled successfully.');
-                closeModal(); openAccountModal();
-              } catch (err) { showToast(err.message, true); }
-            });
-          } catch (err) { showToast(err.message, true); }
-        });
-      }
-      if (disableBtn) {
-        disableBtn.addEventListener('click', async () => {
-          try {
-            await apiFetch('/api/auth/2fa/disable', { method: 'POST' });
-            showToast('2FA disabled.'); closeModal(); openAccountModal();
-          } catch (err) { showToast(err.message, true); }
-        });
-      }
-    }
-  }
-
-  tabs.forEach(tab => tab.addEventListener('click', () => renderTab(tab.dataset.tab)));
-  renderTab('profile');
+  };
+  tabs.forEach(t => t.onclick = () => render(t.dataset.tab));
+  render('profile');
 }
 
-// --- Attachment button ---
-attachBtn.addEventListener('click', () => {
+// ============ ATTACH BUTTON ============
+attachBtn.onclick = () => {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*,.pdf,.txt,.doc,.docx';
   input.multiple = true;
   input.onchange = () => {
     const files = Array.from(input.files);
-    const maxSize = 10 * 1024 * 1024;
-    if (files.some(f => f.size > maxSize)) { showToast('Files must be smaller than 10MB.', true); return; }
-    if (state.attachments.length + files.length > MAX_ATTACHMENTS) {
-      showToast(`Maximum ${MAX_ATTACHMENTS} files at once.`, true);
-      return;
-    }
+    if (files.some(f => f.size > 10 * 1024 * 1024)) { showToast('Max 10MB per file', true); return; }
+    if (state.attachments.length + files.length > MAX_ATTACHMENTS) { showToast(`Max ${MAX_ATTACHMENTS} files`, true); return; }
     state.attachments.push(...files);
-    renderAttachments();
-    updateSendButton();
+    renderAttachments(); updateSendButton();
   };
   input.click();
-});
+};
 
-// --- Sidebar toggles ---
-sidebarToggle.addEventListener('click', () => {
+// ============ SIDEBAR ============
+sidebarToggle.onclick = () => {
   sidebar.classList.toggle('collapsed');
-  const isCollapsed = sidebar.classList.contains('collapsed');
-  sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = isCollapsed ? 'none' : 'inline';
-  sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = isCollapsed ? 'inline' : 'none';
-});
-openSidebarBtn.addEventListener('click', () => sidebar.classList.toggle('mobile-open'));
+  const c = sidebar.classList.contains('collapsed');
+  sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = c ? 'none' : 'inline';
+  sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = c ? 'inline' : 'none';
+};
+openSidebarBtn.onclick = () => sidebar.classList.toggle('mobile-open');
 document.addEventListener('click', (e) => {
-  if (window.innerWidth < 768) {
-    const isOpen = sidebar.classList.contains('mobile-open');
-    if (isOpen && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
-  }
+  if (window.innerWidth < 768 && sidebar.classList.contains('mobile-open') && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
 });
 
-// --- Main listeners ---
-newChatBtn.addEventListener('click', handleNewChat);
-sendBtn.addEventListener('click', () => { if (state.isGenerating) stopGeneration(); else sendMessage(); });
+// ============ OTHER LISTENERS ============
+newChatBtn.onclick = handleNewChat;
+sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
 messageInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!state.isGenerating) sendMessage(); }
 });
 messageInput.addEventListener('input', () => { resizeComposer(); updateSendButton(); });
-chips.forEach((chip) => {
-  chip.addEventListener('click', () => {
-    messageInput.value = chip.dataset.prompt;
-    updateSendButton();
-    sendMessage();
-  });
-});
+chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; updateSendButton(); sendMessage(); });
+document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
+shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
 
-document.getElementById('shareModalClose').addEventListener('click', () => shareModal.classList.add('hidden'));
-shareModal.addEventListener('click', (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); });
-
-// --- Share view detection ---
+// ============ SHARE VIEW ============
 async function checkShareView() {
   const path = window.location.pathname;
-  if (path.startsWith('/share/')) {
-    const token = path.split('/share/')[1];
-    if (token) {
-      state.isShareView = true;
-      document.body.classList.add('share-view');
-      try {
-        const res = await fetch(`/api/share/${token}`);
-        if (!res.ok) throw new Error('Share not found');
-        const data = await res.json();
-        state.shareMessages = data.messages || [];
-        renderMessages();
-        document.title = 'Shared Chat - AgriDeepAI';
-      } catch (err) {
-        messageList.innerHTML = `<p style="color:var(--danger);text-align:center;padding:2rem;">Error loading share: ${err.message}</p>`;
-      }
-      return true;
-    }
+  if (!path.startsWith('/share/')) return false;
+  const token = path.split('/share/')[1];
+  if (!token) return false;
+  state.isShareView = true;
+  document.body.classList.add('share-view');
+  try {
+    const res = await fetch(`/api/share/${token}`);
+    if (!res.ok) throw new Error('Share not found');
+    const data = await res.json();
+    state.shareMessages = data.messages || [];
+    renderMessages();
+    document.title = 'Shared Chat — AgriDeepAI';
+  } catch (err) {
+    messageList.innerHTML = `<p style="color:var(--danger);text-align:center;padding:2rem;">Error loading share: ${err.message}</p>`;
   }
-  return false;
+  return true;
 }
 
-// --- Init ---
+// ============ INIT ============
 (async function init() {
   const isShare = await checkShareView();
-  if (!isShare) {
-    await initSupabase();
-    updateSendButton();
-  }
+  if (!isShare) { await initSupabase(); updateSendButton(); }
 })();
