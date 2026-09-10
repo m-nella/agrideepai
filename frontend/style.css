@@ -28,6 +28,17 @@ body {
   width: 100vw;
   overflow: hidden;
 }
+body.share-view #sidebar,
+body.share-view #topBar,
+body.share-view #composerArea {
+  display: none !important;
+}
+body.share-view #mainContent {
+  width: 100%;
+}
+body.share-view #chatContainer {
+  padding: 2rem;
+}
 
 /* ===== Sidebar ===== */
 #sidebar {
@@ -407,9 +418,19 @@ body {
   color: var(--text);
 }
 .message-actions-row .icon-button-sm:active { transform: scale(0.9); }
-.message-actions-row .icon-button-sm.liked { color: var(--accent); }
-.message-actions-row .icon-button-sm.disliked { color: var(--danger); }
-.message-actions-row .icon-button-sm.copied { color: var(--accent); }
+.message-actions-row .icon-button-sm.liked {
+  background-color: var(--accent-dim);
+  color: var(--accent);
+}
+.message-actions-row .icon-button-sm.disliked {
+  background-color: rgba(232, 93, 93, 0.2);
+  color: var(--danger);
+}
+.message-actions-row .icon-button-sm.copied {
+  background-color: var(--accent-dim);
+  color: var(--accent);
+  transition: background-color 0.1s, color 0.1s;
+}
 
 .version-controls {
   display: flex;
@@ -478,9 +499,6 @@ body {
   height: 30px;
   object-fit: cover;
   border-radius: 4px;
-}
-.attachment-chip .file-name {
-  display: none;
 }
 .attachment-chip button {
   background: none; border: none;
@@ -802,7 +820,7 @@ body {
   #sidebar.collapsed .auth-btn span { display: none; }
 }
 
-/* Additional styles for 2FA, etc. */
+/* Additional styles for 2FA, attachments, etc. */
 .twofa-setup {
   display: flex;
   flex-direction: column;
@@ -821,4 +839,27 @@ body {
   max-width: 200px;
   text-align: center;
   letter-spacing: 4px;
+}
+.user-message-attachment {
+  display: inline-block;
+  margin: 0.2rem 0.2rem 0.2rem 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  max-width: 80px;
+  max-height: 80px;
+}
+.user-message-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.user-message-attachment .file-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  background: var(--surface-hover);
+  color: var(--text-muted);
 }
