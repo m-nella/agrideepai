@@ -1585,21 +1585,37 @@ async function openAccountModal() {
         const cur = data.current || {};
         const acc = data.account || {};
         const all = data.all || [];
+
+        // Determine which rows belong to THIS browser
+        const isCurrentRow = (s) => {
+          if (s.client_id && s.client_id === CLIENT_ID) return true;
+          if (!s.client_id && s.ip === cur.ip && s.user_agent === cur.user_agent) return true;
+          return false;
+        };
+
+        const otherSessions = all.filter(s => !isCurrentRow(s));
+        const currentRows = all.filter(s => isCurrentRow(s));
+
         html = `<h2>Active Sessions</h2>
           <div class="sessions-list">
             <div class="sessions-actions">
-              <button class="btn-primary btn-danger sessions-logout-all" id="logoutAllBtn">
+              <button class="btn-primary btn-danger sessions-logout-all" id="logoutAllBtn" ${otherSessions.length === 0 ? 'disabled' : ''}>
                 <i data-lucide="log-out"></i> Log out all other sessions
               </button>
             </div>
-            <h3>Current device</h3>
+
+            <h3>This device</h3>
             <p><strong>Email:</strong> ${cur.email || state.currentUser.email}</p>
             <p><strong>Browser:</strong> ${(cur.user_agent || '').substring(0, 80)}</p>
             <p><strong>IP:</strong> ${cur.ip || 'Unknown'}</p>
+            <p style="font-size:.8rem;color:var(--text-muted);margin-top:.35rem;">
+              To sign out this device, use the <strong>Log out</strong> tab on the left.
+            </p>
             <hr />
-            <h3>All recent sessions (${all.length})</h3>
+
+            <h3>Other active sessions (${otherSessions.length})</h3>
             <div id="sessionsListBody">
-            ${all.length === 0 ? '<p style="color:var(--text-muted);font-size:.85rem;">No other sessions recorded.</p>' : all.map(s => `
+            ${otherSessions.length === 0 ? '<p style="color:var(--text-muted);font-size:.85rem;">No other sessions recorded.</p>' : otherSessions.map(s => `
               <div class="session-item" data-session-id="${s.id}">
                 <div class="session-info">
                   <p><strong>Device:</strong> ${(s.device || 'Unknown').substring(0, 60)}</p>
@@ -1794,13 +1810,14 @@ async function openAccountModal() {
 
     if (id === 'sessions') {
       document.getElementById('logoutAllBtn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('logoutAllBtn');
+        if (btn && btn.disabled) return;
         const ok = await showCustomModal(
           'Log out all other sessions',
           'This will sign out every device except this one. You may need to sign in again on those devices. Continue?',
           'Log out all others', 'Cancel', true
         );
         if (!ok) return;
-        const btn = document.getElementById('logoutAllBtn');
         if (btn) { btn.disabled = true; btn.innerHTML = 'Logging out…'; }
         try {
           const r = await apiFetch('/api/auth/sessions/all', { method: 'DELETE' });
@@ -1813,6 +1830,7 @@ async function openAccountModal() {
         }
       });
 
+      // Note: no per-row logout for the CURRENT device — only for other sessions
       content.querySelectorAll('.session-logout-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const sid = btn.dataset.sessionId;
