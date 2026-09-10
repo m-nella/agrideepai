@@ -961,28 +961,21 @@ async function sendMessage() {
   if (state.isGenerating) return;
 
   let chat = state.chats.find(c => c.id === state.activeChatId);
+  let isNewlyCreated = false;
   if (!chat) {
     state.messages = [];
     if (state.currentUser) {
-      // Authenticated: create with placeholder title. Backend renames it.
       const cloud = await createChat('New Chat');
       if (!cloud) return;
-      chat = cloud; state.activeChatId = chat.id;
+      chat = cloud; state.activeChatId = chat.id; isNewlyCreated = true;
     } else {
-      // Guest: no backend — client-side title using the message text.
-      const title = (text || 'New Chat').substring(0, 42);
-      chat = createLocalChat(title);
-      state.activeChatId = chat.id;
+      chat = createLocalChat('New Chat');
+      state.activeChatId = chat.id; isNewlyCreated = true;
     }
   }
 
-  // Client-side title update ONLY for local (guest) chats.
-  if (chat.id.startsWith('local_') && (chat.title === 'New Chat' || !chat.title) && text) {
-    chat.title = text.substring(0, 42) + (text.length > 42 ? '…' : '');
-    renderChatList();
-  }
-  // For authenticated chats with title "New Chat", we DO NOT rename here.
-  // The backend generates the smart title and the post-stream reload picks it up.
+  // Detect whether this is the first message in the chat
+  const isFirstMessage = isNewlyCreated || (chat.title === 'New Chat' || !chat.title);
 
   const localFiles = state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size, public_url: URL.createObjectURL(f) }));
   const userMsg = { id: 'user_' + Date.now().toString(36), role: 'user', content: text || '[File attached]', files: localFiles, created_at: new Date().toISOString() };
@@ -998,6 +991,25 @@ async function sendMessage() {
   state.isGenerating = true; state.shouldScrollToBottom = true;
   renderMessages(); updateSendButton();
   state.abortController = new AbortController();
+
+  // --- GUEST: ask the backend for a smart title in parallel ---
+  if (isFirstMessage && !state.currentUser && text) {
+    const localChatId = chat.id;
+    fetch('/api/chat/title', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.title) {
+          const c = state.chats.find(x => x.id === localChatId);
+          if (c) { c.title = d.title; renderChatList(); }
+        }
+      })
+      .catch(() => {});
+  }
+  // --- END guest title request ---
 
   try {
     let response;
