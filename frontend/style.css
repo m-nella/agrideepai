@@ -23,6 +23,7 @@ html, body {
   overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
 }
+html.is-share-view, html.is-share-view body { background: #171b20; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--background);
@@ -245,8 +246,11 @@ input, textarea, select { font-size: var(--input-font) !important; }
 .modal-content .error-msg { color: var(--danger); font-size: .85rem; margin-top: .3rem; }
 .modal-content .status-msg { color: var(--text-muted); font-size: .85rem; margin-top: .3rem; }
 .modal-content hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+
+/* Countdown-aware resend button */
 .link-btn { background: none; border: none; color: var(--accent); cursor: pointer; margin-top: .5rem; font-size: .9rem; padding: .5rem; min-height: 40px; }
 .link-btn:hover { text-decoration: underline; }
+.link-btn:disabled { color: var(--text-muted); cursor: not-allowed; text-decoration: none; opacity: .7; }
 
 /* ===== Account Modal ===== */
 .account-modal .modal-content { max-width: 700px; width: 95%; padding: 1.5rem; }
@@ -279,7 +283,19 @@ input, textarea, select { font-size: var(--input-font) !important; }
 /* ===== Lightbox ===== */
 .lightbox-overlay { animation: fadeIn .2s ease; }
 
-/* ===== SHARE VIEW ===== */
+/* ===== SHARE VIEW (hardened: applies via html class set by inline <head> script) ===== */
+html.is-share-view body,
+body.share-view {
+  background: var(--background) !important;
+  overflow: hidden;
+}
+html.is-share-view #sidebar,
+html.is-share-view #topBar,
+html.is-share-view #composerArea,
+html.is-share-view #welcomeScreen,
+html.is-share-view .welcome-logo,
+html.is-share-view .suggestion-chips,
+html.is-share-view .footer-note,
 body.share-view #sidebar,
 body.share-view #topBar,
 body.share-view #composerArea,
@@ -287,9 +303,25 @@ body.share-view #welcomeScreen,
 body.share-view .welcome-logo,
 body.share-view .suggestion-chips,
 body.share-view .footer-note { display: none !important; }
-body.share-view #mainContent { width: 100%; max-width: 100%; }
-body.share-view #chatContainer { padding: 4rem 1rem 2rem; max-width: 900px; margin: 0 auto; width: 100%; }
-body.share-view #messageList { display: flex !important; gap: 1.5rem; }
+
+html.is-share-view #app,
+body.share-view #app { display: block; width: 100vw; height: 100dvh; }
+html.is-share-view #mainContent,
+body.share-view #mainContent { width: 100%; max-width: 100%; height: 100dvh; display: block; }
+html.is-share-view #chatContainer,
+body.share-view #chatContainer {
+  padding: 4.25rem 1rem 2rem;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  height: 100dvh;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+html.is-share-view #messageList,
+body.share-view #messageList { display: flex !important; gap: 1.5rem; flex-direction: column; }
+
+html.is-share-view body::before,
 body.share-view::before {
   content: "Shared Chat — AgriDeepAI";
   display: block;
@@ -340,7 +372,7 @@ body.share-view::before {
   .account-tabs::-webkit-scrollbar { display: none; }
   .account-tab { white-space: nowrap; padding: .5rem .7rem; }
   .account-content { max-height: none; }
-  body.share-view #chatContainer { padding: 4rem .75rem 1rem; }
+  body.share-view #chatContainer, html.is-share-view #chatContainer { padding: 4.25rem .75rem 1rem; }
   .user-message-attachment { width: 64px; height: 64px; }
 }
 
@@ -374,48 +406,14 @@ body.share-view::before {
   #welcomeScreen { gap: .4rem; }
   .welcome-logo { height: 50px; }
 }
+
 /* Manual secret for 2FA */
-.manual-secret {
-  margin-top: .75rem;
-  width: 100%;
-}
-.secret-box {
-  display: flex;
-  align-items: center;
-  gap: .4rem;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: .5rem .6rem;
-  margin-top: .3rem;
-}
-.secret-box code {
-  flex: 1;
-  font-family: monospace;
-  font-size: .75rem;
-  word-break: break-all;
-  color: var(--text);
-  user-select: all;
-}
-.copy-secret-btn {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: .3rem .6rem;
-  font-size: .75rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
+.manual-secret { margin-top: .75rem; width: 100%; }
+.secret-box { display: flex; align-items: center; gap: .4rem; background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .5rem .6rem; margin-top: .3rem; }
+.secret-box code { flex: 1; font-family: monospace; font-size: .75rem; word-break: break-all; color: var(--text); user-select: all; }
+.copy-secret-btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: .3rem .6rem; font-size: .75rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .copy-secret-btn:hover { background: var(--accent-hover); }
 
 /* Session items */
-.session-item {
-  padding: .5rem;
-  border-radius: 6px;
-  background: var(--surface-hover);
-  margin-bottom: .4rem;
-  font-size: .85rem;
-}
+.session-item { padding: .5rem; border-radius: 6px; background: var(--surface-hover); margin-bottom: .4rem; font-size: .85rem; }
 .session-item p { margin: .15rem 0; word-break: break-word; }
