@@ -41,7 +41,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'agrideepai-set-JWT_SECRET-in-env';
 const signPending = (payload, ttl = 900) => jwt.sign(payload, JWT_SECRET, { expiresIn: ttl });
 const verifyPending = (token) => { try { return jwt.verify(token, JWT_SECRET); } catch { return null; } };
 
-// ============ AI PROVIDERS ============
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'groq/compound'];
@@ -55,7 +54,13 @@ const FHROUTER_VISION_MODELS = [];
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TEXT_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3-235b-a22b:free', 'mistralai/mistral-7b-instruct:free'];
-const OPENROUTER_VISION_MODELS = ['qwen/qwen2.5-vl-72b-instruct:free'];
+// Multiple vision fallbacks — if one 404s, next tries
+const OPENROUTER_VISION_MODELS = [
+  'google/gemini-2.0-flash-exp:free',
+  'meta-llama/llama-3.2-11b-vision-instruct:free',
+  'qwen/qwen-2-vl-7b-instruct:free',
+  'google/gemma-3-27b-it:free',
+];
 
 const openRouterCooldown = {};
 const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 1000; };
@@ -87,15 +92,88 @@ app.get('/api/debug/groq-models', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-async function getAIStream(chatMessages, imageData = null) {
+// Recursive: vision attempt first, then fall back to text-only
+async function getAIStream(chatMessages, imageData = null, isVisionRetry = false) {
   const errors = [];
+  const usingVision = !!imageData && !isVisionRetry;
 
+  if (usingVision) {
+    if (groq) {
+      for (const model of GROQ_VISION_MODELS) {
+        try {
+          const stream = await groq.chat.completions.create({ model, messages: chatMessages, temperature: 0.6, max_tokens: 1500, stream: true });
+          log(`✅ Using Groq vision: ${model}`, 'info');
+          return { stream, provider: 'groq', model };
+        } catch (err) { errors.push(`groq:${model}`); }
+      }
+    }
+    if (FHROUTER_API_KEY) {
+      for (const model of FHROUTER_VISION_MODELS) {
+        const cdKey = `fhrouter-v:${model}`;
+        if (isCoolingDown(cdKey)) continue;
+        try {
+          const response = await axios.post(FHROUTER_URL, {
+            model, messages: chatMessages, temperature: 0.6, max_tokens: 1500, stream: true,
+          }, {
+            headers: { 'Authorization': `Bearer ${FHROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+            responseType: 'stream', timeout: 45000,
+          });
+          log(`✅ Using FHRouter vision: ${model}`, 'info');
+          return { stream: response.data, provider: 'fhrouter', model };
+        } catch (err) {
+          const status = err.response?.status;
+          errors.push(`fhrouter:${model}`);
+          if (status === 429) markCooldown(cdKey, 120);
+          if (status === 404 || status === 400) markCooldown(cdKey, 300);
+        }
+      }
+    }
+    if (OPENROUTER_API_KEY) {
+      for (const model of OPENROUTER_VISION_MODELS) {
+        const cdKey = `openrouter-v:${model}`;
+        if (isCoolingDown(cdKey)) continue;
+        try {
+          const visionMessages = chatMessages.map((m, i) => {
+            if (i === chatMessages.length - 1 && m.role === 'user') {
+              const parts = [];
+              if (m.content) parts.push({ type: 'text', text: m.content });
+              parts.push({ type: 'image_url', image_url: { url: `data:${imageData.mimeType};base64,${imageData.base64}` } });
+              return { role: 'user', content: parts };
+            }
+            return m;
+          });
+          const response = await axios.post(OPENROUTER_URL, {
+            model, messages: visionMessages, temperature: 0.6, max_tokens: 1500, stream: true,
+          }, {
+            headers: {
+              'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': process.env.FRONTEND_URL || 'https://agrideepai.agentdomains.co',
+              'X-Title': 'AgriDeepAI',
+            },
+            responseType: 'stream', timeout: 45000,
+          });
+          log(`✅ Using OpenRouter vision: ${model}`, 'info');
+          return { stream: response.data, provider: 'openrouter', model };
+        } catch (err) {
+          const status = err.response?.status;
+          errors.push(`openrouter:${model}`);
+          if (status === 429) markCooldown(cdKey, 120);
+          if (status === 404 || status === 400) markCooldown(cdKey, 300);
+        }
+      }
+    }
+    // ALL vision failed → fall through to text-only (OCR text already in prompt)
+    log(`Vision path failed (${errors.join(', ') || 'no vision providers'}), retrying text-only`, 'warn');
+    return getAIStream(chatMessages, null, true);
+  }
+
+  // Text-only path
   if (groq) {
-    const models = imageData ? GROQ_VISION_MODELS : GROQ_TEXT_MODELS;
-    for (const model of models) {
+    for (const model of GROQ_TEXT_MODELS) {
       try {
         const stream = await groq.chat.completions.create({ model, messages: chatMessages, temperature: 0.6, max_tokens: 1500, stream: true });
-        log(`✅ Using Groq: ${model}${imageData ? ' (vision)' : ''}`, 'info');
+        log(`✅ Using Groq: ${model}`, 'info');
         return { stream, provider: 'groq', model };
       } catch (err) {
         log(`⚠️ Groq ${model}: ${String(err.message).slice(0, 120)}`, 'warn');
@@ -103,10 +181,8 @@ async function getAIStream(chatMessages, imageData = null) {
       }
     }
   }
-
   if (FHROUTER_API_KEY) {
-    const models = imageData ? FHROUTER_VISION_MODELS : FHROUTER_TEXT_MODELS;
-    for (const model of models) {
+    for (const model of FHROUTER_TEXT_MODELS) {
       const cdKey = `fhrouter:${model}`;
       if (isCoolingDown(cdKey)) continue;
       try {
@@ -127,27 +203,13 @@ async function getAIStream(chatMessages, imageData = null) {
       }
     }
   }
-
   if (OPENROUTER_API_KEY) {
-    const models = imageData ? OPENROUTER_VISION_MODELS : OPENROUTER_TEXT_MODELS;
-    for (const model of models) {
+    for (const model of OPENROUTER_TEXT_MODELS) {
       const cdKey = `openrouter:${model}`;
       if (isCoolingDown(cdKey)) continue;
       try {
-        let finalMessages = chatMessages;
-        if (imageData) {
-          finalMessages = chatMessages.map((m, i) => {
-            if (i === chatMessages.length - 1 && m.role === 'user') {
-              const parts = [];
-              if (m.content) parts.push({ type: 'text', text: m.content });
-              parts.push({ type: 'image_url', image_url: { url: `data:${imageData.mimeType};base64,${imageData.base64}` } });
-              return { role: 'user', content: parts };
-            }
-            return m;
-          });
-        }
         const response = await axios.post(OPENROUTER_URL, {
-          model, messages: finalMessages, temperature: 0.6, max_tokens: 1500, stream: true,
+          model, messages: chatMessages, temperature: 0.6, max_tokens: 1500, stream: true,
         }, {
           headers: {
             'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
@@ -249,8 +311,9 @@ async function streamAI(messages, res, imageData = null, onDone = null) {
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 async function tavilySearch(query) {
   if (!TAVILY_API_KEY) return null;
-  const q = (query || '').trim();
+  let q = (query || '').trim();
   if (q.length < 3) return null;
+  if (q.length > 1400) q = q.substring(0, 1400);
   try {
     const r = await axios.post('https://api.tavily.com/search', {
       query: q, search_depth: 'basic',
@@ -439,21 +502,15 @@ async function trackSession(userId, email, req) {
     const ua = req.headers['user-agent'] || 'Unknown';
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
     const { data: recent, error: recentErr } = await supabase.from('sessions')
       .select('*').eq('user_id', userId).gte('last_active', thirtyDaysAgo);
     if (recentErr) log(`trackSession read error: ${recentErr.message}`, 'warn');
-
     const isNewDevice = !recent || !recent.some(s => s.ip === ip && s.user_agent === ua);
     const hasAnyPrevious = !!(recent && recent.length > 0);
-
     const { error: insErr } = await supabase.from('sessions').insert({
-      user_id: userId,
-      device: ua.substring(0, 120),
-      ip, user_agent: ua,
+      user_id: userId, device: ua.substring(0, 120), ip, user_agent: ua,
     });
     if (insErr) log(`trackSession insert error: ${insErr.message}`, 'error');
-
     if (isNewDevice && hasAnyPrevious && email) {
       sendLoginNotification(email, ip, ua.substring(0, 120), new Date().toLocaleString())
         .catch(e => log(`Login notification failed: ${e.message}`, 'warn'));
@@ -461,7 +518,6 @@ async function trackSession(userId, email, req) {
   } catch (err) { log(`trackSession error: ${err.message}`, 'warn'); }
 }
 
-// ============ AUTH ROUTES ============
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -518,10 +574,8 @@ app.post('/api/auth/login', async (req, res) => {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const pendingToken = signPending({
       type: 'login', email, code,
-      access_token: data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      user: data.user,
-      two_factor_enabled: !!profile?.two_factor_enabled,
+      access_token: data.session.access_token, refresh_token: data.session.refresh_token,
+      user: data.user, two_factor_enabled: !!profile?.two_factor_enabled,
     });
     await sendVerificationEmail(email, code, 'login', 'Use the code below to complete your sign-in.');
     res.json({ requiresCode: true, email, pendingToken, message: 'Verification code sent to your email.' });
@@ -551,8 +605,7 @@ app.post('/api/auth/verify-login', async (req, res) => {
       return res.json({ requires2fa: true, twoFactorToken, message: 'Email verified. Now enter your 2FA code.' });
     }
     await trackSession(p.user.id, p.user.email, req);
-    const session = { access_token: p.access_token, refresh_token: p.refresh_token };
-    res.json({ user: p.user, session, message: 'Login successful' });
+    res.json({ user: p.user, session: { access_token: p.access_token, refresh_token: p.refresh_token }, message: 'Login successful' });
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
 });
 
@@ -566,8 +619,7 @@ app.post('/api/auth/2fa/validate-login', async (req, res) => {
     const verified = speakeasy.totp.verify({ secret: profile.two_factor_secret, encoding: 'base32', token: code, window: 1 });
     if (!verified) return res.status(400).json({ error: 'Invalid 2FA code' });
     await trackSession(p.user.id, p.user.email, req);
-    const session = { access_token: p.access_token, refresh_token: p.refresh_token };
-    res.json({ user: p.user, session, message: 'Login successful' });
+    res.json({ user: p.user, session: { access_token: p.access_token, refresh_token: p.refresh_token }, message: 'Login successful' });
   } catch (err) { res.status(500).json({ error: 'Failed to validate 2FA' }); }
 });
 
@@ -592,7 +644,6 @@ app.post('/api/auth/verify-code', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
 });
 
-// NEW: verify current password before sending code
 app.post('/api/auth/verify-current-password', authenticate, async (req, res) => {
   try {
     const { password } = req.body;
@@ -677,9 +728,7 @@ app.get('/api/auth/sessions', authenticate, async (req, res) => {
   try {
     const ua = req.headers['user-agent'] || 'Unknown';
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
-    const { data: sessions, error } = await supabase.from('sessions')
-      .select('*').eq('user_id', req.user.id)
-      .order('last_active', { ascending: false });
+    const { data: sessions, error } = await supabase.from('sessions').select('*').eq('user_id', req.user.id).order('last_active', { ascending: false });
     if (error) log(`sessions fetch error: ${error.message}`, 'warn');
     res.json({
       current: { user_agent: ua, ip, signed_in_at: new Date().toISOString(), email: req.user.email },
