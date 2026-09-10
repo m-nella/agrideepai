@@ -41,17 +41,17 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
-// Groq models (current — updated Sep 2026)
+// ============ THE FIX: Correct model names from /api/debug/groq-models ============
 const GROQ_TEXT_MODELS = [
-  'openai/gpt-oss-120b',
-  'openai/gpt-oss-20b',
-  'meta-llama/llama-4-scout-17b-16e-instruct',
-  'qwen/qwen3-32b',
-  'deepseek-r1-distill-llama-70b',
+  'openai/gpt-oss-120b',      // ✅ Verified on your key - most capable
+  'openai/gpt-oss-20b',       // ✅ Verified on your key - fast
+  'qwen/qwen3.8-27b',         // ✅ Verified on your key
+  'qwen/qwen3.6-27b',         // ✅ Verified on your key
+  'groq/compound',            // ✅ Verified on your key - agentic
 ];
 const GROQ_VISION_MODELS = [
-  'meta-llama/llama-4-scout-17b-16e-instruct',
-  'meta-llama/llama-4-maverick-17b-128e-instruct',
+  'qwen/qwen3.8-27b',         // ✅ Verified - text + image
+  'qwen/qwen3.6-27b',         // ✅ Verified - text + image
 ];
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -62,12 +62,10 @@ const OPENROUTER_TEXT_MODELS = [
   'qwen/qwen3-235b-a22b:free',
   'mistralai/mistral-7b-instruct:free',
   'google/gemma-3-27b-it:free',
-  'deepseek/deepseek-r1:free',
 ];
 const OPENROUTER_VISION_MODELS = [
-  'minimax/minimax-m3:free',
-  'thinkingmachines/inkling:free',
-  'google/gemma-4-31b-it:free',
+  'qwen/qwen2.5-vl-72b-instruct:free',
+  'google/gemma-3-27b-it:free',
 ];
 
 const openRouterCooldown = {};
@@ -99,14 +97,14 @@ async function getAIStream(chatMessages, imageData = null) {
           model,
           messages: chatMessages,
           temperature: 0.6,
-          max_tokens: 900,
+          max_tokens: 1500,
           stream: true,
         });
         log(`✅ Using Groq model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
         return { stream, provider: 'groq', model };
       } catch (err) {
         const msg = err.message || String(err);
-        log(`⚠️ Groq ${model} failed: ${msg.slice(0, 120)}`, 'warn');
+        log(`⚠️ Groq ${model} failed: ${msg.slice(0, 150)}`, 'warn');
         errors.push(`groq:${model}`);
       }
     }
@@ -136,7 +134,7 @@ async function getAIStream(chatMessages, imageData = null) {
           model,
           messages: finalMessages,
           temperature: 0.6,
-          max_tokens: 900,
+          max_tokens: 1500,
           stream: true,
         }, {
           headers: {
@@ -383,7 +381,6 @@ async function sendVerificationEmail(email, code, action = 'verify', extra = '')
 
 // ============ AUTH ROUTES ============
 
-// Signup — step 1: request code
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -401,7 +398,6 @@ app.post('/api/auth/signup', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-// Signup — step 2: confirm and create account
 app.post('/api/auth/confirm-signup', async (req, res) => {
   try {
     const { email, code } = req.body;
@@ -423,7 +419,6 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-// Resend verification code
 app.post('/api/auth/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
@@ -436,14 +431,12 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to resend code.' }); }
 });
 
-// Login — step 1: password check + send email code
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    // Check 2FA
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', data.user.id).single();
     const code = generateCode();
     pendingLogins[email] = {
@@ -453,7 +446,6 @@ app.post('/api/auth/login', async (req, res) => {
       twoFactorValidated: false,
     };
     await sendVerificationEmail(email, code, 'login', 'Use the code below to complete your sign-in.');
-    // Sign out the temp session we don't want to leak
     await supabase.auth.signOut();
     res.json({ requiresCode: true, email, message: 'Verification code sent to your email.' });
   } catch (err) {
@@ -462,7 +454,6 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Login — step 2a: verify email code
 app.post('/api/auth/verify-login', async (req, res) => {
   try {
     const { email, code } = req.body;
@@ -471,15 +462,12 @@ app.post('/api/auth/verify-login', async (req, res) => {
     if (!pending) return res.status(400).json({ error: 'No pending login. Please sign in again.' });
     if (pending.code !== code || Date.now() > pending.expires)
       return res.status(400).json({ error: 'Invalid or expired code.' });
-    // If 2FA is enabled, require the second step
     if (pending.twoFactorEnabled && !pending.twoFactorValidated) {
       const tempToken = crypto.randomBytes(32).toString('hex');
       twoFactorStore[tempToken] = { email, expires: Date.now() + 10 * 60 * 1000 };
-      // Keep pending logins but mark email verified
       pending.emailVerified = true;
       return res.json({ requires2fa: true, tempToken, message: 'Email verified. Now enter your 2FA code.' });
     }
-    // Complete login
     const session = pending.session;
     const user = pending.user;
     delete pendingLogins[email];
@@ -490,13 +478,11 @@ app.post('/api/auth/verify-login', async (req, res) => {
   }
 });
 
-// Login — step 2b: verify 2FA code
 app.post('/api/auth/2fa/validate-login', async (req, res) => {
   try {
     const { tempToken, code } = req.body;
     const entry = twoFactorStore[tempToken];
     if (!entry || Date.now() > entry.expires) return res.status(400).json({ error: 'Invalid or expired token' });
-    const { data: profile } = await supabase.from('profiles').select('two_factor_secret, two_factor_enabled').eq('id', pendingLogins[entry.email]?.user?.id || '').single();
     const pending = pendingLogins[entry.email];
     if (!pending) return res.status(400).json({ error: 'Session expired. Please sign in again.' });
     const { data: p2 } = await supabase.from('profiles').select('two_factor_secret').eq('id', pending.user.id).single();
@@ -516,7 +502,6 @@ app.post('/api/auth/2fa/validate-login', async (req, res) => {
   }
 });
 
-// Send verification code for authenticated actions
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
     const { action } = req.body;
@@ -528,7 +513,6 @@ app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to send code.' }); }
 });
 
-// Verify code for authenticated actions
 app.post('/api/auth/verify-code', authenticate, async (req, res) => {
   try {
     const { code, action } = req.body;
@@ -580,7 +564,6 @@ app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ============ 2FA ROUTES ============
 app.post('/api/auth/2fa/enable', authenticate, async (req, res) => {
   try {
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', req.user.id).single();
@@ -611,16 +594,13 @@ app.post('/api/auth/2fa/disable', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to disable 2FA' }); }
 });
 
-// Sessions — return info about current session
 app.get('/api/auth/sessions', authenticate, async (req, res) => {
   try {
-    const { data: profile } = await supabase.from('profiles').select('*').eq('id', req.user.id).single();
     const ua = req.headers['user-agent'] || 'Unknown';
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
     res.json({
       current: {
-        user_agent: ua,
-        ip,
+        user_agent: ua, ip,
         signed_in_at: new Date().toISOString(),
         email: req.user.email,
       },
@@ -661,7 +641,6 @@ async function enrichWithWebSearch(query) {
   return query;
 }
 
-// ============ GUEST CHAT ============
 app.post('/api/chat/guest', async (req, res) => {
   try {
     const { messages, image } = req.body;
@@ -683,7 +662,6 @@ app.post('/api/chat/guest', async (req, res) => {
   }
 });
 
-// ============ AUTHENTICATED CHAT ============
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { data, error } = await supabase.from('conversations').select('*')
@@ -774,7 +752,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         mime_type: file.mimetype, size: file.size,
       });
       if (file.mimetype.startsWith('image/')) {
-        // Limit to ~2MB base64 to avoid timeouts
         if (file.size > 4 * 1024 * 1024) {
           log('Image too large, skipping vision', 'warn');
         } else {
@@ -899,16 +876,12 @@ app.get('/api/share/:token', async (req, res) => {
 
 // ============ SERVE FRONTEND ============
 const frontendPath = path.join(__dirname, '../frontend');
-
-// Serve share routes with no-cache so fresh index.html loads
 app.get('/share/*', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.sendFile(path.join(frontendPath, 'index.html'));
 });
-
-// Static files with cache-busting for HTML and CSS
 app.use(express.static(frontendPath, {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.html') || filePath.endsWith('.css') || filePath.endsWith('.js')) {
@@ -916,11 +889,11 @@ app.use(express.static(frontendPath, {
     }
   }
 }));
-
 app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
   log(`Primary: ${GROQ_API_KEY ? 'Groq' : 'none'} | Fallback: ${OPENROUTER_API_KEY ? 'OpenRouter' : 'none'}`, 'info');
-  log(`Diagnostic: GET /api/debug/groq-models to list available Groq models`, 'info');
+  log(`Groq text models: ${GROQ_TEXT_MODELS.join(', ')}`, 'info');
+  log(`Groq vision models: ${GROQ_VISION_MODELS.join(', ')}`, 'info');
 });
