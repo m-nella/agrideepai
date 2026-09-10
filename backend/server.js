@@ -28,22 +28,24 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 200,
+  windowMs: 15 * 60 * 1000,
+  max: 200,
   message: 'Too many requests, please try again later.',
-  standardHeaders: true, legacyHeaders: false,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
+// ---------- Supabase ----------
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
 // ============ AI PROVIDERS ============
 
-// --- Groq (PRIMARY — most reliable free tier) ---
+// --- Groq (PRIMARY) ---
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
-// Current Groq models (verified working as of 2026)
 const GROQ_TEXT_MODELS = [
   'llama-3.3-70b-versatile',
   'llama-3.1-8b-instant',
@@ -72,26 +74,16 @@ const OPENROUTER_VISION_MODELS = [
   'meta-llama/llama-3.2-90b-vision-instruct:free',
 ];
 
-// Track recently-failed OpenRouter models to avoid hammering them
+// Track recently-failed OpenRouter models
 const openRouterCooldown = {};
-function markCooldown(model, seconds = 90) {
-  openRouterCooldown[model] = Date.now() + seconds * 1000;
-}
-function isCoolingDown(model) {
-  return openRouterCooldown[model] && Date.now() < openRouterCooldown[model];
-}
+function markCooldown(model, seconds = 120) { openRouterCooldown[model] = Date.now() + seconds * 1000; }
+function isCoolingDown(model) { return openRouterCooldown[model] && Date.now() < openRouterCooldown[model]; }
 
-// ============ AI STREAMING ============
-
-/**
- * Streams a chat completion. Tries Groq first (with model fallback),
- * then falls back to OpenRouter (with model fallback).
- * Returns { stream, provider, model }.
- */
+// ---------- AI Streaming ----------
 async function getAIStream(chatMessages, imageData = null) {
   const errors = [];
 
-  // -------- 1) Try Groq --------
+  // 1) Groq
   if (groq) {
     const models = imageData ? GROQ_VISION_MODELS : GROQ_TEXT_MODELS;
     for (const model of models) {
@@ -100,7 +92,7 @@ async function getAIStream(chatMessages, imageData = null) {
           model,
           messages: chatMessages,
           temperature: 0.6,
-          max_tokens: 800,
+          max_tokens: 900,
           stream: true,
         });
         log(`✅ Using Groq model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
@@ -108,23 +100,18 @@ async function getAIStream(chatMessages, imageData = null) {
       } catch (err) {
         const msg = err.message || String(err);
         log(`⚠️ Groq ${model} failed: ${msg}`, 'warn');
-        errors.push(`groq:${model}=${msg.slice(0, 100)}`);
-        // If it's a rate limit, move on instantly
-        if (msg.includes('429') || msg.includes('rate')) continue;
+        errors.push(`groq:${model}=${msg.slice(0, 80)}`);
       }
     }
   } else {
     log('Groq not configured (no GROQ_API_KEY)', 'warn');
   }
 
-  // -------- 2) Try OpenRouter --------
+  // 2) OpenRouter
   if (OPENROUTER_API_KEY) {
     const models = imageData ? OPENROUTER_VISION_MODELS : OPENROUTER_TEXT_MODELS;
     for (const model of models) {
-      if (isCoolingDown(model)) {
-        log(`⏭️ Skipping ${model} (cooling down)`, 'debug');
-        continue;
-      }
+      if (isCoolingDown(model)) continue;
       try {
         let finalMessages = chatMessages;
         if (imageData) {
@@ -145,7 +132,7 @@ async function getAIStream(chatMessages, imageData = null) {
           model,
           messages: finalMessages,
           temperature: 0.6,
-          max_tokens: 800,
+          max_tokens: 900,
           stream: true,
         }, {
           headers: {
@@ -172,10 +159,9 @@ async function getAIStream(chatMessages, imageData = null) {
     log('OpenRouter not configured (no OPENROUTER_API_KEY)', 'warn');
   }
 
-  throw new Error(`All AI providers failed. Details: ${errors.slice(-4).join(' | ')}`);
+  throw new Error(`All AI providers failed. Last: ${errors.slice(-2).join(' | ')}`);
 }
 
-/** Consume a Groq stream (native SDK format) */
 function consumeGroqStream(stream, res, onDone) {
   let full = '';
   (async () => {
@@ -199,7 +185,6 @@ function consumeGroqStream(stream, res, onDone) {
   })();
 }
 
-/** Consume an OpenRouter SSE stream */
 function consumeOpenRouterStream(stream, res, onDone) {
   let full = '';
   let buffer = '';
@@ -235,7 +220,6 @@ function consumeOpenRouterStream(stream, res, onDone) {
   });
 }
 
-/** Stream AI response to the client. Handles identity shortcuts. */
 async function streamAI(messages, res, imageData = null, onDone = null) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -248,7 +232,6 @@ async function streamAI(messages, res, imageData = null, onDone = null) {
     else consumeOpenRouterStream(stream, res, onDone);
   } catch (err) {
     log(`streamAI fatal: ${err.message}`, 'error');
-    // Stream a friendly error message to the user
     const friendly = `I'm having trouble reaching my AI service right now. Please try again in a moment.`;
     const words = friendly.split(' ');
     for (let i = 0; i < words.length; i++) {
@@ -261,7 +244,7 @@ async function streamAI(messages, res, imageData = null, onDone = null) {
   }
 }
 
-// ============ TAVILY ============
+// ---------- Tavily ----------
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 
 async function tavilySearch(query) {
@@ -285,7 +268,7 @@ async function tavilySearch(query) {
 
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
-// ============ SYSTEM PROMPT ============
+// ---------- System Prompt ----------
 const SYSTEM_PROMPT = `You are AgriDeepAI, an expert AI assistant for agriculture and livestock.
 
 ## IDENTITY (never violate)
@@ -308,15 +291,11 @@ const SYSTEM_PROMPT = `You are AgriDeepAI, an expert AI assistant for agricultur
 
 ## STYLE
 - Warm, professional, concise. Not chatty.
-- Use Markdown when structure helps (lists, headings). Keep it short.
+- Use Markdown when structure helps. Keep answers focused.
 - For disease questions, ask for symptoms/age/weather first.
-- Include brief disclaimers for chemicals and animal health.
+- Include brief disclaimers for chemicals and animal health.`;
 
-## WHAT YOU DON'T DO
-- Don't invent statistics or prices. Say "check current market prices" if unsure.
-- Don't give medical advice for humans.`;
-
-// ============ MULTER ============
+// ---------- Multer ----------
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -328,7 +307,7 @@ const upload = multer({
   }
 });
 
-// ============ AUTH ============
+// ---------- Auth Middleware ----------
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
@@ -339,12 +318,12 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// ============ VERIFICATION STORES ============
+// ---------- Verification stores ----------
 function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 const verificationStore = {};
 const twoFactorStore = {};
 
-// ============ IDENTITY SHORTCUTS ============
+// ---------- Identity guards ----------
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
   return ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy'].includes(t);
@@ -382,15 +361,13 @@ async function tryIdentityShortcut(messages, res) {
   return false;
 }
 
-// ============ EMAIL HELPER ============
+// ---------- Email ----------
 async function sendVerificationEmail(email, code, action = 'verify', extra = '') {
   try {
     const expiration = '10 minutes';
     const actionMap = {
-      'verify': 'Verify your account',
-      'change-email': 'Change your email',
-      'change-password': 'Change your password',
-      'delete-account': 'Delete your account',
+      'verify': 'Verify your account','change-email': 'Change your email',
+      'change-password': 'Change your password','delete-account': 'Delete your account',
       'signup': 'Complete your registration',
     };
     const subject = actionMap[action] || 'Verification code';
@@ -607,8 +584,7 @@ app.get('/api/config', (req, res) => res.json({
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
 }));
 
-// ============ CHAT ============
-
+// ============ CHAT HELPERS ============
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT) {
   const history = messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -619,28 +595,24 @@ function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT) {
 async function enrichWithWebSearch(query) {
   if (!TAVILY_API_KEY) return query;
   const sr = await tavilySearch(query);
-  if (sr?.answer) {
-    return `${query}\n\n[Current web information, use if relevant]\n${sr.answer}`;
-  }
+  if (sr?.answer) return `${query}\n\n[Current web information, use if relevant]\n${sr.answer}`;
   return query;
 }
 
-// ---- Guest chat ----
+// ============ GUEST CHAT ============
 app.post('/api/chat/guest', async (req, res) => {
   try {
     const { messages, image } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) return res.status(400).json({ error: 'Messages required' });
 
-    // Identity shortcuts (server-side, model-agnostic)
     if (await tryIdentityShortcut(messages, res)) return;
 
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     const enrichedPrompt = await enrichWithWebSearch(lastUser.content);
-
     const withoutLast = messages.slice(0, messages.lastIndexOf(lastUser));
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
-
     const imageData = image ? { base64: image.base64, mimeType: image.mimeType } : null;
+
     await streamAI(chatMessages, res, imageData);
   } catch (err) {
     log(`Guest chat error: ${err.message}`, 'error');
@@ -649,7 +621,7 @@ app.post('/api/chat/guest', async (req, res) => {
   }
 });
 
-// ---- Auth'd conversations ----
+// ============ AUTHENTICATED CHAT ============
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { data, error } = await supabase.from('conversations').select('*')
@@ -710,7 +682,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Identity shortcuts
+    // Identity shortcut
     if (message && (isCreatorQuestion(message) || isGreeting(message))) {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
       const reply = isCreatorQuestion(message)
@@ -755,7 +727,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
 
     const enrichedPrompt = await enrichWithWebSearch(message || 'agriculture update');
-    const lastMsg = aiMessages[aiMessages.length - 1];
     const withoutLast = aiMessages.slice(0, -1);
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
 
