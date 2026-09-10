@@ -28,17 +28,6 @@ body {
   width: 100vw;
   overflow: hidden;
 }
-body.share-view #sidebar,
-body.share-view #topBar,
-body.share-view #composerArea {
-  display: none !important;
-}
-body.share-view #mainContent {
-  width: 100%;
-}
-body.share-view #chatContainer {
-  padding: 2rem;
-}
 
 /* ===== Sidebar ===== */
 #sidebar {
@@ -400,14 +389,15 @@ body.share-view #chatContainer {
   margin-top: 0.2rem;
   flex-wrap: wrap;
   opacity: 0.9;
+  align-items: center;
 }
 .message-actions-row .icon-button-sm {
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 0.1rem 0.2rem;
-  border-radius: 4px;
+  padding: 0.25rem 0.35rem;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -418,24 +408,26 @@ body.share-view #chatContainer {
   color: var(--text);
 }
 .message-actions-row .icon-button-sm:active { transform: scale(0.9); }
+
+/* ===== SOLID active colors for like/dislike/copied ===== */
 .message-actions-row .icon-button-sm.liked {
-  background-color: var(--accent-dim);
-  color: var(--accent);
+  background-color: #2f8f46 !important;
+  color: #ffffff !important;
 }
 .message-actions-row .icon-button-sm.disliked {
-  background-color: rgba(232, 93, 93, 0.2);
-  color: var(--danger);
+  background-color: #e85d5d !important;
+  color: #ffffff !important;
 }
 .message-actions-row .icon-button-sm.copied {
-  background-color: var(--accent-dim);
-  color: var(--accent);
+  background-color: #2f8f46 !important;
+  color: #ffffff !important;
   transition: background-color 0.1s, color 0.1s;
 }
 
 .version-controls {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   margin-top: 0.3rem;
   font-size: 0.8rem;
   color: var(--text-muted);
@@ -445,9 +437,11 @@ body.share-view #chatContainer {
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  padding: 0.1rem;
+  padding: 0.15rem;
   border-radius: 4px;
   transition: background 0.15s;
+  display: inline-flex;
+  align-items: center;
 }
 .version-controls button:hover {
   background: var(--surface-hover);
@@ -469,6 +463,41 @@ body.share-view #chatContainer {
 .sources a { color: var(--accent); text-decoration: none; }
 .sources a:hover { text-decoration: underline; }
 
+/* ===== Attachments above the message text ===== */
+.attachments-above {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.55rem;
+}
+.attachments-above .user-message-attachment {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: transform 0.15s;
+  background: var(--surface-hover);
+}
+.attachments-above .user-message-attachment:hover {
+  transform: scale(1.04);
+}
+.attachments-above .user-message-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.attachments-above .user-message-attachment .file-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-muted);
+}
+
 /* ===== Composer ===== */
 #composerArea {
   flex-shrink: 0;
@@ -489,22 +518,29 @@ body.share-view #chatContainer {
   gap: 0.3rem;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 0.2rem 0.6rem 0.2rem 0.4rem;
-  font-size: 0.8rem;
-  color: var(--text-muted);
+  border-radius: 12px;
+  padding: 0.2rem 0.5rem 0.2rem 0.3rem;
 }
 .attachment-chip img {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.attachment-chip i {
+  width: 20px;
+  height: 20px;
 }
 .attachment-chip button {
   background: none; border: none;
   color: var(--text-muted);
   cursor: pointer;
+  padding: 0.1rem;
+  display: inline-flex;
+  align-items: center;
 }
+.attachment-chip button:hover { color: var(--text); }
 .composer-main {
   display: flex;
   align-items: flex-end;
@@ -546,10 +582,10 @@ body.share-view #chatContainer {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 32px;
-  min-height: 32px;
-  width: 32px;
-  height: 32px;
+  min-width: 34px;
+  min-height: 34px;
+  width: 34px;
+  height: 34px;
   opacity: 1;
 }
 .send-button:disabled {
@@ -561,11 +597,20 @@ body.share-view #chatContainer {
 .send-button:not(:disabled):hover {
   background: var(--accent-hover);
 }
+
+/* Stop button – pulsing red while generating */
 .send-button.generating {
-  background: var(--danger);
+  background: #e85d5d !important;
+  color: #fff !important;
+  opacity: 1 !important;
+  animation: pulseStop 1.2s ease-in-out infinite;
 }
 .send-button.generating:hover {
-  background: #c0392b;
+  background: #c0392b !important;
+}
+@keyframes pulseStop {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232,93,93,0.55); }
+  50%      { box-shadow: 0 0 0 7px rgba(232,93,93,0); }
 }
 .send-button .send-icon,
 .send-button .stop-icon {
@@ -659,7 +704,7 @@ body.share-view #chatContainer {
 .modal-content .status-msg { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.3rem; }
 .modal-content hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
-/* ===== Account Modal (large, two-column) ===== */
+/* ===== Account Modal ===== */
 .account-modal .modal-content {
   max-width: 700px;
   width: 95%;
@@ -740,6 +785,27 @@ body.share-view #chatContainer {
   margin: 0.3rem 0;
 }
 
+/* 2FA QR */
+.twofa-setup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.twofa-setup img.qr-code {
+  width: 200px;
+  height: 200px;
+  border-radius: 8px;
+  background: white;
+  padding: 8px;
+}
+.twofa-setup input {
+  width: 100%;
+  max-width: 200px;
+  text-align: center;
+  letter-spacing: 4px;
+}
+
 /* ===== Context Menu ===== */
 .context-menu {
   position: fixed;
@@ -769,6 +835,44 @@ body.share-view #chatContainer {
 .context-menu button:hover { background: var(--surface-hover); }
 .context-menu button.danger { color: var(--danger); }
 .context-menu button.danger:hover { background: rgba(232, 93, 93, 0.12); }
+
+/* ===== Lightbox ===== */
+.lightbox-overlay { animation: fadeIn 0.2s ease; }
+
+/* ===== Share view ===== */
+body.share-view #sidebar,
+body.share-view #topBar,
+body.share-view #composerArea,
+body.share-view #welcomeScreen {
+  display: none !important;
+}
+body.share-view #mainContent {
+  width: 100%;
+  max-width: 100%;
+}
+body.share-view #chatContainer {
+  padding: 4rem 1rem 2rem;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+body.share-view #messageList {
+  display: flex !important;
+  gap: 1.5rem;
+}
+body.share-view::before {
+  content: "Shared Chat – AgriDeepAI";
+  display: block;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+  z-index: 50;
+}
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
@@ -813,135 +917,11 @@ body.share-view #chatContainer {
     white-space: nowrap;
     padding: 0.3rem 0.6rem;
   }
+  body.share-view #chatContainer { padding: 4rem 0.75rem 1rem; }
+  .attachments-above .user-message-attachment { width: 64px; height: 64px; }
 }
 @media (min-width: 769px) {
   #sidebar.collapsed .brand-name { display: none; }
   #sidebar.collapsed .new-chat-btn span { display: none; }
   #sidebar.collapsed .auth-btn span { display: none; }
 }
-
-/* Additional styles for 2FA, attachments, etc. */
-.twofa-setup {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-}
-.twofa-setup img.qr-code {
-  width: 200px;
-  height: 200px;
-  border-radius: 8px;
-  background: white;
-  padding: 8px;
-}
-.twofa-setup input {
-  width: 100%;
-  max-width: 200px;
-  text-align: center;
-  letter-spacing: 4px;
-}
-.user-message-attachment {
-  display: inline-block;
-  margin: 0.2rem 0.2rem 0.2rem 0;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  max-width: 80px;
-  max-height: 80px;
-}
-.user-message-attachment img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.user-message-attachment .file-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 80px;
-  height: 80px;
-  background: var(--surface-hover);
-  color: var(--text-muted);
-}
-
-/* ===== Edit area fix ===== */
-.message.editing {
-  width: 100%;
-}
-
-/* ===== Like / Dislike strong colours ===== */
-.message-actions-row .icon-button-sm.liked {
-  background-color: #2f8f46 !important;
-  color: #fff !important;
-}
-.message-actions-row .icon-button-sm.disliked {
-  background-color: #e85d5d !important;
-  color: #fff !important;
-}
-.message-actions-row .icon-button-sm.copied {
-  background-color: #2f8f46 !important;
-  color: #fff !important;
-  transition: background-color 0.1s, color 0.1s;
-}
-
-/* ===== User message attachments ===== */
-.user-message-attachment {
-  display: inline-block;
-  margin: 0.2rem 0.2rem 0.2rem 0;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  width: 80px;
-  height: 80px;
-}
-.user-message-attachment img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  cursor: pointer;
-}
-.user-message-attachment .file-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  background: var(--surface-hover);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-/* ===== Attachment chip ===== */
-.attachment-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.2rem 0.5rem;
-  margin-right: 0.3rem;
-  margin-bottom: 0.3rem;
-}
-
-/* ===== Share view ===== */
-body.share-view #sidebar,
-body.share-view #topBar,
-body.share-view #composerArea,
-body.share-view #welcomeScreen {
-  display: none !important;
-}
-body.share-view #mainContent { width: 100%; }
-body.share-view #chatContainer {
-  padding: 2rem 1rem;
-  max-width: 900px;
-  margin: 0 auto;
-  width: 100%;
-}
-body.share-view #messageList {
-  display: flex !important;
-  gap: 1.5rem;
-}
-
-/* ===== Lightbox ===== */
-.lightbox-overlay { animation: fadeIn 0.2s ease; }
