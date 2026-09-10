@@ -2,9 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
+  <meta name="theme-color" content="#171b20" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="description" content="AgriDeepAI – your AI assistant for agriculture and livestock" />
   <title>agrideepai – AI for Agriculture</title>
   <link rel="icon" href="/logo.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/logo.png" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -45,7 +52,6 @@
         <button id="openSidebarBtn" class="icon-button" aria-label="Open sidebar">
           <i data-lucide="menu"></i>
         </button>
-        <!-- No chat title -->
       </header>
 
       <div id="chatContainer">
@@ -70,7 +76,7 @@
             <button id="attachBtn" class="icon-button" aria-label="Attach file">
               <i data-lucide="paperclip"></i>
             </button>
-            <textarea id="messageInput" rows="1" placeholder="Ask about agriculture or livestock..."></textarea>
+            <textarea id="messageInput" rows="1" placeholder="Ask about agriculture or livestock..." autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="false" enterkeyhint="send"></textarea>
             <button id="sendBtn" class="send-button" aria-label="Send message">
               <i data-lucide="send" class="send-icon"></i>
               <i data-lucide="square" class="stop-icon" style="display:none;"></i>
