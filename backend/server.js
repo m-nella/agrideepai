@@ -41,12 +41,43 @@ const JWT_SECRET = process.env.JWT_SECRET || 'agrideepai-set-JWT_SECRET-in-env';
 const signPending = (payload, ttl = 900) => jwt.sign(payload, JWT_SECRET, { expiresIn: ttl });
 const verifyPending = (token) => { try { return jwt.verify(token, JWT_SECRET); } catch { return null; } };
 
-// Strip JWT reserved claims before re-signing a verified payload.
-// jwt.sign() refuses to add a new `exp`/`iat` if the payload already has one.
 function stripJwtClaims(p) {
   if (!p || typeof p !== 'object') return {};
   const { exp, iat, nbf, aud, iss, sub, jti, ...rest } = p;
   return rest;
+}
+
+// ---------- Email validation ----------
+const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+function isValidEmail(email) {
+  if (!email || typeof email !== 'string') return false;
+  const t = email.trim();
+  if (t.length < 5 || t.length > 254) return false;
+  if (t.includes('..')) return false;
+  return EMAIL_RE.test(t);
+}
+
+// Check if email is already registered to a DIFFERENT user (paginated)
+async function isEmailTakenByOther(email, currentUserId) {
+  try {
+    const target = email.toLowerCase().trim();
+    let page = 1;
+    const perPage = 1000;
+    while (page <= 10) {
+      const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+      if (error) { log(`listUsers error: ${error.message}`, 'warn'); return false; }
+      const users = data?.users || [];
+      if (users.some(u => u.email && u.email.toLowerCase() === target && u.id !== currentUserId)) {
+        return true;
+      }
+      if (users.length < perPage) break;
+      page++;
+    }
+    return false;
+  } catch (e) {
+    log(`isEmailTakenByOther error: ${e.message}`, 'warn');
+    return false;
+  }
 }
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -507,21 +538,13 @@ Title:`;
     for (const model of ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']) {
       try {
         const completion = await groq.chat.completions.create({
-          model,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.4,
-          max_tokens: 400,
+          model, messages: [{ role: 'user', content: prompt }], temperature: 0.4, max_tokens: 400,
         });
         const raw = completion.choices?.[0]?.message?.content;
         const title = cleanTitle(raw);
-        if (title) {
-          log(`Title (groq ${model}): "${title}"`, 'debug');
-          return title;
-        }
+        if (title) { log(`Title (groq ${model}): "${title}"`, 'debug'); return title; }
         log(`Title gen (groq ${model}) produced empty/unusable response: ${JSON.stringify(raw).slice(0, 120)}`, 'warn');
-      } catch (err) {
-        log(`Title gen (groq ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn');
-      }
+      } catch (err) { log(`Title gen (groq ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn'); }
     }
   }
   if (FHROUTER_API_KEY) {
@@ -535,13 +558,8 @@ Title:`;
         });
         const raw = r.data?.choices?.[0]?.message?.content;
         const title = cleanTitle(raw);
-        if (title) {
-          log(`Title (fhrouter ${model}): "${title}"`, 'debug');
-          return title;
-        }
-      } catch (err) {
-        log(`Title gen (fhrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn');
-      }
+        if (title) { log(`Title (fhrouter ${model}): "${title}"`, 'debug'); return title; }
+      } catch (err) { log(`Title gen (fhrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn'); }
     }
   }
   if (OPENROUTER_API_KEY) {
@@ -560,13 +578,8 @@ Title:`;
         });
         const raw = r.data?.choices?.[0]?.message?.content;
         const title = cleanTitle(raw);
-        if (title) {
-          log(`Title (openrouter ${model}): "${title}"`, 'debug');
-          return title;
-        }
-      } catch (err) {
-        log(`Title gen (openrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn');
-      }
+        if (title) { log(`Title (openrouter ${model}): "${title}"`, 'debug'); return title; }
+      } catch (err) { log(`Title gen (openrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn'); }
     }
   }
   const firstWords = msg.split(/\s+/).slice(0, 5).join(' ');
@@ -579,8 +592,7 @@ async function sendEmail(to, subject, htmlContent) {
   sendSmtpEmail.htmlContent = htmlContent;
   sendSmtpEmail.sender = { name: 'AgriDeepAI', email: 'noreply@agrideepai.agentdomains.co' };
   sendSmtpEmail.to = [{ email: to }];
-  const result = await brevoApi.sendTransacEmail(sendSmtpEmail);
-  return result;
+  return await brevoApi.sendTransacEmail(sendSmtpEmail);
 }
 
 async function sendVerificationEmailWithRetry(email, code, action = 'verify', extra = '') {
@@ -660,32 +672,24 @@ async function trackSession(userId, email, req) {
     const ip = getRequestIp(req);
     const clientId = getClientId(req);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
     const { data: recent, error: recentErr } = await supabase.from('sessions')
       .select('*').eq('user_id', userId).gte('last_active', thirtyDaysAgo);
     if (recentErr) log(`trackSession read error: ${recentErr.message}`, 'warn');
-
     const existing = (recent || []).find(s =>
       (clientId && s.client_id === clientId)
       || (s.ip === ip && s.user_agent === ua)
     );
     const hasAnyPrevious = !!(recent && recent.length > 0);
-
     if (existing) {
       const { error: upErr } = await supabase.from('sessions').update({
-        device: ua.substring(0, 120),
-        ip,
-        user_agent: ua,
+        device: ua.substring(0, 120), ip, user_agent: ua,
         last_active: new Date().toISOString(),
         client_id: clientId || existing.client_id || null,
       }).eq('id', existing.id);
       if (upErr) log(`trackSession update error: ${upErr.message}`, 'error');
     } else {
       const { error: insErr } = await supabase.from('sessions').insert({
-        user_id: userId,
-        device: ua.substring(0, 120),
-        ip,
-        user_agent: ua,
+        user_id: userId, device: ua.substring(0, 120), ip, user_agent: ua,
         client_id: clientId || null,
       });
       if (insErr) log(`trackSession insert error: ${insErr.message}`, 'error');
@@ -702,6 +706,7 @@ app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    if (!isValidEmail(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
     if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password))
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
     const { data: existingUsers } = await supabase.auth.admin.listUsers();
@@ -736,42 +741,23 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-// ============ RESEND VERIFICATION (signup) ============
 app.post('/api/auth/resend-verification', async (req, res) => {
   try {
     const { pendingToken } = req.body;
     log(`[RESEND-SIGNUP] Request received. Token length: ${pendingToken ? pendingToken.length : 0}`, 'info');
-
-    if (!pendingToken) {
-      log(`[RESEND-SIGNUP] No pendingToken provided`, 'warn');
-      return res.status(400).json({ error: 'Your session expired. Please sign up again.' });
-    }
-
+    if (!pendingToken) return res.status(400).json({ error: 'Your session expired. Please sign up again.' });
     const p = verifyPending(pendingToken);
-    if (!p) {
-      log(`[RESEND-SIGNUP] Token verification failed (expired or invalid signature)`, 'warn');
-      return res.status(400).json({ error: 'Your session expired. Please sign up again.' });
-    }
-    if (p.type !== 'signup') {
-      log(`[RESEND-SIGNUP] Wrong token type: ${p.type}`, 'warn');
-      return res.status(400).json({ error: 'Invalid session. Please sign up again.' });
-    }
-    if (!p.email || !p.password) {
-      log(`[RESEND-SIGNUP] Missing email or password in token`, 'warn');
-      return res.status(400).json({ error: 'Session data incomplete. Please sign up again.' });
-    }
-
+    if (!p) return res.status(400).json({ error: 'Your session expired. Please sign up again.' });
+    if (p.type !== 'signup') return res.status(400).json({ error: 'Invalid session. Please sign up again.' });
+    if (!p.email || !p.password) return res.status(400).json({ error: 'Session data incomplete. Please sign up again.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    // Strip JWT reserved claims (exp/iat/nbf/etc) before re-signing
     const payload = { ...stripJwtClaims(p), code };
     const newToken = signPending(payload);
-    log(`[RESEND-SIGNUP] Sending new code to ${p.email}`, 'info');
     await sendVerificationEmailWithRetry(p.email, code, 'signup', 'Resend: complete your registration.');
     log(`[RESEND-SIGNUP] ✅ Success for ${p.email}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
   } catch (err) {
     log(`[RESEND-SIGNUP] ❌ Error: ${err.message}`, 'error');
-    log(`[RESEND-SIGNUP] Stack: ${err.stack || 'n/a'}`, 'error');
     res.status(500).json({ error: `Failed to resend code: ${err.message || 'unknown error'}` });
   }
 });
@@ -785,9 +771,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', data.user.id).single();
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const pendingToken = signPending({
-      type: 'login',
-      email,
-      code,
+      type: 'login', email, code,
       access_token: data.session.access_token,
       refresh_token: data.session.refresh_token,
       userId: data.user.id,
@@ -805,42 +789,23 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// ============ RESEND LOGIN CODE ============
 app.post('/api/auth/resend-login-code', async (req, res) => {
   try {
     const { pendingToken } = req.body;
     log(`[RESEND-LOGIN] Request received. Token length: ${pendingToken ? pendingToken.length : 0}`, 'info');
-
-    if (!pendingToken) {
-      log(`[RESEND-LOGIN] No pendingToken provided`, 'warn');
-      return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
-    }
-
+    if (!pendingToken) return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
     const p = verifyPending(pendingToken);
-    if (!p) {
-      log(`[RESEND-LOGIN] Token verification failed (expired or invalid signature)`, 'warn');
-      return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
-    }
-    if (p.type !== 'login') {
-      log(`[RESEND-LOGIN] Wrong token type: ${p.type}`, 'warn');
-      return res.status(400).json({ error: 'Invalid session. Please sign in again.' });
-    }
-    if (!p.email) {
-      log(`[RESEND-LOGIN] No email in token payload`, 'warn');
-      return res.status(400).json({ error: 'Session data missing email. Please sign in again.' });
-    }
-
+    if (!p) return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
+    if (p.type !== 'login') return res.status(400).json({ error: 'Invalid session. Please sign in again.' });
+    if (!p.email) return res.status(400).json({ error: 'Session data missing email. Please sign in again.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    // Strip JWT reserved claims (exp/iat/nbf/etc) before re-signing
     const payload = { ...stripJwtClaims(p), code };
     const newToken = signPending(payload);
-    log(`[RESEND-LOGIN] Sending new code to ${p.email}`, 'info');
     await sendVerificationEmailWithRetry(p.email, code, 'login', 'Resend: use the code below to complete your sign-in.');
     log(`[RESEND-LOGIN] ✅ Success for ${p.email}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
   } catch (err) {
     log(`[RESEND-LOGIN] ❌ Error: ${err.message}`, 'error');
-    log(`[RESEND-LOGIN] Stack: ${err.stack || 'n/a'}`, 'error');
     res.status(500).json({ error: `Failed to resend code: ${err.message || 'unknown error'}` });
   }
 });
@@ -851,19 +816,11 @@ app.post('/api/auth/verify-login', async (req, res) => {
     const p = verifyPending(pendingToken);
     if (!p || p.type !== 'login') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
     if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
-    const user = {
-      id: p.userId,
-      email: p.userEmail || p.email,
-      created_at: p.userCreatedAt,
-      last_sign_in_at: p.userLastSignInAt,
-    };
+    const user = { id: p.userId, email: p.userEmail || p.email, created_at: p.userCreatedAt, last_sign_in_at: p.userLastSignInAt };
     if (p.two_factor_enabled) {
       const twoFactorToken = signPending({
-        type: '2fa',
-        email: p.email,
-        access_token: p.access_token,
-        refresh_token: p.refresh_token,
-        user,
+        type: '2fa', email: p.email,
+        access_token: p.access_token, refresh_token: p.refresh_token, user,
       });
       return res.json({ requires2fa: true, twoFactorToken, message: 'Email verified. Now enter your 2FA code.' });
     }
@@ -886,17 +843,50 @@ app.post('/api/auth/2fa/validate-login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to validate 2FA' }); }
 });
 
+// ==================================================================
+// SEND VERIFICATION CODE
+// For action 'change-email': requires newEmail, validates it, sends code TO THE NEW EMAIL,
+// and bakes the new email into the signed pendingToken (tamper-proof).
+// ==================================================================
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
-    const { action } = req.body;
+    const { action, newEmail } = req.body;
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const pendingToken = signPending({ type: 'action', action, userId: req.user.id, email: req.user.email, code });
-    await sendVerificationEmailWithRetry(req.user.email, code, action);
-    res.json({ message: 'Verification code sent.', pendingToken });
-  } catch (err) { res.status(500).json({ error: 'Failed to send code.' }); }
+    const currentEmail = (req.user.email || '').toLowerCase();
+
+    const tokenPayload = { type: 'action', action, userId: req.user.id, email: req.user.email, code };
+    let targetEmail = req.user.email;
+
+    if (action === 'change-email') {
+      if (!newEmail || typeof newEmail !== 'string') {
+        return res.status(400).json({ error: 'Please enter the new email address' });
+      }
+      const trimmed = newEmail.trim().toLowerCase();
+      if (!isValidEmail(trimmed)) {
+        return res.status(400).json({ error: 'Please enter a valid email address' });
+      }
+      if (trimmed === currentEmail) {
+        return res.status(400).json({ error: 'New email must be different from your current email' });
+      }
+      const taken = await isEmailTakenByOther(trimmed, req.user.id);
+      if (taken) {
+        return res.status(400).json({ error: 'This email is already registered to another account' });
+      }
+      targetEmail = trimmed;
+      tokenPayload.newEmail = trimmed;
+      log(`[SEND-CODE] change-email → code will go to NEW email ${trimmed}`, 'info');
+    }
+
+    const pendingToken = signPending(tokenPayload);
+    await sendVerificationEmailWithRetry(targetEmail, code, action);
+    res.json({ message: `Verification code sent to ${targetEmail}.`, pendingToken, targetEmail });
+  } catch (err) {
+    log(`[SEND-CODE] ❌ Error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to send code.' });
+  }
 });
 
-// Resend for ACTION endpoints (change email/password/delete)
+// Resend action code — uses newEmail for change-email action
 app.post('/api/auth/resend-action-code', authenticate, async (req, res) => {
   try {
     const { pendingToken } = req.body;
@@ -907,12 +897,13 @@ app.post('/api/auth/resend-action-code', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Your session expired. Please try again.' });
     }
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    // Strip JWT reserved claims (exp/iat/nbf/etc) before re-signing
     const payload = { ...stripJwtClaims(p), code };
     const newToken = signPending(payload);
-    await sendVerificationEmailWithRetry(req.user.email, code, p.action);
-    log(`[RESEND-ACTION] ✅ Sent new code for action ${p.action}`, 'info');
-    res.json({ message: 'New code sent.', pendingToken: newToken });
+    // For change-email, resend goes to the NEW email (baked in the token)
+    const targetEmail = (p.action === 'change-email' && p.newEmail) ? p.newEmail : req.user.email;
+    await sendVerificationEmailWithRetry(targetEmail, code, p.action);
+    log(`[RESEND-ACTION] ✅ Sent new code for action ${p.action} to ${targetEmail}`, 'info');
+    res.json({ message: `New code sent to ${targetEmail}.`, pendingToken: newToken, targetEmail });
   } catch (err) {
     log(`[RESEND-ACTION] ❌ Error: ${err.message}`, 'error');
     res.status(500).json({ error: `Failed to resend code: ${err.message || 'unknown error'}` });
@@ -925,7 +916,10 @@ app.post('/api/auth/verify-code', authenticate, async (req, res) => {
     const p = verifyPending(pendingToken);
     if (!p || p.type !== 'action' || p.userId !== req.user.id) return res.status(400).json({ error: 'Pending session expired.' });
     if (p.code !== code || p.action !== action) return res.status(400).json({ error: 'Invalid or expired code' });
-    const grantedToken = signPending({ type: 'granted', action, userId: req.user.id }, 600);
+    const grantedPayload = { type: 'granted', action, userId: req.user.id };
+    // Preserve newEmail from the verified pending token (tamper-proof)
+    if (action === 'change-email' && p.newEmail) grantedPayload.newEmail = p.newEmail;
+    const grantedToken = signPending(grantedPayload, 600);
     res.json({ message: 'Code verified.', grantedToken });
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
 });
@@ -957,15 +951,35 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ==================================================================
+// CHANGE EMAIL — uses newEmail from the SIGNED grantedToken (never trusts body)
+// ==================================================================
 app.post('/api/auth/change-email', authenticate, async (req, res) => {
   try {
     const { newEmail, grantedToken } = req.body;
     const g = verifyPending(grantedToken);
     if (!g || g.type !== 'granted' || g.action !== 'change-email' || g.userId !== req.user.id)
       return res.status(400).json({ error: 'Please verify your code first.' });
-    await supabase.auth.updateUser({ email: newEmail });
-    res.json({ message: 'Email change requested.' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    // Prefer newEmail from the signed grantedToken (tamper-proof)
+    const finalNewEmail = String(g.newEmail || newEmail || '').trim().toLowerCase();
+    if (!isValidEmail(finalNewEmail)) return res.status(400).json({ error: 'Invalid new email address' });
+    if (finalNewEmail === (req.user.email || '').toLowerCase())
+      return res.status(400).json({ error: 'New email must be different from your current email' });
+    const taken = await isEmailTakenByOther(finalNewEmail, req.user.id);
+    if (taken) return res.status(400).json({ error: 'This email is already registered to another account' });
+
+    // Use admin.updateUserById to bypass Supabase's own confirmation email flow
+    const { error: uErr } = await supabase.auth.admin.updateUserById(req.user.id, {
+      email: finalNewEmail,
+      email_confirm: true,
+    });
+    if (uErr) throw uErr;
+    log(`[CHANGE-EMAIL] ✅ ${req.user.email} → ${finalNewEmail}`, 'info');
+    res.json({ message: 'Email changed successfully.', newEmail: finalNewEmail });
+  } catch (err) {
+    log(`[CHANGE-EMAIL] ❌ Error: ${err.message}`, 'error');
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
@@ -1057,9 +1071,7 @@ app.delete('/api/auth/sessions/all', authenticate, async (req, res) => {
       : list.filter(s => s.ip === ip && s.user_agent === ua);
     const keepId = mine[0]?.id;
     const idsToDelete = list.filter(s => s.id !== keepId).map(s => s.id);
-    if (idsToDelete.length > 0) {
-      await supabase.from('sessions').delete().in('id', idsToDelete);
-    }
+    if (idsToDelete.length > 0) await supabase.from('sessions').delete().in('id', idsToDelete);
     try { await supabase.auth.admin.signOut(req.token, 'others'); }
     catch (e) { log(`Supabase signOut(others) failed: ${e.message}`, 'warn'); }
     res.json({ message: 'All other sessions logged out', removed: idsToDelete.length });
@@ -1125,9 +1137,7 @@ async function extractTextFromFile(file) {
 app.post('/api/chat/title', async (req, res) => {
   try {
     const { message } = req.body;
-    if (!message || typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({ error: 'Message required' });
-    }
+    if (!message || typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'Message required' });
     const title = await generateChatTitle(message);
     res.json({ title });
   } catch (err) {
