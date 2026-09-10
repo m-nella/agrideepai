@@ -1,5 +1,5 @@
 // ============================================================
-// AGRIDEEPAI – Full Frontend (Final, all fixes)
+// AGRIDEEPAI – Full Frontend (Final)
 // ============================================================
 
 const log = (msg, type = 'info') => {
@@ -30,6 +30,9 @@ const shareLinkDisplay = document.getElementById('shareLinkDisplay');
 const copyShareLink = document.getElementById('copyShareLink');
 const chatMenu = document.getElementById('chatMenu');
 
+// --- Constants ---
+const MAX_ATTACHMENTS = 5;
+
 // --- State ---
 let state = {
   activeChatId: null,
@@ -51,17 +54,14 @@ let state = {
   copyTimeout: null,
 };
 
-// --- Attachment limit ---
-const MAX_ATTACHMENTS = 5; // Keep it small for performance
-
 // --- Lightbox ---
 function openLightbox(src, isImage = true) {
   const overlay = document.createElement('div');
   overlay.className = 'lightbox-overlay';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:99999;display:flex;align-items:center;justify-content:center;padding:2rem;cursor:zoom-out;';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);z-index:99999;display:flex;align-items:center;justify-content:center;padding:2rem;cursor:zoom-out;';
   const closeBtn = document.createElement('button');
   closeBtn.innerHTML = '&times;';
-  closeBtn.style.cssText = 'position:absolute;top:1rem;right:1rem;background:rgba(255,255,255,0.1);border:none;color:#fff;font-size:2rem;cursor:pointer;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;';
+  closeBtn.style.cssText = 'position:absolute;top:1rem;right:1rem;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:2rem;cursor:pointer;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;';
   closeBtn.onclick = (e) => { e.stopPropagation(); overlay.remove(); };
   overlay.appendChild(closeBtn);
   if (isImage) {
@@ -99,7 +99,6 @@ function showCustomModal(title, message, confirmText = 'Confirm', cancelText = '
       </div>
     `;
     document.body.appendChild(modal);
-
     const closeModal = () => { modal.remove(); resolve(false); };
     modal.querySelector('#customModalClose').addEventListener('click', closeModal);
     modal.querySelector('#customModalCancel').addEventListener('click', closeModal);
@@ -125,11 +124,9 @@ function showCustomPrompt(title, defaultValue = '') {
       </div>
     `;
     document.body.appendChild(modal);
-
     const input = modal.querySelector('#customPromptInput');
     input.focus();
     input.select();
-
     const closeModal = () => { modal.remove(); resolve(null); };
     modal.querySelector('#customPromptClose').addEventListener('click', closeModal);
     modal.querySelector('#customPromptCancel').addEventListener('click', closeModal);
@@ -253,9 +250,7 @@ async function loadCloudConversations() {
       state.messages = [];
       renderMessages();
     }
-  } catch (err) {
-    log(`Load cloud conversations error: ${err.message}`, 'error');
-  }
+  } catch (err) { log(`Load cloud conversations error: ${err.message}`, 'error'); }
 }
 
 async function loadCloudMessages(chatId) {
@@ -266,9 +261,7 @@ async function loadCloudMessages(chatId) {
     rebuildVersions();
     renderMessages();
     renderChatList();
-  } catch (err) {
-    log(`Load cloud messages error: ${err.message}`, 'error');
-  }
+  } catch (err) { log(`Load cloud messages error: ${err.message}`, 'error'); }
 }
 
 function rebuildVersions() {
@@ -295,19 +288,16 @@ function renderChatList() {
   if (pinned.length > 0) {
     const pinContainer = document.createElement('div');
     pinContainer.className = 'pinned-section';
-    pinContainer.style.cssText = 'border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; padding-bottom: 0.5rem;';
     const pinLabel = document.createElement('div');
-    pinLabel.style.cssText = 'font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; padding: 0.2rem 0.6rem;';
+    pinLabel.className = 'pinned-label';
     pinLabel.textContent = 'Pinned';
     pinContainer.appendChild(pinLabel);
     pinned.forEach(chat => appendChatItem(pinContainer, chat));
     chatList.appendChild(pinContainer);
   }
-
   if (unpinned.length > 0) {
     unpinned.forEach(chat => appendChatItem(chatList, chat));
   }
-
   if (state.chats.length === 0) {
     chatList.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:1.5rem 0;font-size:0.9rem;">No chats yet</div>';
   }
@@ -407,19 +397,66 @@ function renderMessages() {
     if (state.editingMessageId === msg.id && msg.role === 'user') {
       const editArea = document.createElement('div');
       editArea.style.cssText = 'width:100%;';
+
+      // Show attachments during editing too (above the textarea)
+      if (msg.files && msg.files.length > 0) {
+        const attachDiv = document.createElement('div');
+        attachDiv.className = 'attachments-above';
+        msg.files.forEach(f => {
+          const wrap = document.createElement('div');
+          wrap.className = 'user-message-attachment';
+          if (f.mime_type && f.mime_type.startsWith('image/') && f.public_url) {
+            const img = document.createElement('img');
+            img.src = f.public_url;
+            img.alt = f.filename;
+            img.addEventListener('click', () => openLightbox(f.public_url, true));
+            wrap.appendChild(img);
+          } else if (f.public_url) {
+            const icon = document.createElement('div');
+            icon.className = 'file-icon';
+            icon.innerHTML = `<i data-lucide="file-text" style="width:24px;height:24px;"></i>`;
+            icon.addEventListener('click', () => openLightbox(f.public_url, false));
+            wrap.appendChild(icon);
+          }
+          attachDiv.appendChild(wrap);
+        });
+        editArea.appendChild(attachDiv);
+        window.refreshIcons();
+      }
+
       const textarea = document.createElement('textarea');
       textarea.value = state.editingValue;
-      textarea.style.cssText = 'width:100%;padding:0.4rem;border-radius:var(--radius-sm);background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:0.95rem;';
+      textarea.style.cssText = 'width:100%;padding:0.5rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:0.95rem;';
+
       const btnGroup = document.createElement('div');
-      btnGroup.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.3rem;';
+      btnGroup.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.5rem;justify-content:flex-end;';
+
       const cancelBtn = document.createElement('button');
       cancelBtn.textContent = 'Cancel';
-      cancelBtn.style.cssText = 'padding:0.2rem 0.8rem;background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);cursor:pointer;';
+      cancelBtn.style.cssText = 'padding:0.45rem 1.1rem;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-weight:500;font-size:0.9rem;transition:background 0.2s;';
+      cancelBtn.addEventListener('mouseenter', () => cancelBtn.style.background = 'var(--surface-hover)');
+      cancelBtn.addEventListener('mouseleave', () => cancelBtn.style.background = 'transparent');
       cancelBtn.addEventListener('click', () => { state.editingMessageId = null; renderMessages(); });
+
       const sendEditBtn = document.createElement('button');
       sendEditBtn.textContent = 'Send';
-      sendEditBtn.className = 'btn-primary';
-      sendEditBtn.style.cssText = 'padding:0.2rem 0.8rem;width:auto;';
+      sendEditBtn.style.cssText = `
+        padding:0.45rem 1.4rem;
+        background:var(--accent);
+        color:#fff;
+        border:none;
+        border-radius:10px;
+        font-weight:600;
+        font-size:0.9rem;
+        cursor:pointer;
+        box-shadow:0 2px 8px rgba(47,143,70,0.35);
+        transition:background 0.2s, box-shadow 0.2s, transform 0.15s;
+      `;
+      sendEditBtn.addEventListener('mouseenter', () => { sendEditBtn.style.background = 'var(--accent-hover)'; sendEditBtn.style.boxShadow = '0 4px 14px rgba(47,143,70,0.45)'; });
+      sendEditBtn.addEventListener('mouseleave', () => { sendEditBtn.style.background = 'var(--accent)'; sendEditBtn.style.boxShadow = '0 2px 8px rgba(47,143,70,0.35)'; });
+      sendEditBtn.addEventListener('mousedown', () => sendEditBtn.style.transform = 'scale(0.97)');
+      sendEditBtn.addEventListener('mouseup', () => sendEditBtn.style.transform = 'scale(1)');
+
       sendEditBtn.addEventListener('click', async () => {
         const newContent = textarea.value.trim();
         if (!newContent) return;
@@ -442,191 +479,197 @@ function renderMessages() {
         renderMessages();
         await sendEditedUserMessage();
       });
+
       btnGroup.appendChild(cancelBtn);
       btnGroup.appendChild(sendEditBtn);
       editArea.appendChild(textarea);
       editArea.appendChild(btnGroup);
       msgDiv.appendChild(editArea);
-      // FIX: Append row and msgDiv to DOM
       row.appendChild(msgDiv);
       messageList.appendChild(row);
       setTimeout(() => textarea.focus(), 50);
-    } else {
-      // ----- Normal display -----
-      if (msg.role === 'assistant') {
-        const isLastMessage = (index === lastIndex);
-        const isThinking = isLastMessage && state.isGenerating && msg.content === '';
-        if (isThinking) {
-          const thinkingDiv = document.createElement('div');
-          thinkingDiv.className = 'thinking-indicator';
-          thinkingDiv.style.cssText = 'display:flex;align-items:center;gap:0.5rem;color:var(--text-muted);padding:0.2rem 0;';
-          thinkingDiv.innerHTML = `<div class="spinner" style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;"></div><span>Thinking...</span>`;
-          msgDiv.appendChild(thinkingDiv);
-        } else if (msg.content) {
-          const cleaned = cleanContent(msg.content);
-          const contentDiv = document.createElement('div');
-          contentDiv.className = 'message-content';
-          let html = marked.parse(cleaned || '');
-          html = html.replace(/<hr\s*\/?>/g, '');
-          contentDiv.innerHTML = html;
-          msgDiv.appendChild(contentDiv);
-          if (msg.files && msg.files.length > 0) {
-            const fileDiv = document.createElement('div');
-            fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
-            msg.files.forEach(f => {
-              if (f.public_url) {
-                const link = document.createElement('a');
-                link.href = f.public_url;
-                link.target = '_blank';
-                link.textContent = '📎 ' + (f.filename || 'File');
-                fileDiv.appendChild(link);
-                fileDiv.appendChild(document.createTextNode(' '));
-              }
-            });
-            if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
-          }
-        }
-      } else {
+      return;
+    }
+
+    // ----- Normal display -----
+    if (msg.role === 'assistant') {
+      const isLastMessage = (index === lastIndex);
+      const isThinking = isLastMessage && state.isGenerating && msg.content === '';
+      if (isThinking) {
+        const thinkingDiv = document.createElement('div');
+        thinkingDiv.className = 'thinking-indicator';
+        thinkingDiv.innerHTML = `<div class="spinner"></div><span>Thinking...</span>`;
+        msgDiv.appendChild(thinkingDiv);
+      } else if (msg.content) {
+        const cleaned = cleanContent(msg.content);
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
-        contentDiv.textContent = msg.content;
+        let html = marked.parse(cleaned || '');
+        html = html.replace(/<hr\s*\/?>/g, '');
+        contentDiv.innerHTML = html;
         msgDiv.appendChild(contentDiv);
-        // Attachments as thumbnails
         if (msg.files && msg.files.length > 0) {
-          const attachDiv = document.createElement('div');
-          attachDiv.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.4rem;';
+          const fileDiv = document.createElement('div');
+          fileDiv.style.cssText = 'font-size:0.8rem;margin-top:0.3rem;opacity:0.7;';
           msg.files.forEach(f => {
-            const wrap = document.createElement('div');
-            wrap.className = 'user-message-attachment';
-            if (f.mime_type && f.mime_type.startsWith('image/') && f.public_url) {
-              const img = document.createElement('img');
-              img.src = f.public_url;
-              img.alt = f.filename;
-              img.style.cursor = 'pointer';
-              img.addEventListener('click', () => openLightbox(f.public_url, true));
-              wrap.appendChild(img);
-            } else if (f.public_url) {
-              const icon = document.createElement('div');
-              icon.className = 'file-icon';
-              icon.innerHTML = `<i data-lucide="file-text" style="width:24px;height:24px;"></i>`;
-              icon.style.cursor = 'pointer';
-              icon.addEventListener('click', () => openLightbox(f.public_url, false));
-              wrap.appendChild(icon);
+            if (f.public_url) {
+              const link = document.createElement('a');
+              link.href = f.public_url;
+              link.target = '_blank';
+              link.textContent = '📎 ' + (f.filename || 'File');
+              fileDiv.appendChild(link);
+              fileDiv.appendChild(document.createTextNode(' '));
             }
-            attachDiv.appendChild(wrap);
           });
-          msgDiv.appendChild(attachDiv);
+          if (fileDiv.children.length > 0) msgDiv.appendChild(fileDiv);
+        }
+      }
+    } else {
+      // User message — attachments ABOVE the text
+      if (msg.files && msg.files.length > 0) {
+        const attachDiv = document.createElement('div');
+        attachDiv.className = 'attachments-above';
+        msg.files.forEach(f => {
+          const wrap = document.createElement('div');
+          wrap.className = 'user-message-attachment';
+          if (f.mime_type && f.mime_type.startsWith('image/') && f.public_url) {
+            const img = document.createElement('img');
+            img.src = f.public_url;
+            img.alt = f.filename;
+            img.addEventListener('click', () => openLightbox(f.public_url, true));
+            wrap.appendChild(img);
+          } else if (f.public_url) {
+            const icon = document.createElement('div');
+            icon.className = 'file-icon';
+            icon.innerHTML = `<i data-lucide="file-text" style="width:24px;height:24px;"></i>`;
+            icon.addEventListener('click', () => openLightbox(f.public_url, false));
+            wrap.appendChild(icon);
+          }
+          attachDiv.appendChild(wrap);
+        });
+        msgDiv.appendChild(attachDiv);
+        window.refreshIcons();
+      }
+
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'message-content';
+      contentDiv.textContent = msg.content;
+      msgDiv.appendChild(contentDiv);
+    }
+
+    const showActions = (msg.role === 'user') || (msg.role === 'assistant' && msg.content && !(state.isGenerating && index === lastIndex && msg.content === ''));
+
+    if (state.editingMessageId !== msg.id && showActions) {
+      const actionsRow = document.createElement('div');
+      actionsRow.className = 'message-actions-row';
+
+      // Copy
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'icon-button-sm';
+      copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
+      copyBtn.title = 'Copy';
+      copyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await navigator.clipboard.writeText(msg.content);
+        copyBtn.classList.add('copied');
+        showToast('Copied!');
+        if (state.copyTimeout) clearTimeout(state.copyTimeout);
+        state.copyTimeout = setTimeout(() => copyBtn.classList.remove('copied'), 1500);
+      });
+      actionsRow.appendChild(copyBtn);
+
+      if (msg.role === 'user') {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'icon-button-sm';
+        editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
+        editBtn.title = 'Edit';
+        editBtn.addEventListener('click', (e) => { e.stopPropagation(); startEditing(msg); });
+        actionsRow.appendChild(editBtn);
+
+        // Version controls for user messages
+        if (state.messageVersions[msg.id] && state.messageVersions[msg.id].versions.length > 1) {
+          const vData = state.messageVersions[msg.id];
+          const versionControls = document.createElement('div');
+          versionControls.className = 'version-controls';
+          const prevBtn = document.createElement('button');
+          prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
+          prevBtn.title = 'Previous version';
+          prevBtn.disabled = vData.currentIndex === 0;
+          prevBtn.addEventListener('click', () => {
+            if (vData.currentIndex > 0) {
+              vData.currentIndex--;
+              msg.content = vData.versions[vData.currentIndex];
+              renderMessages();
+            }
+          });
+          versionControls.appendChild(prevBtn);
+          const label = document.createElement('span');
+          label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
+          versionControls.appendChild(label);
+          const nextBtn = document.createElement('button');
+          nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
+          nextBtn.title = 'Next version';
+          nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
+          nextBtn.addEventListener('click', () => {
+            if (vData.currentIndex < vData.versions.length - 1) {
+              vData.currentIndex++;
+              msg.content = vData.versions[vData.currentIndex];
+              renderMessages();
+            }
+          });
+          versionControls.appendChild(nextBtn);
+          actionsRow.appendChild(versionControls);
           window.refreshIcons();
         }
       }
 
-      const showActions = (msg.role === 'user') || (msg.role === 'assistant' && msg.content && !(state.isGenerating && index === lastIndex && msg.content === ''));
+      if (msg.role === 'assistant') {
+        // Like
+        const likeBtn = document.createElement('button');
+        likeBtn.className = 'icon-button-sm';
+        const isLiked = state.likedMessages.has(msg.id);
+        likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
+        likeBtn.title = isLiked ? 'Liked' : 'Like';
+        if (isLiked) likeBtn.classList.add('liked');
+        likeBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleLike(msg); });
+        actionsRow.appendChild(likeBtn);
 
-      if (state.editingMessageId !== msg.id && showActions) {
-        const actionsRow = document.createElement('div');
-        actionsRow.className = 'message-actions-row';
+        // Dislike
+        const dislikeBtn = document.createElement('button');
+        dislikeBtn.className = 'icon-button-sm';
+        const isDisliked = state.dislikedMessages.has(msg.id);
+        dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
+        dislikeBtn.title = isDisliked ? 'Disliked' : 'Dislike';
+        if (isDisliked) dislikeBtn.classList.add('disliked');
+        dislikeBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleDislike(msg); });
+        actionsRow.appendChild(dislikeBtn);
 
-        // Copy
-        const copyBtn = document.createElement('button');
-        copyBtn.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`;
-        copyBtn.title = 'Copy';
-        copyBtn.className = 'icon-button-sm';
-        copyBtn.addEventListener('click', async (e) => {
+        // Regenerate
+        const regenBtn = document.createElement('button');
+        regenBtn.className = 'icon-button-sm';
+        regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
+        regenBtn.title = 'Regenerate';
+        regenBtn.addEventListener('click', (e) => { e.stopPropagation(); regenerateMessage(index); });
+        actionsRow.appendChild(regenBtn);
+
+        // Share
+        const shareBtn = document.createElement('button');
+        shareBtn.className = 'icon-button-sm';
+        shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
+        shareBtn.title = 'Share this message';
+        shareBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          await navigator.clipboard.writeText(msg.content);
-          copyBtn.classList.add('copied');
-          showToast('Copied!');
-          if (state.copyTimeout) clearTimeout(state.copyTimeout);
-          state.copyTimeout = setTimeout(() => copyBtn.classList.remove('copied'), 1500);
+          shareConversation([{ role: msg.role, content: msg.content }]);
         });
-        actionsRow.appendChild(copyBtn);
-
-        if (msg.role === 'user') {
-          const editBtn = document.createElement('button');
-          editBtn.innerHTML = `<i data-lucide="pencil" style="width:16px;height:16px;"></i>`;
-          editBtn.title = 'Edit';
-          editBtn.className = 'icon-button-sm';
-          editBtn.addEventListener('click', (e) => { e.stopPropagation(); startEditing(msg); });
-          actionsRow.appendChild(editBtn);
-
-          // Version controls for user messages
-          if (state.messageVersions[msg.id] && state.messageVersions[msg.id].versions.length > 1) {
-            const vData = state.messageVersions[msg.id];
-            const versionControls = document.createElement('div');
-            versionControls.className = 'version-controls';
-            const prevBtn = document.createElement('button');
-            prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
-            prevBtn.title = 'Previous version';
-            prevBtn.disabled = vData.currentIndex === 0;
-            prevBtn.addEventListener('click', () => {
-              if (vData.currentIndex > 0) {
-                vData.currentIndex--;
-                msg.content = vData.versions[vData.currentIndex];
-                renderMessages();
-              }
-            });
-            versionControls.appendChild(prevBtn);
-            const label = document.createElement('span');
-            label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
-            versionControls.appendChild(label);
-            const nextBtn = document.createElement('button');
-            nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
-            nextBtn.title = 'Next version';
-            nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
-            nextBtn.addEventListener('click', () => {
-              if (vData.currentIndex < vData.versions.length - 1) {
-                vData.currentIndex++;
-                msg.content = vData.versions[vData.currentIndex];
-                renderMessages();
-              }
-            });
-            versionControls.appendChild(nextBtn);
-            actionsRow.appendChild(versionControls);
-            window.refreshIcons();
-          }
-        }
-
-        if (msg.role === 'assistant') {
-          const likeBtn = document.createElement('button');
-          const isLiked = state.likedMessages.has(msg.id);
-          likeBtn.innerHTML = `<i data-lucide="thumbs-up" style="width:16px;height:16px;"></i>`;
-          likeBtn.title = isLiked ? 'Liked' : 'Like';
-          if (isLiked) likeBtn.classList.add('liked');
-          likeBtn.className = 'icon-button-sm';
-          likeBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleLike(msg); });
-          actionsRow.appendChild(likeBtn);
-
-          const dislikeBtn = document.createElement('button');
-          const isDisliked = state.dislikedMessages.has(msg.id);
-          dislikeBtn.innerHTML = `<i data-lucide="thumbs-down" style="width:16px;height:16px;"></i>`;
-          dislikeBtn.title = isDisliked ? 'Disliked' : 'Dislike';
-          if (isDisliked) dislikeBtn.classList.add('disliked');
-          dislikeBtn.className = 'icon-button-sm';
-          dislikeBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleDislike(msg); });
-          actionsRow.appendChild(dislikeBtn);
-
-          const regenBtn = document.createElement('button');
-          regenBtn.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`;
-          regenBtn.title = 'Regenerate';
-          regenBtn.className = 'icon-button-sm';
-          regenBtn.addEventListener('click', (e) => { e.stopPropagation(); regenerateMessage(index); });
-          actionsRow.appendChild(regenBtn);
-
-          const shareBtn = document.createElement('button');
-          shareBtn.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`;
-          shareBtn.title = 'Share this message';
-          shareBtn.className = 'icon-button-sm';
-          shareBtn.addEventListener('click', (e) => { e.stopPropagation(); shareConversation([{ role: msg.role, content: msg.content }]); });
-          actionsRow.appendChild(shareBtn);
-        }
-
-        row.appendChild(msgDiv);
-        row.appendChild(actionsRow);
-        messageList.appendChild(row);
-      } else {
-        row.appendChild(msgDiv);
-        messageList.appendChild(row);
+        actionsRow.appendChild(shareBtn);
       }
+
+      row.appendChild(msgDiv);
+      row.appendChild(actionsRow);
+      messageList.appendChild(row);
+    } else {
+      row.appendChild(msgDiv);
+      messageList.appendChild(row);
     }
   });
 
@@ -754,9 +797,7 @@ async function sendEditedUserMessage() {
     if (state.currentUser) {
       await loadCloudMessages(chat.id);
       await loadCloudConversations();
-    } else {
-      renderChatList();
-    }
+    } else renderChatList();
   } catch (err) {
     if (err.name !== 'AbortError') {
       showToast('Error: ' + err.message, true);
@@ -858,7 +899,7 @@ async function regenerateMessage(index) {
   }
 }
 
-// --- Share Conversation ---
+// --- Share ---
 async function shareConversation(messagesToShare = null) {
   const chat = state.chats.find(c => c.id === state.activeChatId);
   if (!chat && !messagesToShare) { showToast('No chat to share', true); return; }
@@ -910,10 +951,7 @@ async function createChat(title = 'New Chat') {
       state.chats.unshift(chat);
       renderChatList();
       return chat;
-    } catch (err) {
-      showToast('Failed to create chat', true);
-      return null;
-    }
+    } catch (err) { showToast('Failed to create chat', true); return null; }
   } else return createLocalChat(title);
 }
 
@@ -1083,15 +1121,11 @@ function renderAttachments() {
     if (isImage) {
       const img = document.createElement('img');
       img.src = URL.createObjectURL(file);
-      img.style.cssText = 'width:40px; height:40px; object-fit:cover; border-radius:4px; cursor:pointer;';
       img.addEventListener('click', () => openLightbox(img.src, true));
       chip.appendChild(img);
     } else {
       const icon = document.createElement('i');
       icon.setAttribute('data-lucide', 'file-text');
-      icon.style.width = '24px';
-      icon.style.height = '24px';
-      icon.style.cursor = 'pointer';
       chip.appendChild(icon);
     }
     const removeBtn = document.createElement('button');
@@ -1140,10 +1174,16 @@ async function sendMessage() {
     }
   }
 
+  // Build file metadata with local blob URL for guests, real URL for logged-in (populated after upload)
+  const localFiles = state.attachments.map(f => ({
+    filename: f.name, mime_type: f.type, size: f.size,
+    public_url: URL.createObjectURL(f),
+  }));
+
   const userMsg = {
     id: 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
     role: 'user', content: text || '[File attached]',
-    files: state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size, public_url: URL.createObjectURL(f) })),
+    files: localFiles,
     created_at: new Date().toISOString(),
   };
   state.messages.push(userMsg);
@@ -1182,8 +1222,18 @@ async function sendMessage() {
         body: formData, signal: state.abortController.signal,
       });
     } else {
-      // For guest, send messages as JSON (no file upload to server)
-      const payload = { messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })) };
+      const payload = {
+        messages: state.messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
+      };
+      if (atts.length > 0) {
+        const first = atts[0];
+        const b64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.readAsDataURL(first);
+        });
+        payload.image = { base64: b64, mimeType: first.type, filename: first.name };
+      }
       response = await fetch('/api/chat/guest', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload), signal: state.abortController.signal,
@@ -1229,9 +1279,7 @@ async function sendMessage() {
     if (state.currentUser) {
       await loadCloudMessages(chat.id);
       await loadCloudConversations();
-    } else {
-      renderChatList();
-    }
+    } else renderChatList();
   } catch (err) {
     if (err.name === 'AbortError') {
       const last = state.messages[state.messages.length - 1];
@@ -1318,8 +1366,7 @@ function renderAuthForm(mode) {
       <button id="resendVerifyBtn" style="background:none;border:none;color:var(--accent);cursor:pointer;margin-top:0.5rem;">Resend code</button>
     </div>` : ''}
   `;
-  const pwWrapper = document.getElementById('authPasswordWrapper');
-  pwWrapper.appendChild(createPasswordField('authPassword', '••••••••'));
+  document.getElementById('authPasswordWrapper').appendChild(createPasswordField('authPassword', '••••••••'));
   if (!isLogin) document.getElementById('authConfirmPasswordWrapper').appendChild(createPasswordField('authConfirmPassword', 'Confirm password'));
   window.refreshIcons();
 
@@ -1386,8 +1433,8 @@ function renderAuthForm(mode) {
         resendBtn.onclick = async () => {
           statusDiv.textContent = 'Resending code...'; statusDiv.style.display = 'block';
           try {
-            const res = await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-            if (!res.ok) throw new Error('Failed to resend.');
+            const res2 = await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+            if (!res2.ok) throw new Error('Failed to resend.');
             showToast('New code sent.'); statusDiv.textContent = 'New code sent. Check your email.';
           } catch (err) { errorDiv.textContent = err.message; errorDiv.style.display = 'block'; }
           finally { statusDiv.style.display = 'none'; }
@@ -1516,7 +1563,7 @@ async function openAccountModal() {
             if (!code) { showToast('Enter code.', true); return; }
             try {
               await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-email' }) });
-              await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail, code }) });
+              await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail }) });
               showToast('Email changed! Please verify the new email.');
               closeModal();
             } catch (err) { showToast(err.message, true); }
@@ -1538,7 +1585,7 @@ async function openAccountModal() {
             if (!code) { showToast('Enter code.', true); return; }
             try {
               await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-password' }) });
-              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: current, newPassword: newPw, code }) });
+              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: current, newPassword: newPw }) });
               showToast('Password changed successfully.');
               closeModal();
             } catch (err) { showToast(err.message, true); }
@@ -1605,16 +1652,14 @@ attachBtn.addEventListener('click', () => {
   input.click();
 });
 
-// --- Sidebar toggle ---
+// --- Sidebar toggles ---
 sidebarToggle.addEventListener('click', () => {
   sidebar.classList.toggle('collapsed');
   const isCollapsed = sidebar.classList.contains('collapsed');
   sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = isCollapsed ? 'none' : 'inline';
   sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = isCollapsed ? 'inline' : 'none';
 });
-
 openSidebarBtn.addEventListener('click', () => sidebar.classList.toggle('mobile-open'));
-
 document.addEventListener('click', (e) => {
   if (window.innerWidth < 768) {
     const isOpen = sidebar.classList.contains('mobile-open');
@@ -1622,7 +1667,7 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// --- Other listeners ---
+// --- Main listeners ---
 newChatBtn.addEventListener('click', handleNewChat);
 sendBtn.addEventListener('click', () => { if (state.isGenerating) stopGeneration(); else sendMessage(); });
 messageInput.addEventListener('keydown', (e) => {
@@ -1637,7 +1682,6 @@ chips.forEach((chip) => {
   });
 });
 
-// Share modal close
 document.getElementById('shareModalClose').addEventListener('click', () => shareModal.classList.add('hidden'));
 shareModal.addEventListener('click', (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); });
 
