@@ -54,7 +54,6 @@ const FHROUTER_VISION_MODELS = [];
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TEXT_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3-235b-a22b:free', 'mistralai/mistral-7b-instruct:free'];
-// Multiple vision fallbacks — if one 404s, next tries
 const OPENROUTER_VISION_MODELS = [
   'google/gemini-2.0-flash-exp:free',
   'meta-llama/llama-3.2-11b-vision-instruct:free',
@@ -92,7 +91,6 @@ app.get('/api/debug/groq-models', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Recursive: vision attempt first, then fall back to text-only
 async function getAIStream(chatMessages, imageData = null, isVisionRetry = false) {
   const errors = [];
   const usingVision = !!imageData && !isVisionRetry;
@@ -163,12 +161,10 @@ async function getAIStream(chatMessages, imageData = null, isVisionRetry = false
         }
       }
     }
-    // ALL vision failed → fall through to text-only (OCR text already in prompt)
     log(`Vision path failed (${errors.join(', ') || 'no vision providers'}), retrying text-only`, 'warn');
     return getAIStream(chatMessages, null, true);
   }
 
-  // Text-only path
   if (groq) {
     for (const model of GROQ_TEXT_MODELS) {
       try {
@@ -433,6 +429,59 @@ async function tryIdentityShortcut(messages, res) {
   return false;
 }
 
+// ============ CHAT TITLE GENERATOR ============
+async function generateChatTitle(userMessage) {
+  const msg = (userMessage || '').trim();
+  if (!msg) return 'New Chat';
+  if (isGreeting(msg)) return 'Greeting';
+  if (isCreatorQuestion(msg)) return 'About AgriDeepAI';
+  const prompt = `You name chat conversations. Read the user's first message and reply with ONLY a short descriptive title (3 to 6 words) that captures what they are asking about. No quotes, no period at the end, no prefix like "Title:", just the title itself.\n\nUser message: ${msg.substring(0, 600)}`;
+  const tryParse = (raw) => {
+    let t = String(raw || '').trim();
+    t = t.replace(/^["'`]+|["'`]+$/g, '').replace(/\.+$/, '').trim();
+    if (/^(title|chat title)\s*[:\-]/i.test(t)) t = t.replace(/^(title|chat title)\s*[:\-]\s*/i, '').trim();
+    if (t.length === 0 || t.length > 90) return null;
+    return t;
+  };
+  if (groq) {
+    for (const model of ['openai/gpt-oss-20b', 'openai/gpt-oss-120b']) {
+      try {
+        const completion = await groq.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          max_tokens: 30,
+        });
+        const title = tryParse(completion.choices?.[0]?.message?.content);
+        if (title) return title.substring(0, 60);
+      } catch (err) {
+        log(`Title gen (groq ${model}) error: ${err.message}`, 'warn');
+      }
+    }
+  }
+  if (FHROUTER_API_KEY) {
+    for (const model of FHROUTER_TEXT_MODELS.slice(0, 2)) {
+      try {
+        const r = await axios.post(FHROUTER_URL, {
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          max_tokens: 30,
+          stream: false,
+        }, {
+          headers: { 'Authorization': `Bearer ${FHROUTER_API_KEY}`, 'Content-Type': 'application/json' },
+          timeout: 15000,
+        });
+        const title = tryParse(r.data?.choices?.[0]?.message?.content);
+        if (title) return title.substring(0, 60);
+      } catch (err) {
+        log(`Title gen (fhrouter ${model}) error: ${err.message}`, 'warn');
+      }
+    }
+  }
+  return msg.substring(0, 42) + (msg.length > 42 ? '…' : '');
+}
+
 async function sendEmail(to, subject, htmlContent) {
   const sendSmtpEmail = new brevo.SendSmtpEmail();
   sendSmtpEmail.subject = subject;
@@ -518,6 +567,7 @@ async function trackSession(userId, email, req) {
   } catch (err) { log(`trackSession error: ${err.message}`, 'warn'); }
 }
 
+// ============ AUTH ROUTES ============
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -738,6 +788,26 @@ app.get('/api/auth/sessions', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Log out ALL other sessions (not the current one)
+app.delete('/api/auth/sessions/all', authenticate, async (req, res) => {
+  try {
+    const ua = req.headers['user-agent'] || 'Unknown';
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
+    const { data: sessions } = await supabase.from('sessions').select('*').eq('user_id', req.user.id).order('last_active', { ascending: false });
+    const list = sessions || [];
+    const mine = list.filter(s => s.ip === ip && s.user_agent === ua);
+    const keepId = mine[0]?.id;
+    const idsToDelete = list.filter(s => s.id !== keepId).map(s => s.id);
+    if (idsToDelete.length > 0) {
+      await supabase.from('sessions').delete().in('id', idsToDelete);
+    }
+    // Revoke other Supabase refresh tokens (real sign-out for other devices)
+    try { await supabase.auth.admin.signOut(req.token, 'others'); }
+    catch (e) { log(`Supabase signOut(others) failed: ${e.message}`, 'warn'); }
+    res.json({ message: 'All other sessions logged out', removed: idsToDelete.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/auth/sessions/:id', authenticate, async (req, res) => {
   try {
     await supabase.from('sessions').delete().eq('id', req.params.id).eq('user_id', req.user.id);
@@ -757,6 +827,7 @@ app.get('/api/config', (req, res) => res.json({
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
 }));
 
+// ============ CHAT ============
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT) {
   const history = messages.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content && String(m.content).trim()).map(m => ({ role: m.role, content: String(m.content || '') }));
   return [{ role: 'system', content: systemPrompt }, ...history];
@@ -855,7 +926,12 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       }
       const { error: aiErr } = await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply, versions: [reply], current_version_index: 0 });
       if (aiErr) log(`Identity reply insert error: ${aiErr.message}`, 'error');
-      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
+      if (conv.title === 'New Chat' || !conv.title) {
+        const newTitle = isGreeting(message) ? 'Greeting' : 'About AgriDeepAI';
+        await supabase.from('conversations').update({ title: newTitle, updated_at: new Date().toISOString() }).eq('id', conversationId);
+      } else {
+        await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
+      }
       return streamSimpleText(res, reply);
     }
 
@@ -879,8 +955,9 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     const { error: userMsgErr } = await supabase.from('messages').insert(messageData);
     if (userMsgErr) log(`User message insert error: ${userMsgErr.message}`, 'error');
 
-    if (conv.title === 'New Chat' && message) {
-      const newTitle = message.substring(0, 50);
+    // AI-generated smart title
+    if ((conv.title === 'New Chat' || !conv.title) && message) {
+      const newTitle = await generateChatTitle(message);
       await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
     }
 
@@ -939,6 +1016,7 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ============ SHARE ============
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -976,6 +1054,7 @@ app.get('/api/share/:token', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error retrieving shared messages' }); }
 });
 
+// ============ SERVE FRONTEND ============
 const frontendPath = path.join(__dirname, '../frontend');
 
 app.get('/share/*', (req, res) => {
