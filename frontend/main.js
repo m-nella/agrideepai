@@ -1313,4 +1313,80 @@ async function openAccountModal() {
           document.getElementById('twofaSetup').style.display = 'block';
           document.getElementById('verify2faBtn').onclick = async () => {
             const code = document.getElementById('twofaCodeIn').value.trim();
-            try { await apiFetch('/api/auth/2fa/verify', { method
+            try { await apiFetch('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }); showToast('2FA enabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      });
+      document.getElementById('dis2fa')?.addEventListener('click', async () => {
+        try { await apiFetch('/api/auth/2fa/disable', { method: 'POST' }); showToast('2FA disabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
+      });
+    }
+  };
+  tabs.forEach(t => t.onclick = () => render(t.dataset.tab));
+  render('profile');
+}
+
+// ============ ATTACH ============
+attachBtn.onclick = () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,.pdf,.txt,.doc,.docx';
+  input.multiple = true;
+  input.onchange = () => {
+    const files = Array.from(input.files);
+    if (files.some(f => f.size > 10 * 1024 * 1024)) { showToast('Max 10MB per file', true); return; }
+    if (state.attachments.length + files.length > MAX_ATTACHMENTS) { showToast(`Max ${MAX_ATTACHMENTS} files`, true); return; }
+    state.attachments.push(...files);
+    renderAttachments(); updateSendButton();
+  };
+  input.click();
+};
+
+// ============ SIDEBAR ============
+sidebarToggle.onclick = () => {
+  sidebar.classList.toggle('collapsed');
+  const c = sidebar.classList.contains('collapsed');
+  sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = c ? 'none' : 'inline';
+  sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = c ? 'inline' : 'none';
+};
+openSidebarBtn.onclick = () => sidebar.classList.toggle('mobile-open');
+document.addEventListener('click', (e) => {
+  if (window.innerWidth < 768 && sidebar.classList.contains('mobile-open') && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
+});
+
+// ============ MAIN LISTENERS ============
+newChatBtn.onclick = handleNewChat;
+sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!state.isGenerating) sendMessage(); }
+});
+messageInput.addEventListener('input', () => { resizeComposer(); updateSendButton(); });
+chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; updateSendButton(); sendMessage(); });
+document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
+shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
+
+// ============ SHARE VIEW ============
+async function checkShareView() {
+  const path = window.location.pathname;
+  if (!path.startsWith('/share/')) return false;
+  const token = path.split('/share/')[1];
+  if (!token) return false;
+  state.isShareView = true;
+  document.body.classList.add('share-view');
+  try {
+    const res = await fetch(`/api/share/${token}`);
+    if (!res.ok) throw new Error('Share not found');
+    const data = await res.json();
+    state.shareMessages = data.messages || [];
+    renderMessages();
+    document.title = 'Shared Chat — AgriDeepAI';
+  } catch (err) {
+    messageList.innerHTML = `<p style="color:var(--danger);text-align:center;padding:2rem;">Error loading share: ${err.message}</p>`;
+  }
+  return true;
+}
+
+(async function init() {
+  const isShare = await checkShareView();
+  if (!isShare) { await initSupabase(); updateSendButton(); }
+})();
