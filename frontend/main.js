@@ -46,6 +46,7 @@ const shareModal = document.getElementById('shareModal');
 const shareLinkDisplay = document.getElementById('shareLinkDisplay');
 const copyShareLink = document.getElementById('copyShareLink');
 const chatMenu = document.getElementById('chatMenu');
+const chatContainer = document.getElementById('chatContainer');
 
 const MAX_ATTACHMENTS = 5;
 const CODE_RESEND_SECONDS = 60;
@@ -57,8 +58,31 @@ let state = {
   attachments: [], editingMessageId: null, editingValue: '',
   messageVersions: {}, likedMessages: new Set(), dislikedMessages: new Set(),
   contextMenuTarget: null, isShareView: IS_SHARE_VIEW, shareMessages: [], copyTimeout: null,
-  pendingAuth: null,
+  pendingAuth: null, shouldScrollToBottom: false,
 };
+
+// ============ SMART SCROLL ============
+function isNearBottom(container, threshold = 200) {
+  if (!container) return true;
+  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+}
+function smartScroll(force = false) {
+  if (!chatContainer) return;
+  if (!force && !state.shouldScrollToBottom && !isNearBottom(chatContainer)) return;
+  // Defer to next frame so layout has settled after content change
+  requestAnimationFrame(() => {
+    if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+  });
+  state.shouldScrollToBottom = false;
+}
+
+// Detect user intent to scroll up
+if (chatContainer) {
+  chatContainer.addEventListener('scroll', () => {
+    // If user scrolls away from bottom, disable auto-follow
+    if (!isNearBottom(chatContainer, 80)) state.shouldScrollToBottom = false;
+  }, { passive: true });
+}
 
 // ============ COUNTDOWN TIMER ============
 function attachCountdown(btn, seconds = CODE_RESEND_SECONDS) {
@@ -71,13 +95,9 @@ function attachCountdown(btn, seconds = CODE_RESEND_SECONDS) {
   btn._cdInterval = setInterval(() => {
     remaining--;
     if (remaining <= 0) {
-      clearInterval(btn._cdInterval);
-      btn._cdInterval = null;
-      btn.disabled = false;
-      btn.textContent = btn.dataset.originalText;
-    } else {
-      btn.textContent = `Resend in ${remaining}s`;
-    }
+      clearInterval(btn._cdInterval); btn._cdInterval = null;
+      btn.disabled = false; btn.textContent = btn.dataset.originalText;
+    } else btn.textContent = `Resend in ${remaining}s`;
   }, 1000);
 }
 
@@ -92,16 +112,13 @@ function openLightbox(src, isImage = true) {
   closeBtn.onclick = (e) => { e.stopPropagation(); overlay.remove(); };
   overlay.appendChild(closeBtn);
   if (isImage) {
-    const img = document.createElement('img');
-    img.src = src;
+    const img = document.createElement('img'); img.src = src;
     img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;';
     overlay.appendChild(img);
   } else {
-    const link = document.createElement('a');
-    link.href = src; link.target = '_blank';
+    const link = document.createElement('a'); link.href = src; link.target = '_blank';
     link.style.cssText = 'color:#fff;font-size:1.2rem;text-decoration:underline;';
-    link.textContent = 'Open file in new tab';
-    overlay.appendChild(link);
+    link.textContent = 'Open file in new tab'; overlay.appendChild(link);
   }
   overlay.onclick = () => overlay.remove();
   document.body.appendChild(overlay);
@@ -143,8 +160,8 @@ function showCustomPrompt(title, defaultValue = '') {
 }
 
 function cleanContent(content) {
-  if (!content) return content;
-  const lines = content.split('\n');
+  if (!content) return '';
+  const lines = String(content).split('\n');
   const out = []; let skip = false;
   for (const line of lines) {
     if (/^sources:/i.test(line.trim())) { skip = true; continue; }
@@ -152,6 +169,11 @@ function cleanContent(content) {
     if (!skip) out.push(line);
   }
   return out.join('\n').trim();
+}
+
+function safeMarkdown(text) {
+  try { return (marked.parse(cleanContent(text) || '') || '').replace(/<hr\s*\/?>/g, ''); }
+  catch (e) { return (String(text) || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 }
 
 // ============ SUPABASE ============
@@ -163,12 +185,8 @@ async function initSupabase() {
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
       auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: false,
-        storage: window.localStorage,
-        storageKey: 'agrideepai-auth-v2',
-        flowType: 'pkce',
+        persistSession: true, autoRefreshToken: true, detectSessionInUrl: false,
+        storage: window.localStorage, storageKey: 'agrideepai-auth-v2', flowType: 'pkce',
       },
     });
     state.supabase.auth.onAuthStateChange(async (event, session) => {
@@ -253,7 +271,6 @@ async function loadCloudMessages(chatId) {
   } catch (err) { log(`Load cloud messages error: ${err.message}`, 'error'); }
 }
 
-// Reload with retry — waits until the assistant reply appears in the DB
 async function reloadAfterSend(chatId, expectedMinCount, maxAttempts = 6) {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 400));
@@ -268,9 +285,8 @@ async function reloadAfterSend(chatId, expectedMinCount, maxAttempts = 6) {
         renderChatList();
         return true;
       }
-    } catch (e) { /* retry */ }
+    } catch (e) {}
   }
-  // Fallback: force reload anyway
   await loadCloudMessages(chatId);
   await loadCloudConversations();
   return false;
@@ -325,32 +341,34 @@ function appendChatItem(container, chat) {
   container.appendChild(div);
 }
 
-function renderMessages() {
+// === Share-view bulletproof rendering ===
+function renderShareMessages() {
+  messageList.style.display = 'flex';
   messageList.innerHTML = '';
-
-  if (state.isShareView) {
-    if (!state.shareMessages?.length) {
-      messageList.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:2rem;">No messages in this share.</p>';
-      return;
-    }
-    state.shareMessages.forEach(msg => {
-      const row = document.createElement('div');
-      row.className = `message-row ${msg.role}`;
-      if (msg.role === 'assistant') {
-        const h = document.createElement('div'); h.className = 'assistant-header-row';
-        h.innerHTML = '<img src="/logo.png" alt="agrideepai" class="assistant-avatar" /> <span class="assistant-name">agrideepai</span>';
-        row.appendChild(h);
-      }
-      const div = document.createElement('div'); div.className = `message ${msg.role}`;
-      const c = document.createElement('div'); c.className = 'message-content';
-      let html = marked.parse(cleanContent(msg.content) || ''); html = html.replace(/<hr\s*\/?>/g, '');
-      c.innerHTML = html; div.appendChild(c); row.appendChild(div); messageList.appendChild(row);
-    });
-    welcomeScreen.style.display = 'none';
-    messageList.style.display = 'flex';
+  const msgs = state.shareMessages || [];
+  if (!msgs.length) {
+    messageList.innerHTML = '<div style="text-align:center;padding:3rem 1rem;color:#98a2ad;font-size:1rem;line-height:1.6;">This shared chat is empty or the link has expired.</div>';
     return;
   }
+  msgs.forEach(msg => {
+    const row = document.createElement('div');
+    row.className = `message-row ${msg.role}`;
+    if (msg.role === 'assistant') {
+      const h = document.createElement('div'); h.className = 'assistant-header-row';
+      h.innerHTML = '<img src="/logo.png" alt="agrideepai" class="assistant-avatar" /> <span class="assistant-name">agrideepai</span>';
+      row.appendChild(h);
+    }
+    const div = document.createElement('div'); div.className = `message ${msg.role}`;
+    const c = document.createElement('div'); c.className = 'message-content';
+    c.innerHTML = safeMarkdown(msg.content);
+    div.appendChild(c); row.appendChild(div); messageList.appendChild(row);
+  });
+}
 
+function renderMessages() {
+  if (state.isShareView) { renderShareMessages(); return; }
+
+  messageList.innerHTML = '';
   if (!state.messages.length) {
     welcomeScreen.style.display = 'flex'; messageList.style.display = 'none'; return;
   }
@@ -368,9 +386,8 @@ function renderMessages() {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
-        if (state.editingMessageId === msg.id && msg.role === 'user') {
-      const area = document.createElement('div');
-      area.className = 'edit-area';
+    if (state.editingMessageId === msg.id && msg.role === 'user') {
+      const area = document.createElement('div'); area.className = 'edit-area';
       if (msg.files?.length) {
         const atts = document.createElement('div'); atts.className = 'attachments-above';
         msg.files.forEach(f => {
@@ -399,11 +416,9 @@ function renderMessages() {
       };
       ta.addEventListener('input', autoGrow);
       const g = document.createElement('div'); g.className = 'edit-actions';
-      const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
-      cancel.className = 'edit-btn-cancel';
+      const cancel = document.createElement('button'); cancel.textContent = 'Cancel'; cancel.className = 'edit-btn-cancel';
       cancel.onclick = () => { state.editingMessageId = null; renderMessages(); };
-      const send = document.createElement('button'); send.textContent = 'Send';
-      send.className = 'edit-btn-send';
+      const send = document.createElement('button'); send.textContent = 'Send'; send.className = 'edit-btn-send';
       send.onclick = async () => {
         const newContent = ta.value.trim(); if (!newContent) return;
         if (!state.messageVersions[msg.id]) state.messageVersions[msg.id] = { versions: [msg.content], currentIndex: 0 };
@@ -420,7 +435,6 @@ function renderMessages() {
       };
       g.appendChild(cancel); g.appendChild(send);
       area.appendChild(ta); area.appendChild(g); msgDiv.appendChild(area);
-      // Mark the bubble so CSS can keep the same box width/position
       msgDiv.classList.add('message-editing');
       row.appendChild(msgDiv); messageList.appendChild(row);
       setTimeout(() => { ta.focus(); autoGrow(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 50); return;
@@ -435,8 +449,8 @@ function renderMessages() {
         msgDiv.appendChild(t);
       } else if (msg.content) {
         const c = document.createElement('div'); c.className = 'message-content';
-        let html = marked.parse(cleanContent(msg.content) || ''); html = html.replace(/<hr\s*\/?>/g, '');
-        c.innerHTML = html; msgDiv.appendChild(c);
+        c.innerHTML = safeMarkdown(msg.content);
+        msgDiv.appendChild(c);
       }
     } else {
       if (msg.files?.length) {
@@ -463,7 +477,6 @@ function renderMessages() {
 
     if (state.editingMessageId !== msg.id && showActions) {
       const ar = document.createElement('div'); ar.className = 'message-actions-row';
-
       const copy = document.createElement('button'); copy.className = 'icon-button-sm';
       copy.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`; copy.title = 'Copy';
       copy.onclick = async (e) => {
@@ -528,14 +541,25 @@ function renderMessages() {
   });
 
   window.refreshIcons();
-  const container = document.getElementById('chatContainer');
-  if (container && (state.shouldScrollToBottom || isNearBottom(container))) {
-    container.scrollTop = container.scrollHeight; state.shouldScrollToBottom = false;
-  }
+  smartScroll();
 }
 
-function isNearBottom(container, threshold = 150) {
-  return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+// Streaming update: only touch the last assistant bubble, don't rebuild all
+function updateStreamingLast(fullContent) {
+  const rows = messageList.querySelectorAll('.message-row.assistant');
+  const row = rows[rows.length - 1];
+  if (!row) { renderMessages(); return; }
+  const msgDiv = row.querySelector('.message');
+  if (!msgDiv) { renderMessages(); return; }
+  const thinking = msgDiv.querySelector('.thinking-indicator');
+  if (thinking) thinking.remove();
+  let contentDiv = msgDiv.querySelector('.message-content');
+  if (!contentDiv) {
+    contentDiv = document.createElement('div'); contentDiv.className = 'message-content';
+    msgDiv.appendChild(contentDiv);
+  }
+  contentDiv.innerHTML = safeMarkdown(fullContent);
+  smartScroll();
 }
 
 function showToast(message, isError = false) {
@@ -644,12 +668,16 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
         if (parsed.text) {
           full += parsed.text;
           const last = state.messages[state.messages.length - 1];
-          if (last && last.role === 'assistant') { last.content = full; chat.messages = state.messages; renderMessages(); }
+          if (last && last.role === 'assistant') {
+            last.content = full; chat.messages = state.messages;
+            updateStreamingLast(full);   // <-- targeted update, preserves scroll
+          }
           if (versionData) { versionData.versions[versionData.versions.length - 1] = full; }
         }
       } catch (e) {}
     }
   }
+  // Final render with full message (adds action buttons)
   const last = state.messages[state.messages.length - 1];
   if (last && last.role === 'assistant' && last.content) {
     if (!state.messageVersions[last.id]) state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
@@ -657,7 +685,6 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
     if (v.versions.length === 0 || v.versions[v.versions.length - 1] !== last.content) { v.versions.push(last.content); v.currentIndex = v.versions.length - 1; }
     renderMessages();
   }
-  // For authenticated sends: poll until DB reflects both messages, then reload
   if (state.currentUser && !opts.skipCloudReload && !chat.id.startsWith('local_')) {
     await reloadAfterSend(chat.id, state.messages.length);
   } else if (!opts.skipCloudReload) {
@@ -771,20 +798,37 @@ function openChatMenu(e, chatId) {
   window.refreshIcons();
 }
 
+// FIXED: use contains() so inner SVG clicks don't close the sidebar
 document.addEventListener('click', (e) => {
+  if (window.innerWidth < 768
+      && sidebar.classList.contains('mobile-open')
+      && !sidebar.contains(e.target)
+      && !openSidebarBtn.contains(e.target)
+      && !e.target.closest('#openSidebarBtn')) {
+    sidebar.classList.remove('mobile-open');
+  }
   if (!chatMenu.contains(e.target) && !e.target.closest('.chat-item .actions')) chatMenu.classList.add('hidden');
 });
 
-function handleNewChat() {
-  const empty = state.chats.find(c => !c.messages || c.messages.length === 0);
-  if (empty) { selectChat(empty.id); return; }
-  createChat('New Chat').then(chat => {
-    if (chat) {
-      state.activeChatId = chat.id; state.messages = []; state.editingMessageId = null; state.messageVersions = {};
-      renderMessages(); renderChatList(); messageInput.focus();
-      if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
-    }
-  });
+// FIXED: always create a new chat unless current one is already blank
+async function handleNewChat() {
+  if (state.activeChatId && state.messages.length === 0 && !state.editingMessageId) {
+    // Current chat is already blank — just focus it
+    messageInput.focus();
+    if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
+    return;
+  }
+  const title = 'New Chat';
+  let chat;
+  if (state.currentUser) chat = await createChat(title);
+  else chat = createLocalChat(title);
+  if (!chat) return;
+  state.activeChatId = chat.id;
+  state.messages = []; state.editingMessageId = null; state.messageVersions = {};
+  state.attachments = []; state.shouldScrollToBottom = false;
+  renderMessages(); renderChatList(); renderAttachments();
+  messageInput.focus();
+  if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
 }
 
 function resizeComposer() {
@@ -848,7 +892,7 @@ async function sendMessage() {
     const newTitle = text.substring(0, 42) + (text.length > 42 ? '…' : '');
     chat.title = newTitle;
     if (state.currentUser && !chat.id.startsWith('local_')) {
-      try { await apiFetch(`/api/chat/conversations/${chat.id}`, { method: 'PUT', body: JSON.stringify({ title: newTitle }) }); } catch (e) { log('Title update failed', 'warn'); }
+      try { await apiFetch(`/api/chat/conversations/${chat.id}`, { method: 'PUT', body: JSON.stringify({ title: newTitle }) }); } catch (e) {}
     }
     renderChatList();
   }
@@ -1010,11 +1054,7 @@ function renderAuthForm(mode) {
       if (resendBtn.disabled) return;
       statDiv.textContent = 'Resending...'; statDiv.style.display = 'block'; errDiv.style.display = 'none';
       try {
-        const rr = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pendingToken: getToken() })
-        });
+        const rr = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: getToken() }) });
         const rd = await rr.json();
         if (!rr.ok) throw new Error(rd.error || 'Failed to resend');
         setToken(rd.pendingToken);
@@ -1022,8 +1062,7 @@ function renderAuthForm(mode) {
         showToast('New code sent.');
         attachCountdown(resendBtn);
       } catch (e) {
-        errDiv.textContent = e.message; errDiv.style.display = 'block';
-        statDiv.style.display = 'none';
+        errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none';
         resendBtn.disabled = false;
         if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; }
         resendBtn.textContent = resendBtn.dataset.originalText || 'Resend code';
@@ -1047,7 +1086,6 @@ function renderAuthForm(mode) {
         statDiv.textContent = 'Verification code sent.';
         const resendBtn = document.getElementById('resendVerifyBtn');
         wireResend(resendBtn, '/api/auth/resend-verification', () => state.pendingAuth, t => state.pendingAuth = t);
-
         document.getElementById('verifyBtn').onclick = async () => {
           const code = document.getElementById('verifyCode').value.trim();
           if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
@@ -1075,7 +1113,6 @@ function renderAuthForm(mode) {
         document.getElementById('verifySection').style.display = 'block';
         const resendBtn = document.getElementById('resendVerifyBtn');
         wireResend(resendBtn, '/api/auth/resend-login-code', () => state.pendingAuth, t => state.pendingAuth = t);
-
         document.getElementById('verifyBtn').onclick = async () => {
           const code = document.getElementById('verifyCode').value.trim();
           if (!code) { errDiv.textContent = 'Enter code'; errDiv.style.display = 'block'; return; }
@@ -1114,7 +1151,6 @@ function renderAuthForm(mode) {
   };
 }
 
-// ============ ACCOUNT MODAL ============
 async function openAccountModal() {
   if (!state.currentUser) return;
   let profile = {};
@@ -1147,10 +1183,7 @@ async function openAccountModal() {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === id));
     if (id === 'logout') {
       content.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure?</p><button class="btn-primary" id="loConfirm" style="background:var(--danger);">Log out</button><button class="btn-primary" id="loCancel" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
-      content.querySelector('#loConfirm').onclick = async () => {
-        await state.supabase.auth.signOut();
-        close(); showToast('Logged out');
-      };
+      content.querySelector('#loConfirm').onclick = async () => { await state.supabase.auth.signOut(); close(); showToast('Logged out'); };
       content.querySelector('#loCancel').onclick = () => render('profile');
       return;
     }
@@ -1232,18 +1265,15 @@ async function openAccountModal() {
       document.getElementById('curPwWrap').appendChild(createPasswordField('curPw', 'Current password'));
       document.getElementById('newPwWrap').appendChild(createPasswordField('newPw', 'New password'));
       window.refreshIcons();
-
       const pwLiveStatus = document.getElementById('pwLiveStatus');
       const pwIsStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
       const updatePwLive = () => {
         const cur = document.getElementById('curPw')?.value || '';
         const np = document.getElementById('newPw')?.value || '';
-        if (!cur && !np) { pwLiveStatus.textContent = ''; return; }
         if (!np) { pwLiveStatus.textContent = ''; return; }
         if (!pwIsStrong(np)) { pwLiveStatus.textContent = 'New password must be 8+ chars with letters and numbers'; pwLiveStatus.style.color = 'var(--danger)'; return; }
         if (np === cur) { pwLiveStatus.textContent = 'New password must be different from current password'; pwLiveStatus.style.color = 'var(--danger)'; return; }
-        pwLiveStatus.textContent = '✓ Password looks good';
-        pwLiveStatus.style.color = 'var(--accent)';
+        pwLiveStatus.textContent = '✓ Password looks good'; pwLiveStatus.style.color = 'var(--accent)';
       };
       document.getElementById('curPw').addEventListener('input', updatePwLive);
       document.getElementById('newPw').addEventListener('input', updatePwLive);
@@ -1283,7 +1313,6 @@ async function openAccountModal() {
         } catch (e) { showToast(e.message, true); }
       };
 
-      // ---- Change Password: VERIFY CURRENT FIRST before sending code ----
       let pwPendingToken = null;
       document.getElementById('changePwBtn').onclick = async () => {
         const cur = document.getElementById('curPw').value;
@@ -1291,16 +1320,11 @@ async function openAccountModal() {
         if (!cur || !np) { showToast('Fill both fields', true); return; }
         if (!pwIsStrong(np)) { showToast('New password must be 8+ chars with letters and numbers', true); return; }
         if (np === cur) { showToast('New password must be different from current password', true); return; }
-        // STEP 1: Verify current password BEFORE sending the code
         try {
           const vres = await apiFetch('/api/auth/verify-current-password', { method: 'POST', body: JSON.stringify({ password: cur }) });
           const vd = await vres.json();
           if (!vd.valid) throw new Error('Current password is incorrect');
-        } catch (e) {
-          showToast(e.message || 'Current password is incorrect', true);
-          return; // Do NOT send code
-        }
-        // STEP 2: Current password verified — now send the code
+        } catch (e) { showToast(e.message || 'Current password is incorrect', true); return; }
         try {
           const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
           const data = await res.json();
@@ -1376,9 +1400,7 @@ async function openAccountModal() {
           const d = await res.json();
           document.getElementById('qrCode').innerHTML = `<img src="${d.qrCodeDataUrl}" class="qr-code" />`;
           document.getElementById('manualSecret').textContent = d.secret;
-          document.getElementById('copySecretBtn').onclick = () => {
-            navigator.clipboard.writeText(d.secret).then(() => showToast('Secret copied!'));
-          };
+          document.getElementById('copySecretBtn').onclick = () => { navigator.clipboard.writeText(d.secret).then(() => showToast('Secret copied!')); };
           document.getElementById('twofaSetup').style.display = 'block';
           document.getElementById('verify2faBtn').onclick = async () => {
             const code = document.getElementById('twofaCodeIn').value.trim();
@@ -1397,9 +1419,7 @@ async function openAccountModal() {
 
 attachBtn.onclick = () => {
   const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*,.pdf,.txt,.doc,.docx';
-  input.multiple = true;
+  input.type = 'file'; input.accept = 'image/*,.pdf,.txt,.doc,.docx'; input.multiple = true;
   input.onchange = () => {
     const files = Array.from(input.files);
     if (files.some(f => f.size > 10 * 1024 * 1024)) { showToast('Max 10MB per file', true); return; }
@@ -1417,9 +1437,6 @@ sidebarToggle.onclick = () => {
   sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = c ? 'inline' : 'none';
 };
 openSidebarBtn.onclick = () => sidebar.classList.toggle('mobile-open');
-document.addEventListener('click', (e) => {
-  if (window.innerWidth < 768 && sidebar.classList.contains('mobile-open') && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
-});
 
 newChatBtn.onclick = handleNewChat;
 sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
@@ -1434,24 +1451,32 @@ shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.
 async function checkShareView() {
   const path = window.location.pathname;
   if (!path.startsWith('/share/')) return false;
-  const token = path.split('/share/')[1];
+  const token = path.split('/share/')[1].split('/')[0].split('?')[0];
   if (!token) return false;
   state.isShareView = true;
   document.body.classList.add('share-view');
+  messageList.style.display = 'flex';
+  messageList.innerHTML = '<div style="text-align:center;padding:3rem 1rem;color:#98a2ad;">Loading shared chat…</div>';
   try {
     const res = await fetch(`/api/share/${token}`);
-    if (!res.ok) throw new Error('Share not found');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Not found (${res.status})`);
+    }
     const data = await res.json();
-    state.shareMessages = data.messages || [];
-    renderMessages();
+    state.shareMessages = Array.isArray(data.messages) ? data.messages : [];
+    renderShareMessages();
     document.title = 'Shared Chat — AgriDeepAI';
   } catch (err) {
-    messageList.innerHTML = `<p style="color:var(--danger);text-align:center;padding:2rem;">Error loading share: ${err.message}</p>`;
+    messageList.style.display = 'flex';
+    messageList.innerHTML = `<div style="text-align:center;padding:3rem 1rem;color:#e85d5d;line-height:1.6;">Unable to load this shared chat:<br><span style="opacity:.75;font-size:.85rem;">${err.message}</span></div>`;
   }
   return true;
 }
 
 (async function init() {
-  const isShare = await checkShareView();
-  if (!isShare) { await initSupabase(); updateSendButton(); }
+  try {
+    const isShare = await checkShareView();
+    if (!isShare) { await initSupabase(); updateSendButton(); resizeComposer(); }
+  } catch (e) { log(`Init error: ${e.message}`, 'error'); }
 })();
