@@ -43,14 +43,23 @@ const signPending = (payload, ttl = 900) => jwt.sign(payload, JWT_SECRET, { expi
 const verifyPending = (token) => { try { return jwt.verify(token, JWT_SECRET); } catch { return null; } };
 
 // ============ AI PROVIDERS ============
+// --- Groq (primary) ---
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
-const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b','openai/gpt-oss-20b','qwen/qwen3.8-27b','qwen/qwen3.6-27b','groq/compound'];
-const GROQ_VISION_MODELS = ['qwen/qwen3.8-27b','qwen/qwen3.6-27b'];
+const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'groq/compound'];
+// Groq has no vision models on this account — skip and fall through to OpenRouter for images
+const GROQ_VISION_MODELS = [];
 
+// --- FHRouter (secondary — free, verified text-only) ---
+const FHROUTER_API_KEY = process.env.FHROUTER_API_KEY;
+const FHROUTER_URL = 'https://fhrouter.com/v1/chat/completions';
+const FHROUTER_TEXT_MODELS = ['deepseek-v4-flash', 'glm-5.3-flash', 'grok-4.6'];
+const FHROUTER_VISION_MODELS = []; // Free tier does not support vision (verified)
+
+// --- OpenRouter (tertiary) ---
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_TEXT_MODELS = ['meta-llama/llama-3.3-70b-instruct:free','qwen/qwen3-235b-a22b:free','mistralai/mistral-7b-instruct:free'];
+const OPENROUTER_TEXT_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3-235b-a22b:free', 'mistralai/mistral-7b-instruct:free'];
 const OPENROUTER_VISION_MODELS = ['qwen/qwen2.5-vl-72b-instruct:free'];
 
 const openRouterCooldown = {};
@@ -88,6 +97,8 @@ app.get('/api/debug/groq-models', async (req, res) => {
 // ---------- AI Streaming ----------
 async function getAIStream(chatMessages, imageData = null) {
   const errors = [];
+
+  // --- 1. Groq ---
   if (groq) {
     const models = imageData ? GROQ_VISION_MODELS : GROQ_TEXT_MODELS;
     for (const model of models) {
@@ -101,10 +112,41 @@ async function getAIStream(chatMessages, imageData = null) {
       }
     }
   }
+
+  // --- 2. FHRouter ---
+  if (FHROUTER_API_KEY) {
+    const models = imageData ? FHROUTER_VISION_MODELS : FHROUTER_TEXT_MODELS;
+    for (const model of models) {
+      const cdKey = `fhrouter:${model}`;
+      if (isCoolingDown(cdKey)) continue;
+      try {
+        const response = await axios.post(FHROUTER_URL, {
+          model, messages: chatMessages, temperature: 0.6, max_tokens: 1500, stream: true,
+        }, {
+          headers: {
+            'Authorization': `Bearer ${FHROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'stream', timeout: 45000,
+        });
+        log(`✅ Using FHRouter: ${model}`, 'info');
+        return { stream: response.data, provider: 'fhrouter', model };
+      } catch (err) {
+        const status = err.response?.status;
+        log(`⚠️ FHRouter ${model}: ${status || err.message}`, 'warn');
+        errors.push(`fhrouter:${model}`);
+        if (status === 429) markCooldown(cdKey, 120);
+        if (status === 404 || status === 400) markCooldown(cdKey, 300);
+      }
+    }
+  }
+
+  // --- 3. OpenRouter ---
   if (OPENROUTER_API_KEY) {
     const models = imageData ? OPENROUTER_VISION_MODELS : OPENROUTER_TEXT_MODELS;
     for (const model of models) {
-      if (isCoolingDown(model)) continue;
+      const cdKey = `openrouter:${model}`;
+      if (isCoolingDown(cdKey)) continue;
       try {
         let finalMessages = chatMessages;
         if (imageData) {
@@ -135,15 +177,14 @@ async function getAIStream(chatMessages, imageData = null) {
         const status = err.response?.status;
         log(`⚠️ OpenRouter ${model}: ${status || err.message}`, 'warn');
         errors.push(`openrouter:${model}`);
-        if (status === 429) markCooldown(model, 120);
-        if (status === 404 || status === 400) markCooldown(model, 300);
+        if (status === 429) markCooldown(cdKey, 120);
+        if (status === 404 || status === 400) markCooldown(cdKey, 300);
       }
     }
   }
   throw new Error(`All AI providers failed. Tried: ${errors.join(', ')}`);
 }
 
-// ---- FIX: await onDone BEFORE res.end() to avoid race condition ----
 function consumeGroqStream(stream, res, onDone) {
   let full = '';
   (async () => {
@@ -164,7 +205,8 @@ function consumeGroqStream(stream, res, onDone) {
   })();
 }
 
-function consumeOpenRouterStream(stream, res, onDone) {
+// Shared by FHRouter + OpenRouter — both use OpenAI-compatible SSE format
+function consumeOpenAICompatibleStream(stream, res, onDone) {
   let full = '';
   let buffer = '';
   stream.on('data', (chunk) => {
@@ -190,7 +232,7 @@ function consumeOpenRouterStream(stream, res, onDone) {
     res.end();
   });
   stream.on('error', (err) => {
-    log(`OpenRouter stream error: ${err.message}`, 'error');
+    log(`Stream error: ${err.message}`, 'error');
     if (!res.headersSent) res.status(500).json({ error: err.message });
     else { res.write(`data: ${JSON.stringify({ done: true })}\n\n`); res.write('data: [DONE]\n\n'); res.end(); }
   });
@@ -204,7 +246,7 @@ async function streamAI(messages, res, imageData = null, onDone = null) {
   try {
     const { stream, provider } = await getAIStream(messages, imageData);
     if (provider === 'groq') consumeGroqStream(stream, res, onDone);
-    else consumeOpenRouterStream(stream, res, onDone);
+    else consumeOpenAICompatibleStream(stream, res, onDone);
   } catch (err) {
     log(`streamAI fatal: ${err.message}`, 'error');
     const friendly = `I'm having trouble reaching my AI service right now. Please try again in a moment.`;
@@ -219,17 +261,26 @@ async function streamAI(messages, res, imageData = null, onDone = null) {
   }
 }
 
-// ---------- Tavily ----------
+// ---------- Tavily (fixed: Bearer auth, no api_key in body) ----------
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 async function tavilySearch(query) {
   if (!TAVILY_API_KEY) return null;
   try {
     const r = await axios.post('https://api.tavily.com/search', {
-      api_key: TAVILY_API_KEY, query, search_depth: 'basic',
+      query, search_depth: 'basic',
       include_answer: true, include_raw_content: false, include_images: false, max_results: 4,
-    }, { timeout: 8000 });
+    }, {
+      headers: {
+        'Authorization': `Bearer ${TAVILY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 8000,
+    });
     return r.data;
-  } catch (err) { log(`Tavily error: ${err.message}`, 'error'); return null; }
+  } catch (err) {
+    log(`Tavily error: ${err.response?.status || err.message}`, 'warn');
+    return null;
+  }
 }
 
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
@@ -377,7 +428,6 @@ async function sendVerificationEmail(email, code, action = 'verify', extra = '')
   } catch (err) { log(`Email send error: ${err.message}`, 'error'); throw err; }
 }
 
-// ---------- New login notification ----------
 async function sendLoginNotification(email, ip, device, time) {
   try {
     const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>New sign-in to AgriDeepAI</title>
@@ -412,20 +462,24 @@ async function trackSession(userId, email, req) {
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: recent } = await supabase.from('sessions')
+    const { data: recent, error: recentErr } = await supabase.from('sessions')
       .select('*').eq('user_id', userId).gte('last_active', thirtyDaysAgo);
+    if (recentErr) log(`trackSession read error: ${recentErr.message}`, 'warn');
 
     const isNewDevice = !recent || !recent.some(s => s.ip === ip && s.user_agent === ua);
+    const hasAnyPrevious = !!(recent && recent.length > 0);
 
-    await supabase.from('sessions').insert({
+    const { error: insErr } = await supabase.from('sessions').insert({
       user_id: userId,
       device: ua.substring(0, 120),
       ip, user_agent: ua,
     });
+    if (insErr) log(`trackSession insert error: ${insErr.message}`, 'error');
 
-    if (isNewDevice && recent && recent.length > 0 && email) {
-      // fire and forget
-      sendLoginNotification(email, ip, ua.substring(0, 120), new Date().toLocaleString()).catch(() => {});
+    // Fire new-device notification only if this is NOT the very first-ever session
+    if (isNewDevice && hasAnyPrevious && email) {
+      sendLoginNotification(email, ip, ua.substring(0, 120), new Date().toLocaleString())
+        .catch(e => log(`Login notification failed: ${e.message}`, 'warn'));
     }
   } catch (err) { log(`trackSession error: ${err.message}`, 'warn'); }
 }
@@ -519,7 +573,6 @@ app.post('/api/auth/verify-login', async (req, res) => {
       const twoFactorToken = signPending({ type: '2fa', email: p.email, access_token: p.access_token, refresh_token: p.refresh_token, user: p.user });
       return res.json({ requires2fa: true, twoFactorToken, message: 'Email verified. Now enter your 2FA code.' });
     }
-    // Track this login
     await trackSession(p.user.id, p.user.email, req);
     const session = { access_token: p.access_token, refresh_token: p.refresh_token };
     res.json({ user: p.user, session, message: 'Login successful' });
@@ -607,7 +660,6 @@ app.post('/api/auth/2fa/enable', authenticate, async (req, res) => {
     const secret = speakeasy.generateSecret({ length: 20, name: 'AgriDeepAI' });
     await supabase.from('profiles').update({ two_factor_secret: secret.base32 }).eq('id', req.user.id);
     const qrCodeDataUrl = await QRCode.toDataURL(secret.otpauth_url);
-    // FIX: return the plaintext secret so users can copy it manually
     res.json({ secret: secret.base32, otpauth_url: secret.otpauth_url, qrCodeDataUrl });
   } catch (err) { res.status(500).json({ error: 'Failed to enable 2FA' }); }
 });
@@ -631,14 +683,14 @@ app.post('/api/auth/2fa/disable', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to disable 2FA' }); }
 });
 
-// Sessions list
 app.get('/api/auth/sessions', authenticate, async (req, res) => {
   try {
     const ua = req.headers['user-agent'] || 'Unknown';
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
-    const { data: sessions } = await supabase.from('sessions')
+    const { data: sessions, error } = await supabase.from('sessions')
       .select('*').eq('user_id', req.user.id)
       .order('last_active', { ascending: false });
+    if (error) log(`sessions fetch error: ${error.message}`, 'warn');
     res.json({
       current: { user_agent: ua, ip, signed_in_at: new Date().toISOString(), email: req.user.email },
       all: sessions || [],
@@ -647,7 +699,6 @@ app.get('/api/auth/sessions', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Sign out a specific session
 app.delete('/api/auth/sessions/:id', authenticate, async (req, res) => {
   try {
     await supabase.from('sessions').delete().eq('id', req.params.id).eq('user_id', req.user.id);
@@ -669,7 +720,7 @@ app.get('/api/config', (req, res) => res.json({
 
 // ============ CHAT ============
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT) {
-  const history = messages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role: m.role, content: String(m.content || '') }));
+  const history = messages.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content && String(m.content).trim()).map(m => ({ role: m.role, content: String(m.content || '') }));
   return [{ role: 'system', content: systemPrompt }, ...history];
 }
 async function enrichWithWebSearch(query) {
@@ -693,7 +744,8 @@ app.post('/api/chat/guest', async (req, res) => {
     if (!Array.isArray(messages) || messages.length === 0) return res.status(400).json({ error: 'Messages required' });
     if (await tryIdentityShortcut(messages, res)) return;
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    const enrichedPrompt = await enrichWithWebSearch(lastUser.content);
+    if (!lastUser) return res.status(400).json({ error: 'No user message' });
+    const enrichedPrompt = await enrichWithWebSearch(lastUser.content || '');
     const withoutLast = messages.slice(0, messages.lastIndexOf(lastUser));
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
     const imageData = image ? { base64: image.base64, mimeType: image.mimeType } : null;
@@ -799,113 +851,4 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
 
     await streamAI(chatMessages, res, imageData, async (full) => {
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full, versions: [full], current_version_index: 0 });
-      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
-    });
-  } catch (err) {
-    log(`Send message error: ${err.message}`, 'error');
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-  }
-});
-
-app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
-  try {
-    const conversationId = req.params.id;
-    const { messageIndex } = req.body;
-    const { data: all } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
-    if (messageIndex >= all.length || all[messageIndex].role !== 'assistant') return res.status(400).json({ error: 'Invalid index' });
-    const idsToDelete = all.slice(messageIndex).map(m => m.id);
-    if (idsToDelete.length) await supabase.from('messages').delete().in('id', idsToDelete);
-    const { data: remaining } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
-    if (!remaining.length || remaining[remaining.length - 1].role !== 'user') return res.status(400).json({ error: 'No user message' });
-    const chatMessages = buildChatMessages(remaining);
-    await streamAI(chatMessages, res, null, async (full) => {
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full });
-      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
-    });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { content, truncate } = req.body;
-    const { data: msg } = await supabase.from('messages').select('*, conversation_id, conversations(user_id)').eq('id', id).single();
-    if (!msg || msg.conversations.user_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
-    if (msg.role !== 'user') return res.status(400).json({ error: 'Only user messages can be edited' });
-    await supabase.from('messages').update({ content }).eq('id', id);
-    if (truncate) {
-      const { data: later } = await supabase.from('messages').select('id').eq('conversation_id', msg.conversation_id).gt('created_at', msg.created_at);
-      if (later.length) await supabase.from('messages').delete().in('id', later.map(m => m.id));
-      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', msg.conversation_id);
-    }
-    res.json({ message: 'Updated' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ============ SHARE ============
-app.post('/api/chat/share/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { data: conv } = await supabase.from('conversations').select('id').eq('id', id).eq('user_id', req.user.id).single();
-    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
-    const token = crypto.randomBytes(16).toString('hex');
-    const { error } = await supabase.from('shared_links').insert({ conversation_id: id, token }).select().single();
-    if (error) throw error;
-    res.json({ url: `${process.env.FRONTEND_URL}/share/${token}` });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/share/guest', async (req, res) => {
-  try {
-    const { messages } = req.body;
-    if (!messages?.length) return res.status(400).json({ error: 'No messages to share' });
-    const token = crypto.randomBytes(16).toString('hex');
-    const { error } = await supabase.from('guest_shares').insert({ token, messages }).select().single();
-    if (error) throw error;
-    res.json({ url: `${process.env.FRONTEND_URL}/share/${token}` });
-  } catch (err) { res.status(500).json({ error: 'Failed to generate share link.' }); }
-});
-
-app.get('/api/share/:token', async (req, res) => {
-  try {
-    const { token } = req.params;
-    let { data } = await supabase.from('shared_links').select('conversation_id').eq('token', token).single();
-    if (data?.conversation_id) {
-      const { data: msgs } = await supabase.from('messages').select('*').eq('conversation_id', data.conversation_id).order('created_at', { ascending: true });
-      return res.json({ messages: msgs || [] });
-    }
-    const { data: guestData, error: ge } = await supabase.from('guest_shares').select('messages').eq('token', token).single();
-    if (ge || !guestData) return res.status(404).json({ error: 'Share not found' });
-    res.json({ messages: guestData.messages });
-  } catch (err) { res.status(500).json({ error: 'Error retrieving shared messages' }); }
-});
-
-// ============ SERVE FRONTEND ============
-const frontendPath = path.join(__dirname, '../frontend');
-
-// No-cache on HTML/CSS/JS so share-view fixes apply immediately
-app.get('/share/*', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  res.sendFile(path.join(frontendPath, 'index.html'));
-});
-app.use(express.static(frontendPath, {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html') || filePath.endsWith('.css') || filePath.endsWith('.js')) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-    }
-  }
-}));
-app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
-
-app.listen(PORT, () => {
-  log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
-  log(`Primary: ${GROQ_API_KEY ? 'Groq' : 'none'} | Fallback: ${OPENROUTER_API_KEY ? 'OpenRouter' : 'none'}`, 'info');
-  log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'}`, 'info');
-  log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
-});
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full, versions: [full], current
