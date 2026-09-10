@@ -13,6 +13,13 @@
   <link rel="icon" href="/logo.png" type="image/png" />
   <link rel="apple-touch-icon" href="/logo.png" />
   <link rel="stylesheet" href="style.css" />
+  <script>
+    // Share-view flag: set BEFORE body renders so the sidebar/composer never flash
+    if (window.location.pathname.startsWith('/share/')) {
+      document.documentElement.classList.add('is-share-view');
+      document.documentElement.style.background = '#171b20';
+    }
+  </script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
