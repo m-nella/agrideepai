@@ -409,6 +409,7 @@ body {
 .message-actions-row .icon-button-sm:active { transform: scale(0.9); }
 .message-actions-row .icon-button-sm.liked { color: var(--accent); }
 .message-actions-row .icon-button-sm.disliked { color: var(--danger); }
+.message-actions-row .icon-button-sm.copied { color: var(--accent); }
 
 .version-controls {
   display: flex;
@@ -462,15 +463,24 @@ body {
   padding: 0.25rem 0;
 }
 .attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 0.2rem 0.6rem 0.2rem 0.4rem;
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+.attachment-chip img {
+  width: 30px;
+  height: 30px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.attachment-chip .file-name {
+  display: none;
 }
 .attachment-chip button {
   background: none; border: none;
@@ -792,15 +802,7 @@ body {
   #sidebar.collapsed .auth-btn span { display: none; }
 }
 
-.attachment-chip img {
-  width: 40px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-/* (Your existing CSS) ... then at the end add: */
-
-/* 2FA QR code container */
+/* Additional styles for 2FA, etc. */
 .twofa-setup {
   display: flex;
   flex-direction: column;
@@ -819,138 +821,4 @@ body {
   max-width: 200px;
   text-align: center;
   letter-spacing: 4px;
-}
-
-.attachment-chip img {
-  width: 40px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-/* Copy button flash */
-.icon-button-sm.copied {
-  color: var(--accent);
-  transition: color 0.1s;
-}
-
-/* Liked / Disliked colours */
-.icon-button-sm.liked {
-  color: var(--accent);
-}
-.icon-button-sm.disliked {
-  color: var(--danger);
-}
-
-/* QR code for 2FA */
-.twofa-setup {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-}
-.twofa-setup img.qr-code {
-  width: 200px;
-  height: 200px;
-  border-radius: 8px;
-  background: white;
-  padding: 8px;
-}
-.twofa-setup input {
-  width: 100%;
-  max-width: 200px;
-  text-align: center;
-  letter-spacing: 4px;
-}
-
-/* Attachment thumbnail */
-.attachment-chip img {
-  width: 40px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-
-/* Version controls styling */
-.version-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-.version-controls button {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted);
-  padding: 0.1rem;
-  border-radius: 4px;
-}
-.version-controls button:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-.version-controls button:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-/* Icon active states */
-.message-actions-row .icon-button-sm.liked {
-  color: var(--accent);
-}
-.message-actions-row .icon-button-sm.disliked {
-  color: var(--danger);
-}
-.message-actions-row .icon-button-sm.copied {
-  color: var(--accent);
-}
-.message-actions-row .icon-button-sm.copied i {
-  color: var(--accent);
-}
-
-/* Attachment chips inside composer */
-.attachment-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 0.2rem 0.6rem 0.2rem 0.4rem;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-.attachment-chip img {
-  width: 30px;
-  height: 30px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-.attachment-chip .file-name {
-  display: none; /* hide file name, show only icon/image */
-}
-
-/* Attachment preview in user message (small thumbnails) */
-.user-message-attachment {
-  display: inline-block;
-  margin: 0.2rem 0.2rem 0.2rem 0;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  max-width: 80px;
-  max-height: 80px;
-}
-.user-message-attachment img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.user-message-attachment .file-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 80px;
-  height: 80px;
-  background: var(--surface-hover);
-  color: var(--text-muted);
 }
