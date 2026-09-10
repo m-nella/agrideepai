@@ -389,15 +389,12 @@ const getClientId = (req) => {
 const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
 const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 
-// Returns true if the WHOLE message is JUST a greeting word (e.g. "hi", "hello")
-// NOT if the message merely starts with one — fixes "Hi, what is your name?"
 function isGreetingOnly(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,;:]/g, '').replace(/\s+/g, ' ');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
     'muraho','mwaramutse','mwiriwe','amakuru','bite','salam','bonjour','salut','jambo','habari','hi bot','hello bot'];
   return greetings.includes(t);
 }
-// Kept for backend greeting-shortcut logic (uses broader match)
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
@@ -446,21 +443,13 @@ async function tryIdentityShortcut(messages, res) {
 }
 
 // ============ CHAT TITLE GENERATOR ============
-// Asks the AI to summarise what the user's message is ABOUT (topic/intent),
-// NOT to repeat the message. Handles greetings and creator questions as
-// fixed, well-known titles.
 async function generateChatTitle(userMessage) {
   const msg = (userMessage || '').trim();
   if (!msg) return 'New Chat';
 
-  // Special-case: message that IS only a greeting → fixed title
-  if (isGreetingOnly(msg)) {
-    return /muraho|mwaramutse|mwiriwe|amakuru|bite|jambo|habari|bonjour|salut|salam/i.test(msg)
-      ? 'Greeting' : 'Greeting';
-  }
+  if (isGreetingOnly(msg)) return 'Greeting';
   if (isCreatorQuestion(msg)) return 'About AgriDeepAI';
 
-  // Prompt the AI to produce a topical title, not an echo
   const prompt = `You write short titles for chat conversations, in the style of ChatGPT sidebar names.
 
 Read the USER MESSAGE below. Reply with ONLY the conversation title — never repeat the user's exact words.
@@ -492,18 +481,14 @@ Title:`;
 
   const cleanTitle = (raw) => {
     let t = String(raw || '').trim();
-    // Remove quotes and stray punctuation
     t = t.replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, '').replace(/\.+$/, '').trim();
-    // Remove "Title:" or "Chat:" prefix
     if (/^(title|chat title|chat)\s*[:\-]\s*/i.test(t)) t = t.replace(/^(title|chat title|chat)\s*[:\-]\s*/i, '').trim();
-    // Sometimes the model prepends a newline — take the first non-empty line
     const lines = t.split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length > 1) {
       const short = lines.find(l => l.length <= 60 && !/^(sure|here|the title)/i.test(l)) || lines[0];
       t = short;
     }
     if (t.length === 0) return null;
-    // Reject obvious echoes of the user message
     const msgNorm = msg.toLowerCase().replace(/\s+/g, ' ').trim();
     const tNorm = t.toLowerCase().replace(/\s+/g, ' ').trim();
     if (tNorm === msgNorm) return null;
@@ -511,8 +496,6 @@ Title:`;
     return t;
   };
 
-  // Try Groq first — use the bigger model, higher token budget so reasoning
-  // doesn't eat the whole answer
   if (groq) {
     for (const model of ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']) {
       try {
@@ -534,7 +517,6 @@ Title:`;
       }
     }
   }
-  // Try FHRouter
   if (FHROUTER_API_KEY) {
     for (const model of FHROUTER_TEXT_MODELS.slice(0, 2)) {
       try {
@@ -555,7 +537,6 @@ Title:`;
       }
     }
   }
-  // Try OpenRouter
   if (OPENROUTER_API_KEY) {
     for (const model of OPENROUTER_TEXT_MODELS) {
       try {
@@ -581,46 +562,64 @@ Title:`;
       }
     }
   }
-  // Last-resort fallback — use the first few words + ellipsis (NOT the whole text)
   const firstWords = msg.split(/\s+/).slice(0, 5).join(' ');
   return firstWords + (msg.split(/\s+/).length > 5 ? '…' : '');
 }
 
+// ============ EMAIL ============
 async function sendEmail(to, subject, htmlContent) {
   const sendSmtpEmail = new brevo.SendSmtpEmail();
   sendSmtpEmail.subject = subject;
   sendSmtpEmail.htmlContent = htmlContent;
   sendSmtpEmail.sender = { name: 'AgriDeepAI', email: 'noreply@agrideepai.agentdomains.co' };
   sendSmtpEmail.to = [{ email: to }];
-  await brevoApi.sendTransacEmail(sendSmtpEmail);
+  const result = await brevoApi.sendTransacEmail(sendSmtpEmail);
+  return result;
+}
+
+// Wraps email send with one retry on failure
+async function sendVerificationEmailWithRetry(email, code, action = 'verify', extra = '') {
+  try {
+    await sendVerificationEmail(email, code, action, extra);
+    return true;
+  } catch (firstErr) {
+    log(`[EMAIL] First attempt failed for ${email} (${action}): ${firstErr.message}. Retrying in 1.5s...`, 'warn');
+    await new Promise(r => setTimeout(r, 1500));
+    try {
+      await sendVerificationEmail(email, code, action, extra);
+      log(`[EMAIL] ✅ Retry succeeded for ${email} (${action})`, 'info');
+      return true;
+    } catch (secondErr) {
+      log(`[EMAIL] ❌ Retry also failed for ${email} (${action}): ${secondErr.message}`, 'error');
+      throw secondErr;
+    }
+  }
 }
 
 async function sendVerificationEmail(email, code, action = 'verify', extra = '') {
-  try {
-    const expiration = '10 minutes';
-    const actionMap = {
-      'verify': 'Verify your account','change-email': 'Change your email',
-      'change-password': 'Change your password','delete-account': 'Delete your account',
-      'signup': 'Complete your registration','login': 'Complete your sign-in',
-    };
-    const subject = actionMap[action] || 'Verification code';
-    const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${subject}</title>
-      <style>body{font-family:Arial,sans-serif;background:#f4f4f4;padding:20px}
-      .container{max-width:560px;margin:0 auto;background:#fff;padding:30px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.1)}
-      .logo{text-align:center;margin-bottom:20px}.logo img{height:60px}
-      h1{color:#1e232a;font-size:24px;margin:0 0 8px}p{color:#555;font-size:16px;line-height:1.6}
-      .code{font-size:28px;font-weight:bold;color:#2f8f46;background:#f0f8f0;padding:10px 20px;border-radius:8px;display:inline-block;letter-spacing:4px;margin:10px 0}
-      .footer{margin-top:30px;font-size:13px;color:#888;border-top:1px solid #eee;padding-top:20px;text-align:center}</style>
-      </head><body><div class="container">
-      <div class="logo"><img src="${LOGO_URL}" alt="AgriDeepAI" /></div>
-      <h1>${subject}</h1><p>${extra} Use the code below to continue.</p>
-      <div style="text-align:center"><span class="code">${code}</span></div>
-      <p><strong>This code is valid for ${expiration}.</strong> If you didn't request this, ignore this email.</p>
-      <div class="footer">&copy; 2026 AgriDeepAI. All rights reserved.</div>
-      </div></body></html>`;
-    await sendEmail(email, subject, htmlContent);
-    log(`Verification email sent to ${email} (${action})`, 'info');
-  } catch (err) { log(`Email send error: ${err.message}`, 'error'); throw err; }
+  const expiration = '10 minutes';
+  const actionMap = {
+    'verify': 'Verify your account','change-email': 'Change your email',
+    'change-password': 'Change your password','delete-account': 'Delete your account',
+    'signup': 'Complete your registration','login': 'Complete your sign-in',
+  };
+  const subject = actionMap[action] || 'Verification code';
+  const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${subject}</title>
+    <style>body{font-family:Arial,sans-serif;background:#f4f4f4;padding:20px}
+    .container{max-width:560px;margin:0 auto;background:#fff;padding:30px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.1)}
+    .logo{text-align:center;margin-bottom:20px}.logo img{height:60px}
+    h1{color:#1e232a;font-size:24px;margin:0 0 8px}p{color:#555;font-size:16px;line-height:1.6}
+    .code{font-size:28px;font-weight:bold;color:#2f8f46;background:#f0f8f0;padding:10px 20px;border-radius:8px;display:inline-block;letter-spacing:4px;margin:10px 0}
+    .footer{margin-top:30px;font-size:13px;color:#888;border-top:1px solid #eee;padding-top:20px;text-align:center}</style>
+    </head><body><div class="container">
+    <div class="logo"><img src="${LOGO_URL}" alt="AgriDeepAI" /></div>
+    <h1>${subject}</h1><p>${extra} Use the code below to continue.</p>
+    <div style="text-align:center"><span class="code">${code}</span></div>
+    <p><strong>This code is valid for ${expiration}.</strong> If you didn't request this, ignore this email.</p>
+    <div class="footer">&copy; 2026 AgriDeepAI. All rights reserved.</div>
+    </div></body></html>`;
+  await sendEmail(email, subject, htmlContent);
+  log(`Verification email sent to ${email} (${action})`, 'info');
 }
 
 async function sendLoginNotification(email, ip, device, time) {
@@ -705,9 +704,12 @@ app.post('/api/auth/signup', async (req, res) => {
       return res.status(400).json({ error: 'Email already registered. Please sign in.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const pendingToken = signPending({ type: 'signup', email, code, password, fullName: fullName || email.split('@')[0] });
-    await sendVerificationEmail(email, code, 'signup', 'To complete your registration, use the code below.');
+    await sendVerificationEmailWithRetry(email, code, 'signup', 'To complete your registration, use the code below.');
     res.status(200).json({ message: 'Verification code sent to your email.', email, pendingToken });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) {
+    log(`[SIGNUP] Error: ${err.message}`, 'error');
+    res.status(400).json({ error: err.message || 'Signup failed' });
+  }
 });
 
 app.post('/api/auth/confirm-signup', async (req, res) => {
@@ -729,16 +731,42 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// ============ RESEND VERIFICATION (signup) ============
 app.post('/api/auth/resend-verification', async (req, res) => {
   try {
     const { pendingToken } = req.body;
+    log(`[RESEND-SIGNUP] Request received. Token length: ${pendingToken ? pendingToken.length : 0}`, 'info');
+
+    if (!pendingToken) {
+      log(`[RESEND-SIGNUP] No pendingToken provided`, 'warn');
+      return res.status(400).json({ error: 'Your session expired. Please sign up again.' });
+    }
+
     const p = verifyPending(pendingToken);
-    if (!p || p.type !== 'signup') return res.status(400).json({ error: 'No pending registration found.' });
+    if (!p) {
+      log(`[RESEND-SIGNUP] Token verification failed (expired or invalid signature)`, 'warn');
+      return res.status(400).json({ error: 'Your session expired. Please sign up again.' });
+    }
+    if (p.type !== 'signup') {
+      log(`[RESEND-SIGNUP] Wrong token type: ${p.type}`, 'warn');
+      return res.status(400).json({ error: 'Invalid session. Please sign up again.' });
+    }
+    if (!p.email || !p.password) {
+      log(`[RESEND-SIGNUP] Missing email or password in token`, 'warn');
+      return res.status(400).json({ error: 'Session data incomplete. Please sign up again.' });
+    }
+
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const newToken = signPending({ ...p, code });
-    await sendVerificationEmail(p.email, code, 'signup', 'Resend: complete your registration.');
+    log(`[RESEND-SIGNUP] Sending new code to ${p.email}`, 'info');
+    await sendVerificationEmailWithRetry(p.email, code, 'signup', 'Resend: complete your registration.');
+    log(`[RESEND-SIGNUP] ✅ Success for ${p.email}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
-  } catch (err) { res.status(500).json({ error: 'Failed to resend code.' }); }
+  } catch (err) {
+    log(`[RESEND-SIGNUP] ❌ Error: ${err.message}`, 'error');
+    log(`[RESEND-SIGNUP] Stack: ${err.stack || 'n/a'}`, 'error');
+    res.status(500).json({ error: `Failed to resend code: ${err.message || 'unknown error'}` });
+  }
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -749,26 +777,64 @@ app.post('/api/auth/login', async (req, res) => {
     if (error) throw error;
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', data.user.id).single();
     const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Trim pending token: only the essentials (avoids huge JWT)
     const pendingToken = signPending({
-      type: 'login', email, code,
-      access_token: data.session.access_token, refresh_token: data.session.refresh_token,
-      user: data.user, two_factor_enabled: !!profile?.two_factor_enabled,
+      type: 'login',
+      email,
+      code,
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      userId: data.user.id,
+      userEmail: data.user.email,
+      userCreatedAt: data.user.created_at,
+      userLastSignInAt: data.user.last_sign_in_at || null,
+      two_factor_enabled: !!profile?.two_factor_enabled,
     });
-    await sendVerificationEmail(email, code, 'login', 'Use the code below to complete your sign-in.');
+    log(`[LOGIN] Issued pending token (${pendingToken.length} chars) for ${email}`, 'debug');
+    await sendVerificationEmailWithRetry(email, code, 'login', 'Use the code below to complete your sign-in.');
     res.json({ requiresCode: true, email, pendingToken, message: 'Verification code sent to your email.' });
-  } catch (err) { log(`Login error: ${err.message}`, 'warn'); res.status(401).json({ error: err.message }); }
+  } catch (err) {
+    log(`[LOGIN] Error: ${err.message}`, 'warn');
+    res.status(401).json({ error: err.message || 'Login failed' });
+  }
 });
 
+// ============ RESEND LOGIN CODE ============
 app.post('/api/auth/resend-login-code', async (req, res) => {
   try {
     const { pendingToken } = req.body;
+    log(`[RESEND-LOGIN] Request received. Token length: ${pendingToken ? pendingToken.length : 0}`, 'info');
+
+    if (!pendingToken) {
+      log(`[RESEND-LOGIN] No pendingToken provided`, 'warn');
+      return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
+    }
+
     const p = verifyPending(pendingToken);
-    if (!p || p.type !== 'login') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
+    if (!p) {
+      log(`[RESEND-LOGIN] Token verification failed (expired or invalid signature)`, 'warn');
+      return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
+    }
+    if (p.type !== 'login') {
+      log(`[RESEND-LOGIN] Wrong token type: ${p.type}`, 'warn');
+      return res.status(400).json({ error: 'Invalid session. Please sign in again.' });
+    }
+    if (!p.email) {
+      log(`[RESEND-LOGIN] No email in token payload`, 'warn');
+      return res.status(400).json({ error: 'Session data missing email. Please sign in again.' });
+    }
+
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const newToken = signPending({ ...p, code });
-    await sendVerificationEmail(p.email, code, 'login', 'Resend: use the code below to complete your sign-in.');
+    log(`[RESEND-LOGIN] Sending new code to ${p.email}`, 'info');
+    await sendVerificationEmailWithRetry(p.email, code, 'login', 'Resend: use the code below to complete your sign-in.');
+    log(`[RESEND-LOGIN] ✅ Success for ${p.email}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
-  } catch (err) { res.status(500).json({ error: 'Failed to resend code.' }); }
+  } catch (err) {
+    log(`[RESEND-LOGIN] ❌ Error: ${err.message}`, 'error');
+    log(`[RESEND-LOGIN] Stack: ${err.stack || 'n/a'}`, 'error');
+    res.status(500).json({ error: `Failed to resend code: ${err.message || 'unknown error'}` });
+  }
 });
 
 app.post('/api/auth/verify-login', async (req, res) => {
@@ -777,12 +843,25 @@ app.post('/api/auth/verify-login', async (req, res) => {
     const p = verifyPending(pendingToken);
     if (!p || p.type !== 'login') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
     if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
+    // Reconstruct a minimal user object from token
+    const user = {
+      id: p.userId,
+      email: p.userEmail || p.email,
+      created_at: p.userCreatedAt,
+      last_sign_in_at: p.userLastSignInAt,
+    };
     if (p.two_factor_enabled) {
-      const twoFactorToken = signPending({ type: '2fa', email: p.email, access_token: p.access_token, refresh_token: p.refresh_token, user: p.user });
+      const twoFactorToken = signPending({
+        type: '2fa',
+        email: p.email,
+        access_token: p.access_token,
+        refresh_token: p.refresh_token,
+        user,
+      });
       return res.json({ requires2fa: true, twoFactorToken, message: 'Email verified. Now enter your 2FA code.' });
     }
-    await trackSession(p.user.id, p.user.email, req);
-    res.json({ user: p.user, session: { access_token: p.access_token, refresh_token: p.refresh_token }, message: 'Login successful' });
+    await trackSession(user.id, user.email, req);
+    res.json({ user, session: { access_token: p.access_token, refresh_token: p.refresh_token }, message: 'Login successful' });
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
 });
 
@@ -805,9 +884,30 @@ app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
     const { action } = req.body;
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const pendingToken = signPending({ type: 'action', action, userId: req.user.id, email: req.user.email, code });
-    await sendVerificationEmail(req.user.email, code, action);
+    await sendVerificationEmailWithRetry(req.user.email, code, action);
     res.json({ message: 'Verification code sent.', pendingToken });
   } catch (err) { res.status(500).json({ error: 'Failed to send code.' }); }
+});
+
+// Resend for ACTION endpoints (change email/password/delete)
+app.post('/api/auth/resend-action-code', authenticate, async (req, res) => {
+  try {
+    const { pendingToken } = req.body;
+    log(`[RESEND-ACTION] Request received for user ${req.user.id}`, 'info');
+    const p = verifyPending(pendingToken);
+    if (!p || p.type !== 'action' || p.userId !== req.user.id) {
+      log(`[RESEND-ACTION] Invalid token`, 'warn');
+      return res.status(400).json({ error: 'Your session expired. Please try again.' });
+    }
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const newToken = signPending({ ...p, code });
+    await sendVerificationEmailWithRetry(req.user.email, code, p.action);
+    log(`[RESEND-ACTION] ✅ Sent new code for action ${p.action}`, 'info');
+    res.json({ message: 'New code sent.', pendingToken: newToken });
+  } catch (err) {
+    log(`[RESEND-ACTION] ❌ Error: ${err.message}`, 'error');
+    res.status(500).json({ error: `Failed to resend code: ${err.message || 'unknown error'}` });
+  }
 });
 
 app.post('/api/auth/verify-code', authenticate, async (req, res) => {
@@ -920,7 +1020,6 @@ app.get('/api/auth/session-check', authenticate, async (req, res) => {
     const ua = getRequestUa(req);
     const ip = getRequestIp(req);
     const clientId = getClientId(req);
-
     if (clientId) {
       const { data, error } = await supabase.from('sessions').select('id').eq('user_id', req.user.id).eq('client_id', clientId).limit(1);
       if (error) log(`session-check error: ${error.message}`, 'warn');
@@ -1014,7 +1113,6 @@ async function extractTextFromFile(file) {
   } catch (err) { log(`Text extraction error: ${err.message}`, 'warn'); return ''; }
 }
 
-// Public title endpoint — used by guest chats to generate a smart title
 app.post('/api/chat/title', async (req, res) => {
   try {
     const { message } = req.body;
