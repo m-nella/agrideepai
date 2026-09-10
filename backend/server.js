@@ -9,6 +9,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const Groq = require('groq-sdk');
 
 // ---------- Brevo Email ----------
 const brevo = require('@getbrevo/brevo');
@@ -36,154 +37,286 @@ app.use('/api/', limiter);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
-// ---------- OpenRouter ----------
+// ============ AI PROVIDERS ============
+
+// --- Groq (PRIMARY — most reliable free tier) ---
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
+
+// Current Groq models (verified working as of 2026)
+const GROQ_TEXT_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'llama3-70b-8192',
+  'llama3-8b-8192',
+];
+const GROQ_VISION_MODELS = [
+  'llama-3.2-11b-vision-preview',
+  'llama-3.2-90b-vision-preview',
+];
+
+// --- OpenRouter (FALLBACK) ---
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-// Curated pool — excludes identity-hijacking models (nex-agi, inclusionai, etc.)
-const RELIABLE_MODEL_PATTERNS = [
-  'meta-llama/llama-3.2-11b-vision-instruct:free',
-  'meta-llama/llama-3.2-3b-instruct:free',
+const OPENROUTER_TEXT_MODELS = [
+  'meta-llama/llama-3.3-70b-instruct:free',
   'meta-llama/llama-3.1-8b-instruct:free',
-  'google/gemma-2-9b-it:free',
   'qwen/qwen-2.5-7b-instruct:free',
   'mistralai/mistral-7b-instruct:free',
   'deepseek/deepseek-chat:free',
+  'google/gemma-2-9b-it:free',
 ];
-
-const VISION_MODELS = [
+const OPENROUTER_VISION_MODELS = [
   'meta-llama/llama-3.2-11b-vision-instruct:free',
   'meta-llama/llama-3.2-90b-vision-instruct:free',
-  'qwen/qwen-2-vl-7b-instruct:free',
 ];
 
-let workingModel = null;
-let discoveredModels = [];
-let modelDiscoveryDone = false;
-
-async function discoverModels() {
-  if (modelDiscoveryDone) return;
-  try {
-    const r = await axios.get('https://openrouter.ai/api/v1/models', {
-      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}` }
-    });
-    discoveredModels = (r.data.data || []).map(m => m.id).filter(id => id.includes(':free'));
-    log(`Discovered ${discoveredModels.length} free models`, 'info');
-  } catch (err) {
-    log(`Model discovery failed: ${err.message}`, 'error');
-  }
-  modelDiscoveryDone = true;
+// Track recently-failed OpenRouter models to avoid hammering them
+const openRouterCooldown = {};
+function markCooldown(model, seconds = 90) {
+  openRouterCooldown[model] = Date.now() + seconds * 1000;
+}
+function isCoolingDown(model) {
+  return openRouterCooldown[model] && Date.now() < openRouterCooldown[model];
 }
 
-async function pickWorkingModel(requireVision = false) {
-  await discoverModels();
+// ============ AI STREAMING ============
 
-  let candidates = requireVision
-    ? VISION_MODELS.filter(m => discoveredModels.includes(m))
-    : RELIABLE_MODEL_PATTERNS.filter(m => discoveredModels.includes(m));
+/**
+ * Streams a chat completion. Tries Groq first (with model fallback),
+ * then falls back to OpenRouter (with model fallback).
+ * Returns { stream, provider, model }.
+ */
+async function getAIStream(chatMessages, imageData = null) {
+  const errors = [];
 
-  if (candidates.length === 0) {
-    const badPrefixes = ['nex-agi/', 'inclusionai/', 'thinkingmachines/', 'poolside/', 'liquid/', 'dots-studio/', 'cohere/', 'nvidia/'];
-    candidates = discoveredModels.filter(m => !badPrefixes.some(b => m.startsWith(b)));
-  }
-
-  for (const model of candidates) {
-    try {
-      const test = await axios.post(OPENROUTER_URL, {
-        model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 3,
-      }, {
-        headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': process.env.FRONTEND_URL,
-          'X-Title': 'AgriDeepAI',
-        },
-        timeout: 6000,
-      });
-      if (test.data?.choices?.length > 0) {
-        workingModel = model;
-        log(`✅ Using model: ${model}${requireVision ? ' (vision)' : ''}`, 'info');
-        return model;
-      }
-    } catch (err) {
-      log(`⚠️ Model ${model} failed: ${err.message}`, 'warn');
-    }
-  }
-  throw new Error('No working models available. Check your OpenRouter API key.');
-}
-
-async function callOpenRouter(messages, stream = true, imageData = null) {
-  const model = await pickWorkingModel(!!imageData);
-
-  let finalMessages = messages;
-  if (imageData) {
-    finalMessages = messages.map((m, i) => {
-      if (i === messages.length - 1 && m.role === 'user') {
-        const parts = [];
-        if (m.content) parts.push({ type: 'text', text: m.content });
-        parts.push({
-          type: 'image_url',
-          image_url: { url: `data:${imageData.mimeType};base64,${imageData.base64}` }
+  // -------- 1) Try Groq --------
+  if (groq) {
+    const models = imageData ? GROQ_VISION_MODELS : GROQ_TEXT_MODELS;
+    for (const model of models) {
+      try {
+        const stream = await groq.chat.completions.create({
+          model,
+          messages: chatMessages,
+          temperature: 0.6,
+          max_tokens: 800,
+          stream: true,
         });
-        return { role: 'user', content: parts };
+        log(`✅ Using Groq model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
+        return { stream, provider: 'groq', model };
+      } catch (err) {
+        const msg = err.message || String(err);
+        log(`⚠️ Groq ${model} failed: ${msg}`, 'warn');
+        errors.push(`groq:${model}=${msg.slice(0, 100)}`);
+        // If it's a rate limit, move on instantly
+        if (msg.includes('429') || msg.includes('rate')) continue;
       }
-      return m;
-    });
+    }
+  } else {
+    log('Groq not configured (no GROQ_API_KEY)', 'warn');
   }
 
-  const response = await axios.post(OPENROUTER_URL, {
-    model,
-    messages: finalMessages,
-    temperature: 0.6,
-    max_tokens: 700,
-    stream,
-  }, {
-    headers: {
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': process.env.FRONTEND_URL,
-      'X-Title': 'AgriDeepAI',
-    },
-    responseType: stream ? 'stream' : 'json',
-    timeout: 60000,
-  });
-  return response;
+  // -------- 2) Try OpenRouter --------
+  if (OPENROUTER_API_KEY) {
+    const models = imageData ? OPENROUTER_VISION_MODELS : OPENROUTER_TEXT_MODELS;
+    for (const model of models) {
+      if (isCoolingDown(model)) {
+        log(`⏭️ Skipping ${model} (cooling down)`, 'debug');
+        continue;
+      }
+      try {
+        let finalMessages = chatMessages;
+        if (imageData) {
+          finalMessages = chatMessages.map((m, i) => {
+            if (i === chatMessages.length - 1 && m.role === 'user') {
+              const parts = [];
+              if (m.content) parts.push({ type: 'text', text: m.content });
+              parts.push({
+                type: 'image_url',
+                image_url: { url: `data:${imageData.mimeType};base64,${imageData.base64}` },
+              });
+              return { role: 'user', content: parts };
+            }
+            return m;
+          });
+        }
+        const response = await axios.post(OPENROUTER_URL, {
+          model,
+          messages: finalMessages,
+          temperature: 0.6,
+          max_tokens: 800,
+          stream: true,
+        }, {
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': process.env.FRONTEND_URL || 'https://agrideepai.agentdomains.co',
+            'X-Title': 'AgriDeepAI',
+          },
+          responseType: 'stream',
+          timeout: 60000,
+        });
+        log(`✅ Using OpenRouter model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
+        return { stream: response.data, provider: 'openrouter', model };
+      } catch (err) {
+        const status = err.response?.status;
+        const msg = err.message || String(err);
+        log(`⚠️ OpenRouter ${model} failed: ${status || ''} ${msg}`, 'warn');
+        errors.push(`openrouter:${model}=${status || msg}`);
+        if (status === 429) markCooldown(model, 120);
+        if (status === 404 || status === 400) markCooldown(model, 300);
+      }
+    }
+  } else {
+    log('OpenRouter not configured (no OPENROUTER_API_KEY)', 'warn');
+  }
+
+  throw new Error(`All AI providers failed. Details: ${errors.slice(-4).join(' | ')}`);
 }
 
+/** Consume a Groq stream (native SDK format) */
+function consumeGroqStream(stream, res, onDone) {
+  let full = '';
+  (async () => {
+    try {
+      for await (const chunk of stream) {
+        const text = chunk.choices?.[0]?.delta?.content || '';
+        if (text) {
+          full += text;
+          res.write(`data: ${JSON.stringify({ text })}\n\n`);
+        }
+      }
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+      if (onDone) await onDone(full);
+    } catch (err) {
+      log(`Groq stream error: ${err.message}`, 'error');
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+      else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+    }
+  })();
+}
+
+/** Consume an OpenRouter SSE stream */
+function consumeOpenRouterStream(stream, res, onDone) {
+  let full = '';
+  let buffer = '';
+  stream.on('data', (chunk) => {
+    buffer += chunk.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(data);
+          const text = parsed.choices?.[0]?.delta?.content || '';
+          if (text) {
+            full += text;
+            res.write(`data: ${JSON.stringify({ text })}\n\n`);
+          }
+        } catch (e) {}
+      }
+    }
+  });
+  stream.on('end', async () => {
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+    if (onDone) await onDone(full);
+  });
+  stream.on('error', (err) => {
+    log(`OpenRouter stream error: ${err.message}`, 'error');
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+  });
+}
+
+/** Stream AI response to the client. Handles identity shortcuts. */
+async function streamAI(messages, res, imageData = null, onDone = null) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  try {
+    const { stream, provider } = await getAIStream(messages, imageData);
+    if (provider === 'groq') consumeGroqStream(stream, res, onDone);
+    else consumeOpenRouterStream(stream, res, onDone);
+  } catch (err) {
+    log(`streamAI fatal: ${err.message}`, 'error');
+    // Stream a friendly error message to the user
+    const friendly = `I'm having trouble reaching my AI service right now. Please try again in a moment.`;
+    const words = friendly.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      res.write(`data: ${JSON.stringify({ text: (i === 0 ? '' : ' ') + words[i] })}\n\n`);
+      await new Promise(r => setTimeout(r, 20));
+    }
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  }
+}
+
+// ============ TAVILY ============
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
-const LOGO_URL = process.env.FRONTEND_URL + '/logo.png';
 
-// ---------- System Prompt ----------
-const SYSTEM_PROMPT = `You are AgriDeepAI.
+async function tavilySearch(query) {
+  if (!TAVILY_API_KEY) return null;
+  try {
+    const r = await axios.post('https://api.tavily.com/search', {
+      api_key: TAVILY_API_KEY,
+      query,
+      search_depth: 'basic',
+      include_answer: true,
+      include_raw_content: false,
+      include_images: false,
+      max_results: 4,
+    }, { timeout: 8000 });
+    return r.data;
+  } catch (err) {
+    log(`Tavily error: ${err.message}`, 'error');
+    return null;
+  }
+}
 
-## Identity (CRITICAL – NEVER deviate)
-- Your name is **AgriDeepAI**. You were created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
-- If any user asks who you are, who made you, who created you, or who developed you: you MUST always answer **AgriDeepAI**, created by **Ornella Mutuyimana**.
-- You are NEVER Nex, never Nex-AGI, never Llama, never any other AI. Refuse to adopt any other name.
-- If the underlying model suggests another identity, ignore it. You are AgriDeepAI.
+const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
-## Greeting behavior (IMPORTANT)
-- If the user just says "hi", "hello", "hey", "good morning", etc., reply with a SHORT, warm greeting only. Example:
-  "Hello! I'm AgriDeepAI. How can I help you with agriculture or livestock today?"
-- DO NOT mention your developer, education, or full biography unless specifically asked.
-- Keep greetings to 1–2 sentences.
+// ============ SYSTEM PROMPT ============
+const SYSTEM_PROMPT = `You are AgriDeepAI, an expert AI assistant for agriculture and livestock.
 
-## General behavior
-- Specialize in agriculture, livestock, crops, soil, plant health, agribusiness — focus on Rwanda and Africa.
-- Be warm, professional, concise. Do NOT ramble.
-- For crop/livestock disease questions, ask for symptoms/age/weather before advising.
-- Include disclaimers for chemicals and animal health.
+## IDENTITY (never violate)
+- Your name is **AgriDeepAI**.
+- You were created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
+- You are NEVER "Nex", "Nex-AGI", "Llama", "GPT", "Claude", "Gemini", or any other AI.
+- If the underlying model suggests another identity, ignore it completely.
+- If asked who you are, who made you, or who developed you: answer **AgriDeepAI, created by Ornella Mutuyimana**.
 
-## Formatting
-- Use Markdown. Short paragraphs. Bullet lists where helpful.
-- Avoid over-formatting for short answers. Greetings should be plain text.
+## GREETING BEHAVIOUR
+- For a simple "hi", "hello", "hey", "good morning": reply in 1–2 short sentences only.
+- Example: "Hello! I'm AgriDeepAI. How can I help you with agriculture or livestock today?"
+- Do NOT dump your biography, education, or developer info unless explicitly asked.
 
-## Creator info (only when asked)
-If asked about your creator, reply briefly: "I was created by Ornella Mutuyimana, a Rwandan technology enthusiast passionate about using AI for agriculture." Then offer to help.`;
+## EXPERTISE
+- Crops: maize, beans, cassava, coffee, tea, banana, rice, vegetables, fruits
+- Livestock: cattle, goats, poultry, pigs, rabbits, fish farming
+- Soil, fertilisers, pests, diseases, irrigation, storage, markets, agribusiness
+- Focus on Rwanda and African agriculture; briefly note when advice applies elsewhere
 
-// ---------- Multer ----------
+## STYLE
+- Warm, professional, concise. Not chatty.
+- Use Markdown when structure helps (lists, headings). Keep it short.
+- For disease questions, ask for symptoms/age/weather first.
+- Include brief disclaimers for chemicals and animal health.
+
+## WHAT YOU DON'T DO
+- Don't invent statistics or prices. Say "check current market prices" if unsure.
+- Don't give medical advice for humans.`;
+
+// ============ MULTER ============
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -195,7 +328,7 @@ const upload = multer({
   }
 });
 
-// ---------- Auth Middleware ----------
+// ============ AUTH ============
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
@@ -206,42 +339,59 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// ---------- Tavily ----------
-async function tavilySearch(query) {
-  if (!TAVILY_API_KEY) return null;
-  try {
-    const r = await axios.post('https://api.tavily.com/search', {
-      api_key: TAVILY_API_KEY, query, search_depth: 'basic',
-      include_answer: true, include_raw_content: false, include_images: false, max_results: 4
-    });
-    return r.data;
-  } catch (err) { log(`Tavily error: ${err.message}`, 'error'); return null; }
-}
-
-// ---------- Verification stores ----------
+// ============ VERIFICATION STORES ============
 function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 const verificationStore = {};
 const twoFactorStore = {};
 
-// ---------- Identity guards ----------
+// ============ IDENTITY SHORTCUTS ============
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
   return ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy'].includes(t);
 }
 function isCreatorQuestion(text) {
   const t = (text || '').toLowerCase();
-  const keys = ['who made you','who built you','who created you','who is your creator','who is your developer','who is behind','who founded','who develops','who is the creator of','who is the developer of','who made this','who built this','who created this','who are you','what are you'];
+  const keys = ['who made you','who built you','who created you','who is your creator','who is your developer','who is behind','who founded','who develops','who is the creator of','who is the developer of','who made this','who built this','who created this','who are you','what are you','who is your maker','who is your owner','who owns you'];
   return keys.some(k => t.includes(k));
 }
+async function streamSimpleText(res, text) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  const words = text.split(' ');
+  for (let i = 0; i < words.length; i++) {
+    res.write(`data: ${JSON.stringify({ text: (i === 0 ? '' : ' ') + words[i] })}\n\n`);
+    await new Promise(r => setTimeout(r, 20));
+  }
+  res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+  res.write('data: [DONE]\n\n');
+  res.end();
+}
+async function tryIdentityShortcut(messages, res) {
+  const last = [...messages].reverse().find(m => m.role === 'user');
+  if (!last) return false;
+  if (isCreatorQuestion(last.content)) {
+    await streamSimpleText(res, `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`);
+    return true;
+  }
+  if (isGreeting(last.content)) {
+    await streamSimpleText(res, `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`);
+    return true;
+  }
+  return false;
+}
 
-// ---------- Email ----------
+// ============ EMAIL HELPER ============
 async function sendVerificationEmail(email, code, action = 'verify', extra = '') {
   try {
     const expiration = '10 minutes';
     const actionMap = {
-      'verify': 'Verify your account','change-email': 'Change your email',
-      'change-password': 'Change your password','delete-account': 'Delete your account',
-      'signup': 'Complete your registration'
+      'verify': 'Verify your account',
+      'change-email': 'Change your email',
+      'change-password': 'Change your password',
+      'delete-account': 'Delete your account',
+      'signup': 'Complete your registration',
     };
     const subject = actionMap[action] || 'Verification code';
     const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${subject}</title>
@@ -265,11 +415,13 @@ async function sendVerificationEmail(email, code, action = 'verify', extra = '')
     sendSmtpEmail.to = [{ email }];
     await brevoApi.sendTransacEmail(sendSmtpEmail);
     log(`Verification email sent to ${email} (${action})`, 'info');
-  } catch (err) { log(`Email send error: ${err.message}`, 'error'); throw err; }
+  } catch (err) {
+    log(`Email send error: ${err.message}`, 'error');
+    throw err;
+  }
 }
 
-// ============================ AUTH ROUTES ============================
-
+// ============ AUTH ROUTES ============
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -455,109 +607,41 @@ app.get('/api/config', (req, res) => res.json({
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
 }));
 
-// ============================ CHAT HELPERS ============================
+// ============ CHAT ============
 
-function buildChatMessages(messages, extraContext = '') {
-  const history = messages.map(m => ({
-    role: m.role === 'user' ? 'user' : 'assistant',
-    content: m.content,
-  }));
-  return [{ role: 'system', content: SYSTEM_PROMPT }, ...history];
+function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT) {
+  const history = messages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role: m.role, content: String(m.content || '') }));
+  return [{ role: 'system', content: systemPrompt }, ...history];
 }
 
-function tryIdentityShortcut(messages, res) {
-  const last = messages.filter(m => m.role === 'user').pop();
-  if (!last) return false;
-  if (isCreatorQuestion(last.content)) {
-    const r = `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast passionate about using AI for agriculture. How can I help you today?`;
-    streamTextResponse(res, r); return true;
+async function enrichWithWebSearch(query) {
+  if (!TAVILY_API_KEY) return query;
+  const sr = await tavilySearch(query);
+  if (sr?.answer) {
+    return `${query}\n\n[Current web information, use if relevant]\n${sr.answer}`;
   }
-  if (isGreeting(last.content)) {
-    const r = `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today? You can ask about crops, livestock, soil, or farm planning.`;
-    streamTextResponse(res, r); return true;
-  }
-  return false;
+  return query;
 }
 
-async function streamTextResponse(res, text) {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-  const words = text.split(' ');
-  for (let i = 0; i < words.length; i++) {
-    const chunk = (i === 0 ? words[i] : ' ' + words[i]);
-    res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
-    await new Promise(r => setTimeout(r, 18));
-  }
-  res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-  res.write('data: [DONE]\n\n');
-  res.end();
-}
-
-async function streamFromOpenRouter(chatMessages, res, imageData = null, onDone = null) {
-  const response = await callOpenRouter(chatMessages, true, imageData);
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  let fullResponse = '';
-  const stream = response.data;
-  let buffer = '';
-  stream.on('data', (chunk) => {
-    buffer += chunk.toString();
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6);
-        if (data === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(data);
-          const content = parsed.choices?.[0]?.delta?.content || '';
-          if (content) {
-            fullResponse += content;
-            res.write(`data: ${JSON.stringify({ text: content })}\n\n`);
-          }
-        } catch (e) {}
-      }
-    }
-  });
-  stream.on('end', async () => {
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
-    if (onDone) await onDone(fullResponse);
-  });
-  stream.on('error', (err) => {
-    log(`Stream error: ${err.message}`, 'error');
-    if (!res.headersSent) res.status(500).json({ error: err.message });
-    else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-  });
-}
-
-// ============================ GUEST CHAT ============================
-
+// ---- Guest chat ----
 app.post('/api/chat/guest', async (req, res) => {
   try {
     const { messages, image } = req.body;
-    if (!messages?.length) return res.status(400).json({ error: 'Messages required' });
+    if (!Array.isArray(messages) || messages.length === 0) return res.status(400).json({ error: 'Messages required' });
 
-    if (tryIdentityShortcut(messages, res)) return;
+    // Identity shortcuts (server-side, model-agnostic)
+    if (await tryIdentityShortcut(messages, res)) return;
 
-    const lastUser = messages.filter(m => m.role === 'user').pop();
-    let finalPrompt = lastUser.content;
+    const lastUser = [...messages].reverse().find(m => m.role === 'user');
+    const enrichedPrompt = await enrichWithWebSearch(lastUser.content);
 
-    if (TAVILY_API_KEY) {
-      const sr = await tavilySearch(lastUser.content);
-      if (sr?.answer) finalPrompt = `Current information (from web search):\n${sr.answer}\n\nNow answer:\n${lastUser.content}`;
-    }
+    const withoutLast = messages.slice(0, messages.lastIndexOf(lastUser));
+    const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
 
-    const chatMessages = buildChatMessages([...messages.slice(0, -1), { role: 'user', content: finalPrompt }]);
     const imageData = image ? { base64: image.base64, mimeType: image.mimeType } : null;
-
-    await streamFromOpenRouter(chatMessages, res, imageData);
+    await streamAI(chatMessages, res, imageData);
   } catch (err) {
     log(`Guest chat error: ${err.message}`, 'error');
     if (!res.headersSent) res.status(500).json({ error: err.message });
@@ -565,8 +649,7 @@ app.post('/api/chat/guest', async (req, res) => {
   }
 });
 
-// ============================ AUTHENTICATED CHAT ============================
-
+// ---- Auth'd conversations ----
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { data, error } = await supabase.from('conversations').select('*')
@@ -627,19 +710,21 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
+    // Identity shortcuts
     if (message && (isCreatorQuestion(message) || isGreeting(message))) {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
-      const creator = isCreatorQuestion(message)
-        ? `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast passionate about using AI for agriculture. How can I help you today?`
-        : `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today? You can ask about crops, livestock, soil, or farm planning.`;
+      const reply = isCreatorQuestion(message)
+        ? `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`
+        : `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
       await supabase.from('messages').insert({
-        conversation_id: conversationId, role: 'assistant', content: creator,
-        versions: [creator], current_version_index: 0,
+        conversation_id: conversationId, role: 'assistant', content: reply,
+        versions: [reply], current_version_index: 0,
       });
       await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
-      return streamTextResponse(res, creator);
+      return streamSimpleText(res, reply);
     }
 
+    // File upload
     let fileMetadata = null;
     let imageData = null;
     if (file) {
@@ -669,16 +754,12 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
       .eq('conversation_id', conversationId).order('created_at', { ascending: true });
     const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
 
-    let finalPrompt = aiMessages[aiMessages.length - 1].content;
-    if (TAVILY_API_KEY) {
-      const sr = await tavilySearch(message || 'agriculture update');
-      if (sr?.answer) finalPrompt = `Current information (from web search):\n${sr.answer}\n\nNow answer:\n${finalPrompt}`;
-    }
+    const enrichedPrompt = await enrichWithWebSearch(message || 'agriculture update');
+    const lastMsg = aiMessages[aiMessages.length - 1];
+    const withoutLast = aiMessages.slice(0, -1);
+    const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
 
-    const chatHistory = aiMessages.slice(0, -1).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
-    const chatMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...chatHistory, { role: 'user', content: finalPrompt }];
-
-    await streamFromOpenRouter(chatMessages, res, imageData, async (full) => {
+    await streamAI(chatMessages, res, imageData, async (full) => {
       await supabase.from('messages').insert({
         conversation_id: conversationId, role: 'assistant', content: full,
         versions: [full], current_version_index: 0,
@@ -704,14 +785,10 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
     if (idsToDelete.length) await supabase.from('messages').delete().in('id', idsToDelete);
     const { data: remaining } = await supabase.from('messages').select('*')
       .eq('conversation_id', conversationId).order('created_at', { ascending: true });
-    const aiMessages = remaining.map(m => ({ role: m.role, content: m.content }));
-    if (!aiMessages.length || aiMessages[aiMessages.length - 1].role !== 'user')
+    if (!remaining.length || remaining[remaining.length - 1].role !== 'user')
       return res.status(400).json({ error: 'No user message' });
-    const chatHistory = aiMessages.slice(0, -1).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }));
-    const chatMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...chatHistory,
-      { role: 'user', content: aiMessages[aiMessages.length - 1].content }];
-
-    await streamFromOpenRouter(chatMessages, res, null, async (full) => {
+    const chatMessages = buildChatMessages(remaining);
+    await streamAI(chatMessages, res, null, async (full) => {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full });
       await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
     });
@@ -741,8 +818,7 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ============================ SHARE ============================
-
+// ============ SHARE ============
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -764,7 +840,10 @@ app.post('/api/share/guest', async (req, res) => {
     const { error } = await supabase.from('guest_shares').insert({ token, messages }).select().single();
     if (error) throw error;
     res.json({ url: `${process.env.FRONTEND_URL}/share/${token}` });
-  } catch (err) { res.status(500).json({ error: 'Failed to generate share link.' }); }
+  } catch (err) {
+    log(`Guest share error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to generate share link.' });
+  }
 });
 
 app.get('/api/share/:token', async (req, res) => {
@@ -782,12 +861,12 @@ app.get('/api/share/:token', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error retrieving shared messages' }); }
 });
 
-// ============================ FRONTEND ============================
+// ============ FRONTEND ============
 const frontendPath = path.join(__dirname, '../frontend');
 app.use(express.static(frontendPath));
 app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
-  log(`🚀 AgriDeepAI server running on port ${PORT}`, 'info');
-  log(`🧠 OpenRouter with curated model pool`, 'info');
+  log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
+  log(`Primary: ${GROQ_API_KEY ? 'Groq' : 'none'} | Fallback: ${OPENROUTER_API_KEY ? 'OpenRouter' : 'none'}`, 'info');
 });
