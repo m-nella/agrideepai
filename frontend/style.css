@@ -452,3 +452,63 @@ html.is-share-view body::before, body.share-view::before {
   .account-tab:active { background: var(--surface-hover); color: var(--text); }
   .context-menu button:active { background: var(--surface-hover); }
 }
+
+/* ===== Session list with per-row logout ===== */
+.sessions-list .sessions-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: .75rem;
+}
+.sessions-list .sessions-logout-all {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .55rem 1rem;
+  font-size: .85rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  width: auto;
+  align-self: flex-end;
+}
+.sessions-list .sessions-logout-all svg { width: 16px; height: 16px; }
+.sessions-list .sessions-logout-all:disabled { opacity: .6; cursor: not-allowed; }
+
+.session-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: .75rem;
+  padding: .65rem .75rem;
+  border-radius: 8px;
+  background: var(--surface-hover);
+  margin-bottom: .5rem;
+  font-size: .85rem;
+}
+.session-item .session-info { flex: 1; min-width: 0; }
+.session-item .session-info p { margin: .15rem 0; word-break: break-word; }
+
+.session-logout-btn {
+  flex-shrink: 0;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(232,93,93,.35);
+  border-radius: 8px;
+  padding: .4rem .7rem;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  min-height: 36px;
+}
+.session-logout-btn:hover { background: rgba(232,93,93,.12); border-color: var(--danger); }
+.session-logout-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+@media (max-width: 480px) {
+  .session-item { flex-direction: column; align-items: stretch; }
+  .session-logout-btn { align-self: flex-start; }
+  .sessions-list .sessions-logout-all { width: 100%; justify-content: center; align-self: stretch; }
+}
