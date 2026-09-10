@@ -47,7 +47,6 @@ function stripJwtClaims(p) {
   return rest;
 }
 
-// ---------- Email validation ----------
 const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 function isValidEmail(email) {
   if (!email || typeof email !== 'string') return false;
@@ -57,7 +56,22 @@ function isValidEmail(email) {
   return EMAIL_RE.test(t);
 }
 
-// Check if email is already registered to a DIFFERENT user (paginated)
+async function findUserByEmail(email) {
+  const target = String(email || '').toLowerCase().trim();
+  if (!target) return null;
+  let page = 1;
+  while (page <= 10) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw error;
+    const users = data?.users || [];
+    const found = users.find(u => u.email && u.email.toLowerCase() === target);
+    if (found) return found;
+    if (users.length < 1000) break;
+    page++;
+  }
+  return null;
+}
+
 async function isEmailTakenByOther(email, currentUserId) {
   try {
     const target = email.toLowerCase().trim();
@@ -67,17 +81,12 @@ async function isEmailTakenByOther(email, currentUserId) {
       const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
       if (error) { log(`listUsers error: ${error.message}`, 'warn'); return false; }
       const users = data?.users || [];
-      if (users.some(u => u.email && u.email.toLowerCase() === target && u.id !== currentUserId)) {
-        return true;
-      }
+      if (users.some(u => u.email && u.email.toLowerCase() === target && u.id !== currentUserId)) return true;
       if (users.length < perPage) break;
       page++;
     }
     return false;
-  } catch (e) {
-    log(`isEmailTakenByOther error: ${e.message}`, 'warn');
-    return false;
-  }
+  } catch (e) { log(`isEmailTakenByOther error: ${e.message}`, 'warn'); return false; }
 }
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -619,6 +628,7 @@ async function sendVerificationEmail(email, code, action = 'verify', extra = '')
     'verify': 'Verify your account','change-email': 'Change your email',
     'change-password': 'Change your password','delete-account': 'Delete your account',
     'signup': 'Complete your registration','login': 'Complete your sign-in',
+    'forgot-password': 'Reset your password',
   };
   const subject = actionMap[action] || 'Verification code';
   const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${subject}</title>
@@ -709,11 +719,10 @@ app.post('/api/auth/signup', async (req, res) => {
     if (!isValidEmail(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
     if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password))
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
-    const { data: existingUsers } = await supabase.auth.admin.listUsers();
-    if (existingUsers.users.some(u => u.email === email))
-      return res.status(400).json({ error: 'Email already registered. Please sign in.' });
+    const existingUser = await findUserByEmail(email);
+    if (existingUser) return res.status(400).json({ error: 'Email already registered. Please sign in.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const pendingToken = signPending({ type: 'signup', email, code, password, fullName: fullName || email.split('@')[0] });
+    const pendingToken = signPending({ type: 'signup', email: email.toLowerCase().trim(), code, password, fullName: fullName || email.split('@')[0] });
     await sendVerificationEmailWithRetry(email, code, 'signup', 'To complete your registration, use the code below.');
     res.status(200).json({ message: 'Verification code sent to your email.', email, pendingToken });
   } catch (err) {
@@ -751,8 +760,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     if (p.type !== 'signup') return res.status(400).json({ error: 'Invalid session. Please sign up again.' });
     if (!p.email || !p.password) return res.status(400).json({ error: 'Session data incomplete. Please sign up again.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const payload = { ...stripJwtClaims(p), code };
-    const newToken = signPending(payload);
+    const newToken = signPending({ ...stripJwtClaims(p), code });
     await sendVerificationEmailWithRetry(p.email, code, 'signup', 'Resend: complete your registration.');
     log(`[RESEND-SIGNUP] ✅ Success for ${p.email}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
@@ -799,8 +807,7 @@ app.post('/api/auth/resend-login-code', async (req, res) => {
     if (p.type !== 'login') return res.status(400).json({ error: 'Invalid session. Please sign in again.' });
     if (!p.email) return res.status(400).json({ error: 'Session data missing email. Please sign in again.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const payload = { ...stripJwtClaims(p), code };
-    const newToken = signPending(payload);
+    const newToken = signPending({ ...stripJwtClaims(p), code });
     await sendVerificationEmailWithRetry(p.email, code, 'login', 'Resend: use the code below to complete your sign-in.');
     log(`[RESEND-LOGIN] ✅ Success for ${p.email}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
@@ -843,11 +850,97 @@ app.post('/api/auth/2fa/validate-login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to validate 2FA' }); }
 });
 
-// ==================================================================
-// SEND VERIFICATION CODE
-// For action 'change-email': requires newEmail, validates it, sends code TO THE NEW EMAIL,
-// and bakes the new email into the signed pendingToken (tamper-proof).
-// ==================================================================
+// ============ FORGOT PASSWORD ============
+app.post('/api/auth/forgot-password-request', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string') return res.status(400).json({ error: 'Please enter your email address' });
+    const target = email.trim().toLowerCase();
+    if (!isValidEmail(target)) return res.status(400).json({ error: 'Please enter a valid email address' });
+
+    const user = await findUserByEmail(target);
+    if (!user) {
+      log(`[FORGOT-PW] Email not registered: ${target}`, 'warn');
+      return res.status(404).json({ error: 'This email is not registered. Please sign up first.' });
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const pendingToken = signPending({
+      type: 'forgot-password',
+      email: user.email,
+      userId: user.id,
+      code,
+    });
+    await sendVerificationEmailWithRetry(user.email, code, 'forgot-password', 'Use the code below to reset your password.');
+    log(`[FORGOT-PW] Code sent to ${user.email}`, 'info');
+    res.json({ message: `Verification code sent to ${user.email}`, pendingToken, email: user.email });
+  } catch (err) {
+    log(`[FORGOT-PW] ❌ ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to process request. Please try again.' });
+  }
+});
+
+app.post('/api/auth/resend-forgot-password-code', async (req, res) => {
+  try {
+    const { pendingToken } = req.body;
+    const p = verifyPending(pendingToken);
+    if (!p || p.type !== 'forgot-password') {
+      return res.status(400).json({ error: 'Your session expired. Please start again.' });
+    }
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const newToken = signPending({ ...stripJwtClaims(p), code });
+    await sendVerificationEmailWithRetry(p.email, code, 'forgot-password', 'Resend: use the code below to reset your password.');
+    log(`[FORGOT-PW-RESEND] Code resent to ${p.email}`, 'info');
+    res.json({ message: `New code sent to ${p.email}`, pendingToken: newToken, email: p.email });
+  } catch (err) {
+    log(`[FORGOT-PW-RESEND] ❌ ${err.message}`, 'error');
+    res.status(500).json({ error: `Failed to resend code: ${err.message}` });
+  }
+});
+
+app.post('/api/auth/forgot-password-verify-code', async (req, res) => {
+  try {
+    const { pendingToken, code } = req.body;
+    const p = verifyPending(pendingToken);
+    if (!p || p.type !== 'forgot-password') {
+      return res.status(400).json({ error: 'Session expired. Please start again.' });
+    }
+    if (p.code !== code) {
+      return res.status(400).json({ error: 'Invalid or expired code' });
+    }
+    const grantedToken = signPending({
+      type: 'forgot-password-granted',
+      email: p.email,
+      userId: p.userId,
+    }, 600);
+    res.json({ message: 'Code verified.', grantedToken });
+  } catch (err) {
+    log(`[FORGOT-PW-VERIFY] ❌ ${err.message}`, 'error');
+    res.status(500).json({ error: 'Verification failed.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { newPassword, grantedToken } = req.body;
+    const g = verifyPending(grantedToken);
+    if (!g || g.type !== 'forgot-password-granted' || !g.userId) {
+      return res.status(400).json({ error: 'Please verify your code first.' });
+    }
+    if (!newPassword || newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
+    }
+    const { error } = await supabase.auth.admin.updateUserById(g.userId, { password: newPassword });
+    if (error) throw error;
+    log(`[FORGOT-PW-RESET] ✅ Password reset for ${g.email}`, 'info');
+    res.json({ message: 'Password reset successfully. You can now sign in.' });
+  } catch (err) {
+    log(`[FORGOT-PW-RESET] ❌ ${err.message}`, 'error');
+    res.status(500).json({ error: err.message || 'Failed to reset password.' });
+  }
+});
+
+// ============ SEND VERIFICATION CODE ============
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
     const { action, newEmail } = req.body;
@@ -886,7 +979,6 @@ app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   }
 });
 
-// Resend action code — uses newEmail for change-email action
 app.post('/api/auth/resend-action-code', authenticate, async (req, res) => {
   try {
     const { pendingToken } = req.body;
@@ -897,9 +989,7 @@ app.post('/api/auth/resend-action-code', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Your session expired. Please try again.' });
     }
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const payload = { ...stripJwtClaims(p), code };
-    const newToken = signPending(payload);
-    // For change-email, resend goes to the NEW email (baked in the token)
+    const newToken = signPending({ ...stripJwtClaims(p), code });
     const targetEmail = (p.action === 'change-email' && p.newEmail) ? p.newEmail : req.user.email;
     await sendVerificationEmailWithRetry(targetEmail, code, p.action);
     log(`[RESEND-ACTION] ✅ Sent new code for action ${p.action} to ${targetEmail}`, 'info');
@@ -917,7 +1007,6 @@ app.post('/api/auth/verify-code', authenticate, async (req, res) => {
     if (!p || p.type !== 'action' || p.userId !== req.user.id) return res.status(400).json({ error: 'Pending session expired.' });
     if (p.code !== code || p.action !== action) return res.status(400).json({ error: 'Invalid or expired code' });
     const grantedPayload = { type: 'granted', action, userId: req.user.id };
-    // Preserve newEmail from the verified pending token (tamper-proof)
     if (action === 'change-email' && p.newEmail) grantedPayload.newEmail = p.newEmail;
     const grantedToken = signPending(grantedPayload, 600);
     res.json({ message: 'Code verified.', grantedToken });
@@ -951,16 +1040,12 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ==================================================================
-// CHANGE EMAIL — uses newEmail from the SIGNED grantedToken (never trusts body)
-// ==================================================================
 app.post('/api/auth/change-email', authenticate, async (req, res) => {
   try {
     const { newEmail, grantedToken } = req.body;
     const g = verifyPending(grantedToken);
     if (!g || g.type !== 'granted' || g.action !== 'change-email' || g.userId !== req.user.id)
       return res.status(400).json({ error: 'Please verify your code first.' });
-    // Prefer newEmail from the signed grantedToken (tamper-proof)
     const finalNewEmail = String(g.newEmail || newEmail || '').trim().toLowerCase();
     if (!isValidEmail(finalNewEmail)) return res.status(400).json({ error: 'Invalid new email address' });
     if (finalNewEmail === (req.user.email || '').toLowerCase())
@@ -968,7 +1053,6 @@ app.post('/api/auth/change-email', authenticate, async (req, res) => {
     const taken = await isEmailTakenByOther(finalNewEmail, req.user.id);
     if (taken) return res.status(400).json({ error: 'This email is already registered to another account' });
 
-    // Use admin.updateUserById to bypass Supabase's own confirmation email flow
     const { error: uErr } = await supabase.auth.admin.updateUserById(req.user.id, {
       email: finalNewEmail,
       email_confirm: true,
