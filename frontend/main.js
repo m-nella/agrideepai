@@ -40,8 +40,10 @@ let state = {
   attachments: [], editingMessageId: null, editingValue: '',
   messageVersions: {}, likedMessages: new Set(), dislikedMessages: new Set(),
   contextMenuTarget: null, isShareView: false, shareMessages: [], copyTimeout: null,
+  pendingAuth: null,
 };
 
+// ============ LIGHTBOX ============
 function openLightbox(src, isImage = true) {
   const overlay = document.createElement('div');
   overlay.className = 'lightbox-overlay';
@@ -67,6 +69,7 @@ function openLightbox(src, isImage = true) {
   document.body.appendChild(overlay);
 }
 
+// ============ MODALS ============
 function showCustomModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel', isDanger = false) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
@@ -113,6 +116,7 @@ function cleanContent(content) {
   return out.join('\n').trim();
 }
 
+// ============ SUPABASE INIT ============
 async function initSupabase() {
   log('Initializing Supabase...', 'info');
   try {
@@ -120,11 +124,29 @@ async function initSupabase() {
     const config = await res.json();
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storage: window.localStorage, storageKey: 'agrideepai-auth-v1' },
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+        storage: window.localStorage,
+        storageKey: 'agrideepai-auth-v2',
+        flowType: 'pkce',
+      },
     });
+
     state.supabase.auth.onAuthStateChange(async (event, session) => {
       log(`Auth: ${event}`, 'debug');
-      if (event === 'TOKEN_REFRESHED' && session) { state.currentUser = session.user; return; }
+      if (event === 'TOKEN_REFRESHED' && session) {
+        state.currentUser = session.user;
+        return;
+      }
+      if (event === 'SIGNED_OUT') {
+        state.currentUser = null;
+        state.chats = []; state.messages = []; state.activeChatId = null;
+        updateAuthUI();
+        renderChatList(); renderMessages();
+        return;
+      }
       if (session?.user) {
         state.currentUser = session.user;
         updateAuthUI();
@@ -136,12 +158,15 @@ async function initSupabase() {
         renderChatList(); renderMessages();
       }
     });
+
+    // Wait for initial session, then try refreshing if not present
     const { data: { session } } = await state.supabase.auth.getSession();
     if (session?.user) {
       state.currentUser = session.user;
       updateAuthUI();
       await loadCloudConversations();
     } else {
+      // Try refresh
       const { data: refreshed } = await state.supabase.auth.refreshSession();
       if (refreshed.session?.user) {
         state.currentUser = refreshed.session.user;
@@ -154,6 +179,7 @@ async function initSupabase() {
     }
   } catch (err) {
     log(`Supabase init error: ${err.message}`, 'error');
+    state.chats = []; state.messages = []; state.activeChatId = null;
     renderChatList(); renderMessages();
   }
 }
@@ -354,7 +380,7 @@ function renderMessages() {
       }
       const ta = document.createElement('textarea');
       ta.value = state.editingValue;
-      ta.style.cssText = 'width:100%;padding:.5rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:.95rem;';
+      ta.style.cssText = 'width:100%;padding:.5rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:16px;';
       const g = document.createElement('div');
       g.style.cssText = 'display:flex;gap:.5rem;margin-top:.5rem;justify-content:flex-end;';
       const cancel = document.createElement('button');
@@ -548,7 +574,7 @@ function showToast(message, isError = false) {
     background: bg, color: '#fff', padding: '.5rem 1.2rem', borderRadius: '10px',
     fontSize: '.9rem', fontWeight: '500', boxShadow: '0 8px 24px rgba(0,0,0,.4)',
     zIndex: '9999', opacity: '0', transition: 'opacity .3s, transform .3s',
-    transform: 'translateX(-50%) translateY(10px)', maxWidth: '90vw',
+    transform: 'translateX(-50%) translateY(10px)', maxWidth: '90vw', textAlign: 'center',
   });
   document.body.appendChild(toast);
   requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateX(-50%) translateY(0)'; });
@@ -886,9 +912,8 @@ async function sendMessage() {
     }
   }
 
-  // ============ FIX: Rename chat if it was a New Chat ============
-  const wasNewChat = (chat.title === 'New Chat' || !chat.title) && text;
-  if (wasNewChat) {
+  // Auto-rename if still "New Chat"
+  if ((chat.title === 'New Chat' || !chat.title) && text) {
     const newTitle = text.substring(0, 42) + (text.length > 42 ? '…' : '');
     chat.title = newTitle;
     if (state.currentUser && !chat.id.startsWith('local_')) {
@@ -993,7 +1018,7 @@ function createPasswordField(id, placeholder) {
   const t = document.createElement('button');
   t.type = 'button';
   t.innerHTML = `<i data-lucide="eye" style="width:18px;height:18px;"></i>`;
-  t.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;';
+  t.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;min-width:32px;min-height:32px;display:flex;align-items:center;justify-content:center;';
   t.onclick = () => {
     const isPw = input.type === 'password';
     input.type = isPw ? 'text' : 'password';
@@ -1016,22 +1041,22 @@ function renderAuthForm(mode) {
     <div id="authError" class="error-msg" style="display:none;"></div>
     <div id="authStatus" class="status-msg" style="display:none;"></div>
     <label>Email</label>
-    <input type="email" id="authEmail" placeholder="you@example.com" />
+    <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
     <label>Password</label>
     <div id="authPasswordWrapper"></div>
     ${!isLogin ? `<label>Confirm Password</label><div id="authConfirmPasswordWrapper"></div>` : ''}
-    ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" />` : ''}
+    ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" autocomplete="name" />` : ''}
     <button class="btn-primary" id="authSubmitBtn" disabled>${isLogin ? 'Sign In' : 'Sign Up'}</button>
     <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
     <div id="verifySection" style="display:none;margin-top:1rem;">
       <p>We sent a verification code to your email.</p>
-      <input type="text" id="verifyCode" placeholder="6-digit code" />
+      <input type="text" id="verifyCode" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
       <button class="btn-primary" id="verifyBtn">Verify</button>
-      <button id="resendVerifyBtn" style="background:none;border:none;color:var(--accent);cursor:pointer;margin-top:.5rem;">Resend code</button>
+      <button id="resendVerifyBtn" class="link-btn" type="button">Resend code</button>
     </div>
     <div id="twofaSection" style="display:none;margin-top:1rem;">
       <p>Enter the 6-digit code from your authenticator app.</p>
-      <input type="text" id="twofaCode" placeholder="6-digit code" />
+      <input type="text" id="twofaCode" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
       <button class="btn-primary" id="twofaBtn">Verify 2FA</button>
     </div>`;
   document.getElementById('authPasswordWrapper').appendChild(createPasswordField('authPassword', '••••••••'));
@@ -1060,6 +1085,7 @@ function renderAuthForm(mode) {
 
   submitBtn.onclick = async () => {
     if (!isLogin) {
+      // SIGNUP
       const email = emailInput.value.trim(), password = pwInput.value, confirm = confirmInput?.value || '';
       if (!email || !password) { errDiv.textContent = 'All fields required'; errDiv.style.display = 'block'; return; }
       if (password !== confirm) { errDiv.textContent = 'Passwords do not match'; errDiv.style.display = 'block'; return; }
@@ -1069,6 +1095,7 @@ function renderAuthForm(mode) {
         const res = await fetch('/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, fullName }) });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
+        state.pendingAuth = data.pendingToken;
         document.getElementById('verifySection').style.display = 'block';
         statDiv.textContent = 'Verification code sent.';
         document.getElementById('verifyBtn').onclick = async () => {
@@ -1076,23 +1103,31 @@ function renderAuthForm(mode) {
           if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
           statDiv.textContent = 'Verifying...';
           try {
-            const cr = await fetch('/api/auth/confirm-signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code }) });
+            const cr = await fetch('/api/auth/confirm-signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: state.pendingAuth, code }) });
             const cd = await cr.json();
             if (!cr.ok) throw new Error(cd.error);
             await state.supabase.auth.setSession({ access_token: cd.session.access_token, refresh_token: cd.session.refresh_token });
             state.currentUser = cd.user;
+            state.pendingAuth = null;
             updateAuthUI(); closeAuthModal(); showToast('Account created!');
             await loadCloudConversations();
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
         document.getElementById('resendVerifyBtn').onclick = async () => {
-          statDiv.textContent = 'Resending...';
-          await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
-          statDiv.textContent = 'New code sent.';
+          statDiv.textContent = 'Resending...'; statDiv.style.display = 'block';
+          try {
+            const rr = await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: state.pendingAuth }) });
+            const rd = await rr.json();
+            if (!rr.ok) throw new Error(rd.error);
+            state.pendingAuth = rd.pendingToken;
+            statDiv.textContent = 'New code sent. Check your email.';
+            showToast('New code sent.');
+          } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
       } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
       finally { submitBtn.disabled = false; }
     } else {
+      // LOGIN
       const email = emailInput.value.trim(), password = pwInput.value;
       if (!email || !password) { errDiv.textContent = 'Email and password required'; errDiv.style.display = 'block'; return; }
       errDiv.style.display = 'none'; statDiv.textContent = 'Checking password...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
@@ -1100,6 +1135,7 @@ function renderAuthForm(mode) {
         const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
+        state.pendingAuth = data.pendingToken;
         statDiv.textContent = 'Verification code sent. Check your email.';
         document.getElementById('verifySection').style.display = 'block';
         document.getElementById('verifyBtn').onclick = async () => {
@@ -1107,10 +1143,11 @@ function renderAuthForm(mode) {
           if (!code) { errDiv.textContent = 'Enter code'; errDiv.style.display = 'block'; return; }
           statDiv.textContent = 'Verifying...';
           try {
-            const vr = await fetch('/api/auth/verify-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code }) });
+            const vr = await fetch('/api/auth/verify-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: state.pendingAuth, code }) });
             const vd = await vr.json();
             if (!vr.ok) throw new Error(vd.error);
             if (vd.requires2fa) {
+              state.pendingAuth = vd.twoFactorToken;
               document.getElementById('verifySection').style.display = 'none';
               document.getElementById('twofaSection').style.display = 'block';
               statDiv.textContent = 'Email verified. Enter your 2FA code.';
@@ -1118,11 +1155,12 @@ function renderAuthForm(mode) {
                 const c2 = document.getElementById('twofaCode').value.trim();
                 if (!c2) { errDiv.textContent = 'Enter 2FA code'; errDiv.style.display = 'block'; return; }
                 try {
-                  const t2 = await fetch('/api/auth/2fa/validate-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tempToken: vd.tempToken, code: c2 }) });
+                  const t2 = await fetch('/api/auth/2fa/validate-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ twoFactorToken: state.pendingAuth, code: c2 }) });
                   const t2d = await t2.json();
                   if (!t2.ok) throw new Error(t2d.error);
                   await state.supabase.auth.setSession({ access_token: t2d.session.access_token, refresh_token: t2d.session.refresh_token });
                   state.currentUser = t2d.user;
+                  state.pendingAuth = null;
                   updateAuthUI(); closeAuthModal(); showToast('Signed in!');
                   await loadCloudConversations();
                 } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; }
@@ -1131,14 +1169,21 @@ function renderAuthForm(mode) {
             }
             await state.supabase.auth.setSession({ access_token: vd.session.access_token, refresh_token: vd.session.refresh_token });
             state.currentUser = vd.user;
+            state.pendingAuth = null;
             updateAuthUI(); closeAuthModal(); showToast('Signed in!');
             await loadCloudConversations();
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
         document.getElementById('resendVerifyBtn').onclick = async () => {
-          statDiv.textContent = 'Resending...';
-          await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-          statDiv.textContent = 'New code sent.';
+          statDiv.textContent = 'Resending...'; statDiv.style.display = 'block';
+          try {
+            const rr = await fetch('/api/auth/resend-login-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingToken: state.pendingAuth }) });
+            const rd = await rr.json();
+            if (!rr.ok) throw new Error(rd.error);
+            state.pendingAuth = rd.pendingToken;
+            statDiv.textContent = 'New code sent. Check your email.';
+            showToast('New code sent.');
+          } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
       } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
       finally { submitBtn.disabled = false; }
@@ -1168,8 +1213,6 @@ async function openAccountModal() {
       content.querySelector('#loConfirm').onclick = async () => {
         await state.supabase.auth.signOut();
         close(); showToast('Logged out');
-        state.chats = []; state.messages = []; state.activeChatId = null;
-        renderChatList(); renderMessages();
       };
       content.querySelector('#loCancel').onclick = () => render('profile');
       return;
@@ -1178,10 +1221,10 @@ async function openAccountModal() {
     if (id === 'profile') {
       html = `<h2>Profile</h2><div class="profile-info"><p><strong>Name:</strong> ${profile.full_name || state.currentUser.email}</p><p><strong>Email:</strong> ${state.currentUser.email}</p><p><strong>Member since:</strong> ${new Date(state.currentUser.created_at).toLocaleDateString()}</p></div>`;
     } else if (id === 'account') {
-      html = `<h2>Account Settings</h2><div class="account-section"><label>Email</label><input type="email" id="newEmail" value="${state.currentUser.email}" /><button class="btn-primary" id="changeEmailBtn">Change Email</button><div id="emailVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="emailCode" /><button class="btn-primary" id="emailVerifyBtn">Verify & Change</button></div><hr /><label>Current Password</label><div id="curPwWrap"></div><label>New Password</label><div id="newPwWrap"></div><button class="btn-primary" id="changePwBtn">Change Password</button><div id="pwVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="pwCode" /><button class="btn-primary" id="pwVerifyBtn">Verify & Change</button></div></div>`;
+      html = `<h2>Account Settings</h2><div class="account-section"><label>Email</label><input type="email" id="newEmail" value="${state.currentUser.email}" /><button class="btn-primary" id="changeEmailBtn">Change Email</button><div id="emailVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="emailCode" inputmode="numeric" maxlength="6" /><button class="btn-primary" id="emailVerifyBtn">Verify & Change</button></div><hr /><label>Current Password</label><div id="curPwWrap"></div><label>New Password</label><div id="newPwWrap"></div><button class="btn-primary" id="changePwBtn">Change Password</button><div id="pwVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="pwCode" inputmode="numeric" maxlength="6" /><button class="btn-primary" id="pwVerifyBtn">Verify & Change</button></div></div>`;
     } else if (id === 'security') {
       const en = profile.two_factor_enabled;
-      html = `<h2>Security</h2><div class="security-section"><h3>Two-Factor Authentication</h3><p>${en ? 'Enabled.' : 'Disabled.'}</p>${en ? `<button class="btn-primary btn-danger" id="dis2fa">Disable 2FA</button>` : `<button class="btn-primary" id="en2fa">Enable 2FA</button><div id="twofaSetup" style="display:none;margin-top:1rem;"><div class="twofa-setup"><p>Scan with your authenticator app:</p><div id="qrCode"></div><label>Enter 6-digit code:</label><input type="text" id="twofaCodeIn" /><button class="btn-primary" id="verify2faBtn">Verify & Enable</button></div></div>`}</div>`;
+      html = `<h2>Security</h2><div class="security-section"><h3>Two-Factor Authentication</h3><p>${en ? 'Enabled.' : 'Disabled.'}</p>${en ? `<button class="btn-primary btn-danger" id="dis2fa">Disable 2FA</button>` : `<button class="btn-primary" id="en2fa">Enable 2FA</button><div id="twofaSetup" style="display:none;margin-top:1rem;"><div class="twofa-setup"><p>Scan with your authenticator app:</p><div id="qrCode"></div><label>Enter 6-digit code:</label><input type="text" id="twofaCodeIn" inputmode="numeric" maxlength="6" /><button class="btn-primary" id="verify2faBtn">Verify & Enable</button></div></div>`}</div>`;
     } else if (id === 'sessions') {
       try {
         const res = await apiFetch('/api/auth/sessions');
@@ -1202,13 +1245,15 @@ async function openAccountModal() {
         const newEmail = document.getElementById('newEmail').value.trim();
         if (!newEmail || newEmail === state.currentUser.email) { showToast('Different email required', true); return; }
         try {
-          await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
+          const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
+          const data = await res.json();
           showToast('Code sent.'); document.getElementById('emailVerify').style.display = 'block';
           document.getElementById('emailVerifyBtn').onclick = async () => {
             const code = document.getElementById('emailCode').value.trim();
             try {
-              await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-email' }) });
-              await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail }) });
+              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: data.pendingToken, code, action: 'change-email' }) });
+              const vd = await vr.json();
+              await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail, grantedToken: vd.grantedToken }) });
               showToast('Email changed.'); close();
             } catch (e) { showToast(e.message, true); }
           };
@@ -1219,13 +1264,15 @@ async function openAccountModal() {
         if (!cur || !np) { showToast('Fill both fields', true); return; }
         if (np.length < 8) { showToast('Min 8 chars', true); return; }
         try {
-          await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
+          const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
+          const data = await res.json();
           showToast('Code sent.'); document.getElementById('pwVerify').style.display = 'block';
           document.getElementById('pwVerifyBtn').onclick = async () => {
             const code = document.getElementById('pwCode').value.trim();
             try {
-              await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-password' }) });
-              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: np }) });
+              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: data.pendingToken, code, action: 'change-password' }) });
+              const vd = await vr.json();
+              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: np, grantedToken: vd.grantedToken }) });
               showToast('Password changed.'); close();
             } catch (e) { showToast(e.message, true); }
           };
