@@ -374,3 +374,48 @@ body.share-view::before {
   #welcomeScreen { gap: .4rem; }
   .welcome-logo { height: 50px; }
 }
+/* Manual secret for 2FA */
+.manual-secret {
+  margin-top: .75rem;
+  width: 100%;
+}
+.secret-box {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .5rem .6rem;
+  margin-top: .3rem;
+}
+.secret-box code {
+  flex: 1;
+  font-family: monospace;
+  font-size: .75rem;
+  word-break: break-all;
+  color: var(--text);
+  user-select: all;
+}
+.copy-secret-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: .3rem .6rem;
+  font-size: .75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.copy-secret-btn:hover { background: var(--accent-hover); }
+
+/* Session items */
+.session-item {
+  padding: .5rem;
+  border-radius: 6px;
+  background: var(--surface-hover);
+  margin-bottom: .4rem;
+  font-size: .85rem;
+}
+.session-item p { margin: .15rem 0; word-break: break-word; }
