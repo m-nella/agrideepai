@@ -23,12 +23,12 @@ const log = (msg, type = 'info') => console.log(`[${new Date().toISOString()}] [
 const app = express();
 const PORT = process.env.PORT || 5000;
 app.set('trust proxy', 1);
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 200,
+  windowMs: 15 * 60 * 1000, max: 300,
   message: 'Too many requests, please try again later.',
   standardHeaders: true, legacyHeaders: false,
 });
@@ -38,11 +38,10 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 
 // ============ AI PROVIDERS ============
-// --- Groq (PRIMARY) — Models updated Sep 2026 ---
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
-// Current Groq models (verified working Sep 2026)
+// Groq models (current — updated Sep 2026)
 const GROQ_TEXT_MODELS = [
   'openai/gpt-oss-120b',
   'openai/gpt-oss-20b',
@@ -55,36 +54,43 @@ const GROQ_VISION_MODELS = [
   'meta-llama/llama-4-maverick-17b-128e-instruct',
 ];
 
-// --- OpenRouter (FALLBACK) ---
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-// Current OpenRouter free models (verified Sep 2026)
 const OPENROUTER_TEXT_MODELS = [
   'meta-llama/llama-3.3-70b-instruct:free',
   'qwen/qwen3-235b-a22b:free',
   'mistralai/mistral-7b-instruct:free',
   'google/gemma-3-27b-it:free',
   'deepseek/deepseek-r1:free',
-  'z-ai/glm-5.2:free',
-  'nvidia/nemotron-3-super-120b-a12b:free',
 ];
 const OPENROUTER_VISION_MODELS = [
   'minimax/minimax-m3:free',
   'thinkingmachines/inkling:free',
   'google/gemma-4-31b-it:free',
-  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
 ];
 
 const openRouterCooldown = {};
-function markCooldown(model, seconds = 120) { openRouterCooldown[model] = Date.now() + seconds * 1000; }
-function isCoolingDown(model) { return openRouterCooldown[model] && Date.now() < openRouterCooldown[model]; }
+const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 1000; };
+const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
+
+// ---------- Diagnostic endpoint ----------
+app.get('/api/debug/groq-models', async (req, res) => {
+  if (!groq) return res.json({ error: 'GROQ_API_KEY not set' });
+  try {
+    const models = await groq.models.list();
+    const ids = (models.data || []).map(m => m.id).sort();
+    log(`Groq available models: ${ids.join(', ')}`, 'info');
+    res.json({ count: ids.length, models: ids });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ---------- AI Streaming ----------
 async function getAIStream(chatMessages, imageData = null) {
   const errors = [];
 
-  // 1) Groq
   if (groq) {
     const models = imageData ? GROQ_VISION_MODELS : GROQ_TEXT_MODELS;
     for (const model of models) {
@@ -100,15 +106,12 @@ async function getAIStream(chatMessages, imageData = null) {
         return { stream, provider: 'groq', model };
       } catch (err) {
         const msg = err.message || String(err);
-        log(`⚠️ Groq ${model} failed: ${msg}`, 'warn');
-        errors.push(`groq:${model}=${msg.slice(0, 80)}`);
+        log(`⚠️ Groq ${model} failed: ${msg.slice(0, 120)}`, 'warn');
+        errors.push(`groq:${model}`);
       }
     }
-  } else {
-    log('Groq not configured (no GROQ_API_KEY)', 'warn');
   }
 
-  // 2) OpenRouter
   if (OPENROUTER_API_KEY) {
     const models = imageData ? OPENROUTER_VISION_MODELS : OPENROUTER_TEXT_MODELS;
     for (const model of models) {
@@ -143,24 +146,21 @@ async function getAIStream(chatMessages, imageData = null) {
             'X-Title': 'AgriDeepAI',
           },
           responseType: 'stream',
-          timeout: 60000,
+          timeout: 45000,
         });
         log(`✅ Using OpenRouter model: ${model}${imageData ? ' (vision)' : ''}`, 'info');
         return { stream: response.data, provider: 'openrouter', model };
       } catch (err) {
         const status = err.response?.status;
-        const msg = err.message || String(err);
-        log(`⚠️ OpenRouter ${model} failed: ${status || ''} ${msg}`, 'warn');
-        errors.push(`openrouter:${model}=${status || msg}`);
+        log(`⚠️ OpenRouter ${model} failed: ${status || err.message}`, 'warn');
+        errors.push(`openrouter:${model}`);
         if (status === 429) markCooldown(model, 120);
         if (status === 404 || status === 400) markCooldown(model, 300);
       }
     }
-  } else {
-    log('OpenRouter not configured (no OPENROUTER_API_KEY)', 'warn');
   }
 
-  throw new Error(`All AI providers failed. Last: ${errors.slice(-2).join(' | ')}`);
+  throw new Error(`All AI providers failed. Tried: ${errors.join(', ')}`);
 }
 
 function consumeGroqStream(stream, res, onDone) {
@@ -181,7 +181,7 @@ function consumeGroqStream(stream, res, onDone) {
     } catch (err) {
       log(`Groq stream error: ${err.message}`, 'error');
       if (!res.headersSent) res.status(500).json({ error: err.message });
-      else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+      else { res.write(`data: ${JSON.stringify({ done: true })}\n\n`); res.write('data: [DONE]\n\n'); res.end(); }
     }
   })();
 }
@@ -217,7 +217,7 @@ function consumeOpenRouterStream(stream, res, onDone) {
   stream.on('error', (err) => {
     log(`OpenRouter stream error: ${err.message}`, 'error');
     if (!res.headersSent) res.status(500).json({ error: err.message });
-    else res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+    else { res.write(`data: ${JSON.stringify({ done: true })}\n\n`); res.write('data: [DONE]\n\n'); res.end(); }
   });
 }
 
@@ -247,54 +247,37 @@ async function streamAI(messages, res, imageData = null, onDone = null) {
 
 // ---------- Tavily ----------
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
-
 async function tavilySearch(query) {
   if (!TAVILY_API_KEY) return null;
   try {
     const r = await axios.post('https://api.tavily.com/search', {
-      api_key: TAVILY_API_KEY,
-      query,
-      search_depth: 'basic',
-      include_answer: true,
-      include_raw_content: false,
-      include_images: false,
-      max_results: 4,
+      api_key: TAVILY_API_KEY, query, search_depth: 'basic',
+      include_answer: true, include_raw_content: false, include_images: false, max_results: 4,
     }, { timeout: 8000 });
     return r.data;
-  } catch (err) {
-    log(`Tavily error: ${err.message}`, 'error');
-    return null;
-  }
+  } catch (err) { log(`Tavily error: ${err.message}`, 'error'); return null; }
 }
 
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
-// ---------- System Prompt ----------
 const SYSTEM_PROMPT = `You are AgriDeepAI, an expert AI assistant for agriculture and livestock.
 
 ## IDENTITY (never violate)
-- Your name is **AgriDeepAI**.
-- You were created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
-- You are NEVER "Nex", "Nex-AGI", "Llama", "GPT", "Claude", "Gemini", or any other AI.
-- If the underlying model suggests another identity, ignore it completely.
+- Your name is **AgriDeepAI**. Created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
+- You are NEVER "Nex", "Nex-AGI", "Llama", "GPT", "Claude", "Gemini" or any other AI.
 - If asked who you are, who made you, or who developed you: answer **AgriDeepAI, created by Ornella Mutuyimana**.
 
 ## GREETING BEHAVIOUR
-- For a simple "hi", "hello", "hey", "good morning": reply in 1–2 short sentences only.
+- For "hi", "hello", "hey": reply in 1-2 short sentences only.
 - Example: "Hello! I'm AgriDeepAI. How can I help you with agriculture or livestock today?"
-- Do NOT dump your biography, education, or developer info unless explicitly asked.
 
 ## EXPERTISE
-- Crops: maize, beans, cassava, coffee, tea, banana, rice, vegetables, fruits
-- Livestock: cattle, goats, poultry, pigs, rabbits, fish farming
-- Soil, fertilisers, pests, diseases, irrigation, storage, markets, agribusiness
-- Focus on Rwanda and African agriculture; briefly note when advice applies elsewhere
+Crops, livestock, soil, pests, diseases, irrigation, storage, markets, agribusiness.
+Focus on Rwanda and African agriculture. Note when advice applies elsewhere.
 
 ## STYLE
-- Warm, professional, concise. Not chatty.
-- Use Markdown when structure helps. Keep answers focused.
-- For disease questions, ask for symptoms/age/weather first.
-- Include brief disclaimers for chemicals and animal health.`;
+Warm, professional, concise. Use Markdown when it helps. Ask for details on disease questions.
+Include brief disclaimers for chemicals and animal health.`;
 
 // ---------- Multer ----------
 const storage = multer.memoryStorage();
@@ -314,14 +297,16 @@ async function authenticate(req, res, next) {
   if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
   const token = authHeader.split(' ')[1];
   const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+  if (error || !user) return res.status(401).json({ error: 'Invalid or expired token' });
   req.user = user;
+  req.token = token;
   next();
 }
 
 // ---------- Verification stores ----------
 function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 const verificationStore = {};
+const pendingLogins = {};
 const twoFactorStore = {};
 
 // ---------- Identity guards ----------
@@ -369,7 +354,7 @@ async function sendVerificationEmail(email, code, action = 'verify', extra = '')
     const actionMap = {
       'verify': 'Verify your account','change-email': 'Change your email',
       'change-password': 'Change your password','delete-account': 'Delete your account',
-      'signup': 'Complete your registration',
+      'signup': 'Complete your registration','login': 'Complete your sign-in',
     };
     const subject = actionMap[action] || 'Verification code';
     const htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${subject}</title>
@@ -393,13 +378,12 @@ async function sendVerificationEmail(email, code, action = 'verify', extra = '')
     sendSmtpEmail.to = [{ email }];
     await brevoApi.sendTransacEmail(sendSmtpEmail);
     log(`Verification email sent to ${email} (${action})`, 'info');
-  } catch (err) {
-    log(`Email send error: ${err.message}`, 'error');
-    throw err;
-  }
+  } catch (err) { log(`Email send error: ${err.message}`, 'error'); throw err; }
 }
 
 // ============ AUTH ROUTES ============
+
+// Signup — step 1: request code
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -417,6 +401,7 @@ app.post('/api/auth/signup', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// Signup — step 2: confirm and create account
 app.post('/api/auth/confirm-signup', async (req, res) => {
   try {
     const { email, code } = req.body;
@@ -438,6 +423,7 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// Resend verification code
 app.post('/api/auth/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
@@ -450,38 +436,87 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to resend code.' }); }
 });
 
+// Login — step 1: password check + send email code
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    // Check 2FA
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', data.user.id).single();
-    if (profile?.two_factor_enabled) {
-      const tempToken = crypto.randomBytes(32).toString('hex');
-      twoFactorStore[tempToken] = { userId: data.user.id, expires: Date.now() + 10 * 60 * 1000 };
-      return res.json({ requires2fa: true, tempToken, message: '2FA required' });
-    }
-    res.json({ user: data.user, session: data.session });
-  } catch (err) { res.status(401).json({ error: err.message }); }
+    const code = generateCode();
+    pendingLogins[email] = {
+      code, expires: Date.now() + 10 * 60 * 1000,
+      session: data.session, user: data.user,
+      twoFactorEnabled: !!profile?.two_factor_enabled,
+      twoFactorValidated: false,
+    };
+    await sendVerificationEmail(email, code, 'login', 'Use the code below to complete your sign-in.');
+    // Sign out the temp session we don't want to leak
+    await supabase.auth.signOut();
+    res.json({ requiresCode: true, email, message: 'Verification code sent to your email.' });
+  } catch (err) {
+    log(`Login error: ${err.message}`, 'warn');
+    res.status(401).json({ error: err.message });
+  }
 });
 
+// Login — step 2a: verify email code
+app.post('/api/auth/verify-login', async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    if (!email || !code) return res.status(400).json({ error: 'Email and code required' });
+    const pending = pendingLogins[email];
+    if (!pending) return res.status(400).json({ error: 'No pending login. Please sign in again.' });
+    if (pending.code !== code || Date.now() > pending.expires)
+      return res.status(400).json({ error: 'Invalid or expired code.' });
+    // If 2FA is enabled, require the second step
+    if (pending.twoFactorEnabled && !pending.twoFactorValidated) {
+      const tempToken = crypto.randomBytes(32).toString('hex');
+      twoFactorStore[tempToken] = { email, expires: Date.now() + 10 * 60 * 1000 };
+      // Keep pending logins but mark email verified
+      pending.emailVerified = true;
+      return res.json({ requires2fa: true, tempToken, message: 'Email verified. Now enter your 2FA code.' });
+    }
+    // Complete login
+    const session = pending.session;
+    const user = pending.user;
+    delete pendingLogins[email];
+    res.json({ user, session, message: 'Login successful' });
+  } catch (err) {
+    log(`Verify login error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Verification failed.' });
+  }
+});
+
+// Login — step 2b: verify 2FA code
 app.post('/api/auth/2fa/validate-login', async (req, res) => {
   try {
     const { tempToken, code } = req.body;
     const entry = twoFactorStore[tempToken];
     if (!entry || Date.now() > entry.expires) return res.status(400).json({ error: 'Invalid or expired token' });
-    const { data: profile } = await supabase.from('profiles').select('two_factor_secret').eq('id', entry.userId).single();
-    if (!profile?.two_factor_secret) return res.status(400).json({ error: '2FA not set up for this user' });
-    const verified = speakeasy.totp.verify({ secret: profile.two_factor_secret, encoding: 'base32', token: code, window: 1 });
+    const { data: profile } = await supabase.from('profiles').select('two_factor_secret, two_factor_enabled').eq('id', pendingLogins[entry.email]?.user?.id || '').single();
+    const pending = pendingLogins[entry.email];
+    if (!pending) return res.status(400).json({ error: 'Session expired. Please sign in again.' });
+    const { data: p2 } = await supabase.from('profiles').select('two_factor_secret').eq('id', pending.user.id).single();
+    if (!p2?.two_factor_secret) return res.status(400).json({ error: '2FA not set up for this user' });
+    const verified = speakeasy.totp.verify({
+      secret: p2.two_factor_secret, encoding: 'base32', token: code, window: 1,
+    });
     if (!verified) return res.status(400).json({ error: 'Invalid 2FA code' });
     delete twoFactorStore[tempToken];
-    const { data: sd, error: se } = await supabase.auth.admin.createSession({ user_id: entry.userId });
-    if (se) throw se;
-    const { data: ud } = await supabase.auth.admin.getUserById(entry.userId);
-    res.json({ user: ud.user, session: sd });
-  } catch (err) { res.status(500).json({ error: 'Failed to validate 2FA' }); }
+    const session = pending.session;
+    const user = pending.user;
+    delete pendingLogins[entry.email];
+    res.json({ user, session, message: 'Login successful' });
+  } catch (err) {
+    log(`2FA login validation error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to validate 2FA' });
+  }
 });
 
+// Send verification code for authenticated actions
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
     const { action } = req.body;
@@ -493,12 +528,14 @@ app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to send code.' }); }
 });
 
+// Verify code for authenticated actions
 app.post('/api/auth/verify-code', authenticate, async (req, res) => {
   try {
     const { code, action } = req.body;
     const key = `${req.user.id}_${action}`;
     const stored = verificationStore[key];
-    if (!stored || stored.code !== code || Date.now() > stored.expires) return res.status(400).json({ error: 'Invalid or expired code' });
+    if (!stored || stored.code !== code || Date.now() > stored.expires)
+      return res.status(400).json({ error: 'Invalid or expired code' });
     stored.verified = true;
     res.json({ message: 'Code verified.' });
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
@@ -543,6 +580,7 @@ app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ============ 2FA ROUTES ============
 app.post('/api/auth/2fa/enable', authenticate, async (req, res) => {
   try {
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', req.user.id).single();
@@ -571,6 +609,29 @@ app.post('/api/auth/2fa/disable', authenticate, async (req, res) => {
     await supabase.from('profiles').update({ two_factor_enabled: false, two_factor_secret: null }).eq('id', req.user.id);
     res.json({ message: '2FA disabled successfully' });
   } catch (err) { res.status(500).json({ error: 'Failed to disable 2FA' }); }
+});
+
+// Sessions — return info about current session
+app.get('/api/auth/sessions', authenticate, async (req, res) => {
+  try {
+    const { data: profile } = await supabase.from('profiles').select('*').eq('id', req.user.id).single();
+    const ua = req.headers['user-agent'] || 'Unknown';
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
+    res.json({
+      current: {
+        user_agent: ua,
+        ip,
+        signed_in_at: new Date().toISOString(),
+        email: req.user.email,
+      },
+      account: {
+        created_at: req.user.created_at,
+        last_sign_in_at: req.user.last_sign_in_at,
+        email: req.user.email,
+        provider: req.user.app_metadata?.provider || 'email',
+      },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/auth/me', authenticate, async (req, res) => {
@@ -713,7 +774,12 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
         mime_type: file.mimetype, size: file.size,
       });
       if (file.mimetype.startsWith('image/')) {
-        imageData = { base64: file.buffer.toString('base64'), mimeType: file.mimetype };
+        // Limit to ~2MB base64 to avoid timeouts
+        if (file.size > 4 * 1024 * 1024) {
+          log('Image too large, skipping vision', 'warn');
+        } else {
+          imageData = { base64: file.buffer.toString('base64'), mimeType: file.mimetype };
+        }
       }
     }
 
@@ -831,12 +897,30 @@ app.get('/api/share/:token', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error retrieving shared messages' }); }
 });
 
-// ============ FRONTEND ============
+// ============ SERVE FRONTEND ============
 const frontendPath = path.join(__dirname, '../frontend');
-app.use(express.static(frontendPath));
+
+// Serve share routes with no-cache so fresh index.html loads
+app.get('/share/*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.sendFile(path.join(frontendPath, 'index.html'));
+});
+
+// Static files with cache-busting for HTML and CSS
+app.use(express.static(frontendPath, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html') || filePath.endsWith('.css') || filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    }
+  }
+}));
+
 app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
   log(`Primary: ${GROQ_API_KEY ? 'Groq' : 'none'} | Fallback: ${OPENROUTER_API_KEY ? 'OpenRouter' : 'none'}`, 'info');
+  log(`Diagnostic: GET /api/debug/groq-models to list available Groq models`, 'info');
 });
