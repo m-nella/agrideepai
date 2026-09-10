@@ -382,6 +382,14 @@ async function authenticate(req, res, next) {
   next();
 }
 
+// ---------- Client ID (per-browser) ----------
+const getClientId = (req) => {
+  const id = (req.headers['x-client-id'] || '').toString().trim();
+  return id ? id.slice(0, 80) : null;
+};
+const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
+const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
+
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
@@ -429,7 +437,7 @@ async function tryIdentityShortcut(messages, res) {
   return false;
 }
 
-// ============ CHAT TITLE GENERATOR ============
+// ---------- Chat title generator ----------
 async function generateChatTitle(userMessage) {
   const msg = (userMessage || '').trim();
   if (!msg) return 'New Chat';
@@ -447,36 +455,25 @@ async function generateChatTitle(userMessage) {
     for (const model of ['openai/gpt-oss-20b', 'openai/gpt-oss-120b']) {
       try {
         const completion = await groq.chat.completions.create({
-          model,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3,
-          max_tokens: 30,
+          model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 30,
         });
         const title = tryParse(completion.choices?.[0]?.message?.content);
         if (title) return title.substring(0, 60);
-      } catch (err) {
-        log(`Title gen (groq ${model}) error: ${err.message}`, 'warn');
-      }
+      } catch (err) { log(`Title gen (groq ${model}) error: ${err.message}`, 'warn'); }
     }
   }
   if (FHROUTER_API_KEY) {
     for (const model of FHROUTER_TEXT_MODELS.slice(0, 2)) {
       try {
         const r = await axios.post(FHROUTER_URL, {
-          model,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3,
-          max_tokens: 30,
-          stream: false,
+          model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 30, stream: false,
         }, {
           headers: { 'Authorization': `Bearer ${FHROUTER_API_KEY}`, 'Content-Type': 'application/json' },
           timeout: 15000,
         });
         const title = tryParse(r.data?.choices?.[0]?.message?.content);
         if (title) return title.substring(0, 60);
-      } catch (err) {
-        log(`Title gen (fhrouter ${model}) error: ${err.message}`, 'warn');
-      }
+      } catch (err) { log(`Title gen (fhrouter ${model}) error: ${err.message}`, 'warn'); }
     }
   }
   return msg.substring(0, 42) + (msg.length > 42 ? '…' : '');
@@ -546,23 +543,48 @@ async function sendLoginNotification(email, ip, device, time) {
   } catch (err) { log(`Login notification error: ${err.message}`, 'error'); }
 }
 
+// Track a session — prefers client_id, falls back to ip+ua
 async function trackSession(userId, email, req) {
   try {
-    const ua = req.headers['user-agent'] || 'Unknown';
-    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
+    const ua = getRequestUa(req);
+    const ip = getRequestIp(req);
+    const clientId = getClientId(req);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
     const { data: recent, error: recentErr } = await supabase.from('sessions')
       .select('*').eq('user_id', userId).gte('last_active', thirtyDaysAgo);
     if (recentErr) log(`trackSession read error: ${recentErr.message}`, 'warn');
-    const isNewDevice = !recent || !recent.some(s => s.ip === ip && s.user_agent === ua);
+
+    const existing = (recent || []).find(s =>
+      (clientId && s.client_id === clientId)
+      || (s.ip === ip && s.user_agent === ua)
+    );
     const hasAnyPrevious = !!(recent && recent.length > 0);
-    const { error: insErr } = await supabase.from('sessions').insert({
-      user_id: userId, device: ua.substring(0, 120), ip, user_agent: ua,
-    });
-    if (insErr) log(`trackSession insert error: ${insErr.message}`, 'error');
-    if (isNewDevice && hasAnyPrevious && email) {
-      sendLoginNotification(email, ip, ua.substring(0, 120), new Date().toLocaleString())
-        .catch(e => log(`Login notification failed: ${e.message}`, 'warn'));
+
+    if (existing) {
+      // Same device — refresh the row
+      const { error: upErr } = await supabase.from('sessions').update({
+        device: ua.substring(0, 120),
+        ip,
+        user_agent: ua,
+        last_active: new Date().toISOString(),
+        client_id: clientId || existing.client_id || null,
+      }).eq('id', existing.id);
+      if (upErr) log(`trackSession update error: ${upErr.message}`, 'error');
+    } else {
+      const { error: insErr } = await supabase.from('sessions').insert({
+        user_id: userId,
+        device: ua.substring(0, 120),
+        ip,
+        user_agent: ua,
+        client_id: clientId || null,
+      });
+      if (insErr) log(`trackSession insert error: ${insErr.message}`, 'error');
+      // New device notification only if this isn't the very first-ever session
+      if (hasAnyPrevious && email) {
+        sendLoginNotification(email, ip, ua.substring(0, 120), new Date().toLocaleString())
+          .catch(e => log(`Login notification failed: ${e.message}`, 'warn'));
+      }
     }
   } catch (err) { log(`trackSession error: ${err.message}`, 'warn'); }
 }
@@ -598,6 +620,8 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
     await supabase.from('profiles').insert({ id: data.user.id, full_name: fullName });
     const { data: sd, error: se } = await supabase.auth.signInWithPassword({ email, password });
     if (se) throw se;
+    // Track the new session immediately so session-check passes on the next page load
+    await trackSession(sd.user.id, sd.user.email, req);
     res.status(201).json({ user: sd.user, session: sd.session });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
@@ -776,8 +800,8 @@ app.post('/api/auth/2fa/disable', authenticate, async (req, res) => {
 
 app.get('/api/auth/sessions', authenticate, async (req, res) => {
   try {
-    const ua = req.headers['user-agent'] || 'Unknown';
-    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
+    const ua = getRequestUa(req);
+    const ip = getRequestIp(req);
     const { data: sessions, error } = await supabase.from('sessions').select('*').eq('user_id', req.user.id).order('last_active', { ascending: false });
     if (error) log(`sessions fetch error: ${error.message}`, 'warn');
     res.json({
@@ -788,20 +812,47 @@ app.get('/api/auth/sessions', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Log out ALL other sessions (not the current one)
+// Lightweight check: is this browser's session still valid?
+app.get('/api/auth/session-check', authenticate, async (req, res) => {
+  try {
+    const ua = getRequestUa(req);
+    const ip = getRequestIp(req);
+    const clientId = getClientId(req);
+
+    if (clientId) {
+      const { data, error } = await supabase.from('sessions').select('id').eq('user_id', req.user.id).eq('client_id', clientId).limit(1);
+      if (error) log(`session-check error: ${error.message}`, 'warn');
+      if (data && data.length > 0) return res.json({ valid: true });
+    }
+    // Fallback: match by ip+ua (covers pre-client_id rows)
+    const { data: byIpUa } = await supabase.from('sessions').select('id').eq('user_id', req.user.id).eq('ip', ip).eq('user_agent', ua).limit(1);
+    if (byIpUa && byIpUa.length > 0) {
+      if (clientId) await supabase.from('sessions').update({ client_id: clientId }).eq('id', byIpUa[0].id);
+      return res.json({ valid: true });
+    }
+    return res.json({ valid: false });
+  } catch (err) {
+    // Never fail-closed on transient errors
+    return res.json({ valid: true, error: err.message });
+  }
+});
+
+// Log out all other sessions
 app.delete('/api/auth/sessions/all', authenticate, async (req, res) => {
   try {
-    const ua = req.headers['user-agent'] || 'Unknown';
-    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
+    const ua = getRequestUa(req);
+    const ip = getRequestIp(req);
+    const clientId = getClientId(req);
     const { data: sessions } = await supabase.from('sessions').select('*').eq('user_id', req.user.id).order('last_active', { ascending: false });
     const list = sessions || [];
-    const mine = list.filter(s => s.ip === ip && s.user_agent === ua);
+    const mine = clientId
+      ? list.filter(s => s.client_id === clientId)
+      : list.filter(s => s.ip === ip && s.user_agent === ua);
     const keepId = mine[0]?.id;
     const idsToDelete = list.filter(s => s.id !== keepId).map(s => s.id);
     if (idsToDelete.length > 0) {
       await supabase.from('sessions').delete().in('id', idsToDelete);
     }
-    // Revoke other Supabase refresh tokens (real sign-out for other devices)
     try { await supabase.auth.admin.signOut(req.token, 'others'); }
     catch (e) { log(`Supabase signOut(others) failed: ${e.message}`, 'warn'); }
     res.json({ message: 'All other sessions logged out', removed: idsToDelete.length });
@@ -955,7 +1006,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     const { error: userMsgErr } = await supabase.from('messages').insert(messageData);
     if (userMsgErr) log(`User message insert error: ${userMsgErr.message}`, 'error');
 
-    // AI-generated smart title
     if ((conv.title === 'New Chat' || !conv.title) && message) {
       const newTitle = await generateChatTitle(message);
       await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
