@@ -80,6 +80,7 @@ let state = {
   contextMenuTarget: null, isShareView: IS_SHARE_VIEW, shareMessages: [], copyTimeout: null,
   pendingAuth: null, shouldScrollToBottom: false,
   lastSessionCheck: 0, isSigningOut: false,
+  forgotPw: { email: null, pendingToken: null, grantedToken: null },
 };
 
 // ============ SMART SCROLL ============
@@ -986,7 +987,6 @@ async function sendMessage() {
   renderMessages(); updateSendButton();
   state.abortController = new AbortController();
 
-  // Guest: ask the backend for a smart title in parallel
   if (isFirstMessage && !state.currentUser && text) {
     const localChatId = chat.id;
     fetch('/api/chat/title', {
@@ -1075,11 +1075,18 @@ function createPasswordField(id, placeholder) {
   w.appendChild(input); w.appendChild(t); return w;
 }
 
-function openAuthModal(mode = 'login') { authModal.classList.remove('hidden'); renderAuthForm(mode); }
+function openAuthModal(mode = 'login') {
+  state.forgotPw = { email: null, pendingToken: null, grantedToken: null };
+  authModal.classList.remove('hidden');
+  renderAuthForm(mode);
+}
 function closeAuthModal() { authModal.classList.add('hidden'); }
 modalClose.forEach(b => b.addEventListener('click', closeAuthModal));
 authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
 
+// ============================================================
+// SIGN IN / SIGN UP FORM
+// ============================================================
 function renderAuthForm(mode) {
   const isLogin = mode === 'login';
   authModalBody.innerHTML = `
@@ -1095,6 +1102,7 @@ function renderAuthForm(mode) {
         <div id="pwLiveStatus" style="font-size:.8rem;margin-top:.3rem;min-height:1.2em;"></div>` : ''}
       ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" autocomplete="name" />` : ''}
       <button class="btn-primary" id="authSubmitBtn" disabled>${isLogin ? 'Sign In' : 'Sign Up'}</button>
+      ${isLogin ? `<div class="toggle-link" id="forgotPwLink" style="margin-top:.5rem;color:var(--accent);">Forgot Password?</div>` : ''}
       <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
     </div>
     <div id="verifySection" style="display:none;margin-top:1rem;">
@@ -1114,6 +1122,7 @@ function renderAuthForm(mode) {
 
   const submitBtn = document.getElementById('authSubmitBtn');
   const toggleLink = document.getElementById('authToggle');
+  const forgotPwLink = document.getElementById('forgotPwLink');
   const errDiv = document.getElementById('authError');
   const statDiv = document.getElementById('authStatus');
   const emailInput = document.getElementById('authEmail');
@@ -1144,17 +1153,14 @@ function renderAuthForm(mode) {
   if (confirmInput) confirmInput.addEventListener('input', check);
   check();
   toggleLink.onclick = () => renderAuthForm(isLogin ? 'signup' : 'login');
+  if (forgotPwLink) forgotPwLink.onclick = () => renderForgotPasswordForm('email');
 
   const wireResend = (resendBtn, endpoint, getToken, setToken) => {
     attachCountdown(resendBtn);
     resendBtn.onclick = async () => {
       if (resendBtn.disabled) return;
       const token = getToken();
-      if (!token) {
-        errDiv.textContent = 'Your session expired. Please sign in again.';
-        errDiv.style.display = 'block';
-        return;
-      }
+      if (!token) { errDiv.textContent = 'Your session expired. Please sign in again.'; errDiv.style.display = 'block'; return; }
       statDiv.textContent = 'Resending...'; statDiv.style.display = 'block'; errDiv.style.display = 'none';
       try {
         const rr = await fetch(endpoint, {
@@ -1282,6 +1288,208 @@ function renderAuthForm(mode) {
       finally { submitBtn.disabled = false; }
     }
   };
+}
+
+// ============================================================
+// FORGOT PASSWORD — 3 steps: email → code → new password
+// ============================================================
+function renderForgotPasswordForm(step) {
+  const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+  const pwIsStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
+
+  if (step === 'email') {
+    authModalBody.innerHTML = `
+      <h2>Reset Password</h2>
+      <div id="fpError" class="error-msg" style="display:none;"></div>
+      <div id="fpStatus" class="status-msg" style="display:none;"></div>
+      <p style="color:var(--text-muted);font-size:.9rem;margin:.25rem 0 .75rem;">Enter the email you used to register. We'll send a verification code to it.</p>
+      <label>Registered Email</label>
+      <input type="email" id="fpEmail" placeholder="you@example.com" autocomplete="email" />
+      <button class="btn-primary" id="fpSendCodeBtn">Send Code</button>
+      <div class="toggle-link" id="fpBackToSignIn" style="margin-top:.5rem;">Back to Sign In</div>`;
+    window.refreshIcons();
+
+    const errDiv = document.getElementById('fpError');
+    const statDiv = document.getElementById('fpStatus');
+    const emailInput = document.getElementById('fpEmail');
+    const sendBtn = document.getElementById('fpSendCodeBtn');
+
+    const validate = () => {
+      const e = emailInput.value.trim();
+      sendBtn.disabled = !(e.includes('@') && e.length >= 5);
+    };
+    emailInput.addEventListener('input', validate);
+    validate();
+    setTimeout(() => emailInput.focus(), 50);
+
+    emailInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendBtn.click(); });
+
+    document.getElementById('fpBackToSignIn').onclick = () => renderAuthForm('login');
+
+    sendBtn.onclick = async () => {
+      const email = emailInput.value.trim().toLowerCase();
+      errDiv.style.display = 'none'; statDiv.style.display = 'none';
+      if (!email) { errDiv.textContent = 'Please enter your email address'; errDiv.style.display = 'block'; return; }
+      if (!EMAIL_RE.test(email) || email.includes('..')) { errDiv.textContent = 'Please enter a valid email address'; errDiv.style.display = 'block'; return; }
+
+      statDiv.textContent = 'Checking email...'; statDiv.style.display = 'block';
+      sendBtn.disabled = true;
+      try {
+        const res = await fetch('/api/auth/forgot-password-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+          body: JSON.stringify({ email }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 404) throw new Error(data.error || 'This email is not registered. Please sign up first.');
+          throw new Error(data.error || `Request failed (${res.status})`);
+        }
+        state.forgotPw.email = data.email || email;
+        state.forgotPw.pendingToken = data.pendingToken;
+        statDiv.textContent = `Verification code sent to ${state.forgotPw.email}.`;
+        setTimeout(() => renderForgotPasswordForm('code'), 300);
+      } catch (e) {
+        errDiv.textContent = e.message; errDiv.style.display = 'block';
+        statDiv.style.display = 'none';
+        sendBtn.disabled = false;
+      }
+    };
+  }
+
+  else if (step === 'code') {
+    authModalBody.innerHTML = `
+      <h2>Enter Verification Code</h2>
+      <div id="fpError" class="error-msg" style="display:none;"></div>
+      <div id="fpStatus" class="status-msg" style="display:block;">We sent a code to <strong>${state.forgotPw.email}</strong>.</div>
+      <label>6-digit code</label>
+      <input type="text" id="fpCode" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
+      <button class="btn-primary" id="fpVerifyBtn">Verify Code</button>
+      <button id="fpResendBtn" class="link-btn" type="button">Resend code</button>
+      <div class="toggle-link" id="fpBackToEmail" style="margin-top:.5rem;">Use a different email</div>`;
+    window.refreshIcons();
+
+    const errDiv = document.getElementById('fpError');
+    const codeInput = document.getElementById('fpCode');
+    const verifyBtn = document.getElementById('fpVerifyBtn');
+    const resendBtn = document.getElementById('fpResendBtn');
+
+    attachCountdown(resendBtn);
+    setTimeout(() => codeInput.focus(), 50);
+    codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyBtn.click(); });
+
+    document.getElementById('fpBackToEmail').onclick = () => {
+      state.forgotPw = { email: null, pendingToken: null, grantedToken: null };
+      renderForgotPasswordForm('email');
+    };
+
+    resendBtn.onclick = async () => {
+      if (resendBtn.disabled) return;
+      if (!state.forgotPw.pendingToken) { errDiv.textContent = 'Your session expired. Please start again.'; errDiv.style.display = 'block'; return; }
+      try {
+        const r = await fetch('/api/auth/resend-forgot-password-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+          body: JSON.stringify({ pendingToken: state.forgotPw.pendingToken }),
+        });
+        const rd = await r.json();
+        if (!r.ok) throw new Error(rd.error || 'Failed to resend');
+        state.forgotPw.pendingToken = rd.pendingToken;
+        showToast(rd.email ? `New code sent to ${rd.email}` : 'New code sent.');
+        attachCountdown(resendBtn);
+      } catch (e) {
+        showToast(e.message, true);
+        resendBtn.disabled = false;
+        if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; }
+        resendBtn.textContent = 'Resend code';
+      }
+    };
+
+    verifyBtn.onclick = async () => {
+      const code = codeInput.value.trim();
+      errDiv.style.display = 'none';
+      if (!code || code.length < 6) { errDiv.textContent = 'Enter the 6-digit code'; errDiv.style.display = 'block'; return; }
+      verifyBtn.disabled = true;
+      try {
+        const vr = await fetch('/api/auth/forgot-password-verify-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+          body: JSON.stringify({ pendingToken: state.forgotPw.pendingToken, code }),
+        });
+        const vd = await vr.json().catch(() => ({}));
+        if (!vr.ok) throw new Error(vd.error || 'Invalid or expired code');
+        state.forgotPw.grantedToken = vd.grantedToken;
+        renderForgotPasswordForm('password');
+      } catch (e) {
+        errDiv.textContent = e.message; errDiv.style.display = 'block';
+        verifyBtn.disabled = false;
+      }
+    };
+  }
+
+  else if (step === 'password') {
+    authModalBody.innerHTML = `
+      <h2>Set New Password</h2>
+      <div id="fpError" class="error-msg" style="display:none;"></div>
+      <p style="color:var(--text-muted);font-size:.9rem;margin:.25rem 0 .75rem;">Choose a new password for <strong>${state.forgotPw.email}</strong>.</p>
+      <label>New Password</label>
+      <div id="fpNewPwWrap"></div>
+      <label>Confirm New Password</label>
+      <div id="fpConfirmPwWrap"></div>
+      <div id="fpPwLiveStatus" style="font-size:.8rem;margin-top:.3rem;min-height:1.2em;"></div>
+      <button class="btn-primary" id="fpResetBtn" disabled>Reset Password</button>
+      <div class="toggle-link" id="fpCancelBtn" style="margin-top:.5rem;">Cancel</div>`;
+    document.getElementById('fpNewPwWrap').appendChild(createPasswordField('fpNewPw', 'New password'));
+    document.getElementById('fpConfirmPwWrap').appendChild(createPasswordField('fpConfirmPw', 'Confirm new password'));
+    window.refreshIcons();
+
+    const errDiv = document.getElementById('fpError');
+    const newPwInput = document.getElementById('fpNewPw');
+    const confirmPwInput = document.getElementById('fpConfirmPw');
+    const statusEl = document.getElementById('fpPwLiveStatus');
+    const resetBtn = document.getElementById('fpResetBtn');
+
+    const validate = () => {
+      const np = newPwInput.value; const cp = confirmPwInput.value;
+      if (!np && !cp) { statusEl.textContent = ''; resetBtn.disabled = true; return; }
+      if (!pwIsStrong(np)) { statusEl.textContent = 'Password must be 8+ chars with letters and numbers'; statusEl.style.color = 'var(--danger)'; resetBtn.disabled = true; return; }
+      if (!cp || np !== cp) { statusEl.textContent = 'Passwords do not match'; statusEl.style.color = 'var(--danger)'; resetBtn.disabled = true; return; }
+      statusEl.textContent = '✓ Passwords match'; statusEl.style.color = 'var(--accent)';
+      resetBtn.disabled = false;
+    };
+    newPwInput.addEventListener('input', validate);
+    confirmPwInput.addEventListener('input', validate);
+    setTimeout(() => newPwInput.focus(), 50);
+
+    document.getElementById('fpCancelBtn').onclick = () => {
+      state.forgotPw = { email: null, pendingToken: null, grantedToken: null };
+      renderAuthForm('login');
+    };
+
+    resetBtn.onclick = async () => {
+      const newPassword = newPwInput.value;
+      const confirm = confirmPwInput.value;
+      errDiv.style.display = 'none';
+      if (!pwIsStrong(newPassword)) { errDiv.textContent = 'Password must be 8+ chars with letters and numbers'; errDiv.style.display = 'block'; return; }
+      if (newPassword !== confirm) { errDiv.textContent = 'Passwords do not match'; errDiv.style.display = 'block'; return; }
+      resetBtn.disabled = true; resetBtn.textContent = 'Resetting...';
+      try {
+        const rr = await fetch('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+          body: JSON.stringify({ newPassword, grantedToken: state.forgotPw.grantedToken }),
+        });
+        const rd = await rr.json().catch(() => ({}));
+        if (!rr.ok) throw new Error(rd.error || 'Failed to reset password');
+        state.forgotPw = { email: null, pendingToken: null, grantedToken: null };
+        showToast('Password reset successfully. You can now sign in.');
+        renderAuthForm('login');
+      } catch (e) {
+        errDiv.textContent = e.message; errDiv.style.display = 'block';
+        resetBtn.disabled = false; resetBtn.textContent = 'Reset Password';
+      }
+    };
+  }
 }
 
 // ============ ACCOUNT MODAL ============
@@ -1434,55 +1642,52 @@ async function openAccountModal() {
 
       let emailPendingToken = null;
       document.getElementById('changeEmailBtn').onclick = async () => {
-  const newEmail = document.getElementById('newEmail').value.trim().toLowerCase();
-  const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-  const currentEmail = (state.currentUser.email || '').toLowerCase();
+        const newEmail = document.getElementById('newEmail').value.trim().toLowerCase();
+        const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+        const currentEmail = (state.currentUser.email || '').toLowerCase();
 
-  if (!newEmail) { showToast('Please enter the new email address', true); return; }
-  if (!EMAIL_RE.test(newEmail) || newEmail.includes('..')) { showToast('Please enter a valid email address', true); return; }
-  if (newEmail === currentEmail) { showToast('New email must be different from your current email', true); return; }
+        if (!newEmail) { showToast('Please enter the new email address', true); return; }
+        if (!EMAIL_RE.test(newEmail) || newEmail.includes('..')) { showToast('Please enter a valid email address', true); return; }
+        if (newEmail === currentEmail) { showToast('New email must be different from your current email', true); return; }
 
-  try {
-    const res = await apiFetch('/api/auth/send-verification-code', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'change-email', newEmail }),
-    });
-    const data = await res.json();
-    emailPendingToken = data.pendingToken;
-    showToast(`Verification code sent to ${newEmail}`);
-    document.getElementById('emailVerify').style.display = 'block';
-    const notice = document.getElementById('emailVerifyNotice');
-    if (notice) notice.textContent = `Check the inbox of ${newEmail} for the 6-digit code.`;
-    const resendBtn = document.getElementById('emailResendBtn');
-    attachCountdown(resendBtn);
-    resendBtn.onclick = async () => {
-      if (resendBtn.disabled) return;
-      if (!emailPendingToken) { showToast('Session expired. Try again.', true); return; }
-      try {
-        const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken }) });
-        const rd = await r.json();
-        emailPendingToken = rd.pendingToken;
-        showToast(rd.targetEmail ? `New code sent to ${rd.targetEmail}` : 'New code sent.');
-        attachCountdown(resendBtn);
-      } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
-    };
-    document.getElementById('emailVerifyBtn').onclick = async () => {
-      const code = document.getElementById('emailCode').value.trim();
-      if (!code) { showToast('Enter the code', true); return; }
-      try {
-        const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken, code, action: 'change-email' }) });
-        const vd = await vr.json();
-        const cr = await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail, grantedToken: vd.grantedToken }) });
-        const cd = await cr.json();
-        showToast(`Email changed to ${cd.newEmail || newEmail}.`);
-        // Update local state so UI reflects the new email immediately
-        state.currentUser.email = cd.newEmail || newEmail;
-        updateAuthUI();
-        close();
-      } catch (e) { showToast(e.message, true); }
-    };
-  } catch (e) { showToast(e.message, true); }
-};
+        try {
+          const res = await apiFetch('/api/auth/send-verification-code', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'change-email', newEmail }),
+          });
+          const data = await res.json();
+          emailPendingToken = data.pendingToken;
+          showToast(`Verification code sent to ${newEmail}`);
+          document.getElementById('emailVerify').style.display = 'block';
+          const resendBtn = document.getElementById('emailResendBtn');
+          attachCountdown(resendBtn);
+          resendBtn.onclick = async () => {
+            if (resendBtn.disabled) return;
+            if (!emailPendingToken) { showToast('Session expired. Try again.', true); return; }
+            try {
+              const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken }) });
+              const rd = await r.json();
+              emailPendingToken = rd.pendingToken;
+              showToast(rd.targetEmail ? `New code sent to ${rd.targetEmail}` : 'New code sent.');
+              attachCountdown(resendBtn);
+            } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
+          };
+          document.getElementById('emailVerifyBtn').onclick = async () => {
+            const code = document.getElementById('emailCode').value.trim();
+            if (!code) { showToast('Enter the code', true); return; }
+            try {
+              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken, code, action: 'change-email' }) });
+              const vd = await vr.json();
+              const cr = await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail, grantedToken: vd.grantedToken }) });
+              const cd = await cr.json();
+              showToast(`Email changed to ${cd.newEmail || newEmail}.`);
+              state.currentUser.email = cd.newEmail || newEmail;
+              updateAuthUI();
+              close();
+            } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      };
 
       let pwPendingToken = null;
       document.getElementById('changePwBtn').onclick = async () => {
