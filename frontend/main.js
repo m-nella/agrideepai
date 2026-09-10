@@ -282,7 +282,7 @@ async function loadCloudMessages(chatId) {
 function rebuildVersions() {
   state.messageVersions = {};
   state.messages.forEach(msg => {
-    if (msg.role === 'assistant' && msg.versions && msg.versions.length > 0) {
+    if (msg.versions && msg.versions.length > 0) {
       state.messageVersions[msg.id] = {
         versions: msg.versions,
         currentIndex: msg.currentVersionIndex || 0
@@ -439,7 +439,20 @@ function renderMessages() {
       sendEditBtn.addEventListener('click', async () => {
         const newContent = textarea.value.trim();
         if (!newContent) return;
+        // Save current version before updating
+        if (!state.messageVersions[msg.id]) {
+          state.messageVersions[msg.id] = { versions: [msg.content], currentIndex: 0 };
+        }
+        const vData = state.messageVersions[msg.id];
+        // Add new version if different from last
+        if (vData.versions[vData.versions.length - 1] !== newContent) {
+          vData.versions.push(newContent);
+          vData.currentIndex = vData.versions.length - 1;
+        } else {
+          vData.currentIndex = vData.versions.length - 1;
+        }
         msg.content = newContent;
+        // Truncate conversation after this user message
         const idx = state.messages.indexOf(msg);
         state.messages = state.messages.slice(0, idx + 1);
         state.editingMessageId = null;
@@ -505,51 +518,49 @@ function renderMessages() {
           }
 
           // Version controls for assistant messages
-          if (state.messageVersions[msg.id]) {
+          if (state.messageVersions[msg.id] && state.messageVersions[msg.id].versions.length > 1) {
             const vData = state.messageVersions[msg.id];
-            if (vData.versions.length > 1) {
-              const versionControls = document.createElement('div');
-              versionControls.className = 'version-controls';
-              const prevBtn = document.createElement('button');
-              prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
-              prevBtn.title = 'Previous version';
-              prevBtn.disabled = vData.currentIndex === 0;
-              prevBtn.addEventListener('click', () => {
-                if (vData.currentIndex > 0) {
-                  vData.currentIndex--;
-                  msg.content = vData.versions[vData.currentIndex];
-                  const chat = state.chats.find(c => c.id === state.activeChatId);
-                  if (chat) {
-                    chat.messages = state.messages;
-                  }
-                  renderMessages();
+            const versionControls = document.createElement('div');
+            versionControls.className = 'version-controls';
+            const prevBtn = document.createElement('button');
+            prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
+            prevBtn.title = 'Previous version';
+            prevBtn.disabled = vData.currentIndex === 0;
+            prevBtn.addEventListener('click', () => {
+              if (vData.currentIndex > 0) {
+                vData.currentIndex--;
+                msg.content = vData.versions[vData.currentIndex];
+                const chat = state.chats.find(c => c.id === state.activeChatId);
+                if (chat) {
+                  chat.messages = state.messages;
                 }
-              });
-              versionControls.appendChild(prevBtn);
+                renderMessages();
+              }
+            });
+            versionControls.appendChild(prevBtn);
 
-              const label = document.createElement('span');
-              label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
-              versionControls.appendChild(label);
+            const label = document.createElement('span');
+            label.textContent = `${vData.currentIndex + 1} / ${vData.versions.length}`;
+            versionControls.appendChild(label);
 
-              const nextBtn = document.createElement('button');
-              nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
-              nextBtn.title = 'Next version';
-              nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
-              nextBtn.addEventListener('click', () => {
-                if (vData.currentIndex < vData.versions.length - 1) {
-                  vData.currentIndex++;
-                  msg.content = vData.versions[vData.currentIndex];
-                  const chat = state.chats.find(c => c.id === state.activeChatId);
-                  if (chat) {
-                    chat.messages = state.messages;
-                  }
-                  renderMessages();
+            const nextBtn = document.createElement('button');
+            nextBtn.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
+            nextBtn.title = 'Next version';
+            nextBtn.disabled = vData.currentIndex === vData.versions.length - 1;
+            nextBtn.addEventListener('click', () => {
+              if (vData.currentIndex < vData.versions.length - 1) {
+                vData.currentIndex++;
+                msg.content = vData.versions[vData.currentIndex];
+                const chat = state.chats.find(c => c.id === state.activeChatId);
+                if (chat) {
+                  chat.messages = state.messages;
                 }
-              });
-              versionControls.appendChild(nextBtn);
-              msgDiv.appendChild(versionControls);
-              window.refreshIcons();
-            }
+                renderMessages();
+              }
+            });
+            versionControls.appendChild(nextBtn);
+            msgDiv.appendChild(versionControls);
+            window.refreshIcons();
           }
         }
       } else {
@@ -751,8 +762,6 @@ function showToast(message, isError = false) {
   }, 2500);
   log(`Toast: ${message}`, isError ? 'error' : 'info');
 }
-
-// --- Copy (moved to button handler) ---
 
 // --- Like / Dislike toggle ---
 function toggleLike(msg) {
@@ -1300,7 +1309,7 @@ function updateSendButton() {
   }
 }
 
-// --- Attachment preview with thumbnails ---
+// --- Attachment preview with thumbnails (file names hidden) ---
 function renderAttachments() {
   attachmentPreview.innerHTML = '';
   state.attachments.forEach((file, idx) => {
@@ -1309,19 +1318,16 @@ function renderAttachments() {
     if (file.type && file.type.startsWith('image/')) {
       const img = document.createElement('img');
       img.src = URL.createObjectURL(file);
-      img.style.cssText = 'width:40px; height:40px; object-fit:cover; border-radius:4px;';
+      img.style.cssText = 'width:30px; height:30px; object-fit:cover; border-radius:4px;';
       chip.appendChild(img);
     } else {
       const icon = document.createElement('i');
       icon.setAttribute('data-lucide', 'file-text');
-      icon.style.width = '24px';
-      icon.style.height = '24px';
+      icon.style.width = '20px';
+      icon.style.height = '20px';
       chip.appendChild(icon);
     }
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = file.name;
-    nameSpan.style.cssText = 'font-size:0.8rem; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-    chip.appendChild(nameSpan);
+    // File name hidden – only thumbnail/icon shows
     const removeBtn = document.createElement('button');
     removeBtn.innerHTML = `<i data-lucide="x" style="width:14px;height:14px;"></i>`;
     removeBtn.dataset.index = idx;
@@ -1360,7 +1366,6 @@ async function sendMessage() {
     state.chats.unshift(newChat);
     state.activeChatId = newChat.id;
     if (state.currentUser) {
-      // If logged in, we should create cloud chat instead.
       const cloudChat = await createChat(title);
       if (cloudChat) {
         state.activeChatId = cloudChat.id;
