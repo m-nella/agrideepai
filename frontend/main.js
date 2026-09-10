@@ -1014,4 +1014,413 @@ async function sendMessage() {
     }
     if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'AI failed'); }
     await consumeStream(response, chat);
-  } catch (err
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const last = state.messages[state.messages.length - 1];
+      if (last?.role === 'assistant') { last.status = 'stopped'; renderMessages(); }
+    } else {
+      showToast('Error: ' + err.message, true);
+      const last = state.messages[state.messages.length - 1];
+      if (last?.role === 'assistant' && last.content === '') { state.messages.pop(); chat.messages = state.messages; renderMessages(); }
+    }
+  } finally {
+    state.isGenerating = false;
+    sendBtn.classList.remove('generating');
+    sendBtn.disabled = false;
+    messageInput.disabled = false;
+    state.abortController = null;
+    updateSendButton();
+  }
+}
+
+function stopGeneration() {
+  if (state.abortController) {
+    state.abortController.abort();
+    state.abortController = null;
+    state.isGenerating = false;
+    sendBtn.classList.remove('generating');
+    sendBtn.disabled = false;
+    messageInput.disabled = false;
+    updateSendButton();
+  }
+}
+
+// ============ PASSWORD FIELD ============
+function createPasswordField(id, placeholder) {
+  const w = document.createElement('div');
+  w.style.cssText = 'position:relative;width:100%;';
+  const input = document.createElement('input');
+  input.type = 'password'; input.id = id; input.placeholder = placeholder;
+  input.style.cssText = 'width:100%;padding-right:40px;';
+  const t = document.createElement('button');
+  t.type = 'button';
+  t.innerHTML = `<i data-lucide="eye" style="width:18px;height:18px;"></i>`;
+  t.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;';
+  t.onclick = () => {
+    const isPw = input.type === 'password';
+    input.type = isPw ? 'text' : 'password';
+    t.innerHTML = `<i data-lucide="${isPw ? 'eye-off' : 'eye'}" style="width:18px;height:18px;"></i>`;
+    window.refreshIcons();
+  };
+  w.appendChild(input); w.appendChild(t);
+  return w;
+}
+
+// ============ AUTH MODAL ============
+function openAuthModal(mode = 'login') { authModal.classList.remove('hidden'); renderAuthForm(mode); }
+function closeAuthModal() { authModal.classList.add('hidden'); }
+modalClose.forEach(b => b.addEventListener('click', closeAuthModal));
+authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
+
+function renderAuthForm(mode, extra = {}) {
+  const isLogin = mode === 'login';
+  authModalBody.innerHTML = `
+    <h2>${isLogin ? 'Sign In' : 'Create Account'}</h2>
+    <div id="authError" class="error-msg" style="display:none;"></div>
+    <div id="authStatus" class="status-msg" style="display:none;"></div>
+    <label>Email</label>
+    <input type="email" id="authEmail" placeholder="you@example.com" value="${extra.email || ''}" ${extra.email ? 'readonly' : ''} />
+    <label>Password</label>
+    <div id="authPasswordWrapper"></div>
+    ${!isLogin ? `<label>Confirm Password</label><div id="authConfirmPasswordWrapper"></div>` : ''}
+    ${!isLogin ? `<label>Full Name (optional)</label><input type="text" id="authFullName" placeholder="Your name" />` : ''}
+    <button class="btn-primary" id="authSubmitBtn" disabled>${isLogin ? 'Sign In' : 'Sign Up'}</button>
+    <div class="toggle-link" id="authToggle">${isLogin ? 'Create an account' : 'Already have an account? Sign in'}</div>
+    <div id="verifySection" style="display:none;margin-top:1rem;">
+      <p>We sent a verification code to your email.</p>
+      <input type="text" id="verifyCode" placeholder="6-digit code" />
+      <button class="btn-primary" id="verifyBtn">Verify</button>
+      <button id="resendVerifyBtn" style="background:none;border:none;color:var(--accent);cursor:pointer;margin-top:.5rem;">Resend code</button>
+    </div>
+    <div id="twofaSection" style="display:none;margin-top:1rem;">
+      <p>Enter the 6-digit code from your authenticator app.</p>
+      <input type="text" id="twofaCode" placeholder="6-digit code" />
+      <button class="btn-primary" id="twofaBtn">Verify 2FA</button>
+    </div>`;
+  document.getElementById('authPasswordWrapper').appendChild(createPasswordField('authPassword', '••••••••'));
+  if (!isLogin) document.getElementById('authConfirmPasswordWrapper').appendChild(createPasswordField('authConfirmPassword', 'Confirm password'));
+  window.refreshIcons();
+
+  const submitBtn = document.getElementById('authSubmitBtn');
+  const toggleLink = document.getElementById('authToggle');
+  const errDiv = document.getElementById('authError');
+  const statDiv = document.getElementById('authStatus');
+  const emailInput = document.getElementById('authEmail');
+  const pwInput = document.getElementById('authPassword');
+  const confirmInput = document.getElementById('authConfirmPassword');
+
+  const check = () => {
+    const e = emailInput.value.trim(); const p = pwInput.value;
+    let v = e && p;
+    if (!isLogin) { const c = confirmInput?.value || ''; v = v && c && p === c; }
+    submitBtn.disabled = !v;
+  };
+  emailInput.addEventListener('input', check);
+  pwInput.addEventListener('input', check);
+  if (confirmInput) confirmInput.addEventListener('input', check);
+  check();
+  toggleLink.onclick = () => renderAuthForm(isLogin ? 'signup' : 'login');
+
+  submitBtn.onclick = async () => {
+    if (!isLogin) {
+      // SIGNUP
+      const email = emailInput.value.trim(), password = pwInput.value, confirm = confirmInput?.value || '';
+      if (!email || !password) { errDiv.textContent = 'All fields required'; errDiv.style.display = 'block'; return; }
+      if (password !== confirm) { errDiv.textContent = 'Passwords do not match'; errDiv.style.display = 'block'; return; }
+      const fullName = document.getElementById('authFullName')?.value.trim() || email.split('@')[0];
+      errDiv.style.display = 'none'; statDiv.textContent = 'Sending code...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
+      try {
+        const res = await fetch('/api/auth/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, fullName }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        document.getElementById('verifySection').style.display = 'block';
+        statDiv.textContent = 'Verification code sent.';
+        document.getElementById('verifyBtn').onclick = async () => {
+          const code = document.getElementById('verifyCode').value.trim();
+          if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
+          statDiv.textContent = 'Verifying...';
+          try {
+            const cr = await fetch('/api/auth/confirm-signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code }) });
+            const cd = await cr.json();
+            if (!cr.ok) throw new Error(cd.error);
+            // Set session on supabase client
+            await state.supabase.auth.setSession({
+              access_token: cd.session.access_token,
+              refresh_token: cd.session.refresh_token,
+            });
+            state.currentUser = cd.user;
+            updateAuthUI(); closeAuthModal();
+            showToast('Account created!');
+            await loadCloudConversations();
+          } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
+        };
+        document.getElementById('resendVerifyBtn').onclick = async () => {
+          statDiv.textContent = 'Resending...';
+          await fetch('/api/auth/resend-verification', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+          statDiv.textContent = 'New code sent.';
+        };
+      } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
+      finally { submitBtn.disabled = false; }
+    } else {
+      // LOGIN — step 1: send email code
+      const email = emailInput.value.trim(), password = pwInput.value;
+      if (!email || !password) { errDiv.textContent = 'Email and password required'; errDiv.style.display = 'block'; return; }
+      errDiv.style.display = 'none'; statDiv.textContent = 'Checking password...'; statDiv.style.display = 'block'; submitBtn.disabled = true;
+      try {
+        const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        statDiv.textContent = 'Verification code sent. Check your email.';
+        document.getElementById('verifySection').style.display = 'block';
+        document.getElementById('verifyBtn').onclick = async () => {
+          const code = document.getElementById('verifyCode').value.trim();
+          if (!code) { errDiv.textContent = 'Enter code'; errDiv.style.display = 'block'; return; }
+          statDiv.textContent = 'Verifying...';
+          try {
+            const vr = await fetch('/api/auth/verify-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code }) });
+            const vd = await vr.json();
+            if (!vr.ok) throw new Error(vd.error);
+            if (vd.requires2fa) {
+              // 2FA step
+              document.getElementById('verifySection').style.display = 'none';
+              document.getElementById('twofaSection').style.display = 'block';
+              statDiv.textContent = 'Email verified. Enter your 2FA code.';
+              document.getElementById('twofaBtn').onclick = async () => {
+                const c2 = document.getElementById('twofaCode').value.trim();
+                if (!c2) { errDiv.textContent = 'Enter 2FA code'; errDiv.style.display = 'block'; return; }
+                try {
+                  const t2 = await fetch('/api/auth/2fa/validate-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tempToken: vd.tempToken, code: c2 }) });
+                  const t2d = await t2.json();
+                  if (!t2.ok) throw new Error(t2d.error);
+                  await state.supabase.auth.setSession({
+                    access_token: t2d.session.access_token,
+                    refresh_token: t2d.session.refresh_token,
+                  });
+                  state.currentUser = t2d.user;
+                  updateAuthUI(); closeAuthModal(); showToast('Signed in!');
+                  await loadCloudConversations();
+                } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; }
+              };
+              return;
+            }
+            // No 2FA — complete login
+            await state.supabase.auth.setSession({
+              access_token: vd.session.access_token,
+              refresh_token: vd.session.refresh_token,
+            });
+            state.currentUser = vd.user;
+            updateAuthUI(); closeAuthModal(); showToast('Signed in!');
+            await loadCloudConversations();
+          } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
+        };
+        document.getElementById('resendVerifyBtn').onclick = async () => {
+          statDiv.textContent = 'Resending...';
+          await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+          statDiv.textContent = 'New code sent.';
+        };
+      } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
+      finally { submitBtn.disabled = false; }
+    }
+  };
+}
+
+// ============ ACCOUNT MODAL ============
+async function openAccountModal() {
+  if (!state.currentUser) return;
+  let profile = {};
+  try { const res = await apiFetch('/api/auth/me'); const d = await res.json(); profile = d.profile || {}; } catch (e) {}
+
+  const modal = document.createElement('div');
+  modal.className = 'modal account-modal';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <button class="modal-close" id="accClose">&times;</button>
+      <div class="account-modal-layout">
+        <div class="account-tabs">
+          <div class="account-tab active" data-tab="profile"><i data-lucide="user"></i> Profile</div>
+          <div class="account-tab" data-tab="account"><i data-lucide="settings"></i> Account</div>
+          <div class="account-tab" data-tab="security"><i data-lucide="shield"></i> Security</div>
+          <div class="account-tab" data-tab="sessions"><i data-lucide="monitor"></i> Sessions</div>
+          <div class="account-tab logout-tab" data-tab="logout"><i data-lucide="log-out"></i> Log out</div>
+        </div>
+        <div class="account-content" id="accContent"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.querySelector('#accClose').onclick = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
+  const tabs = modal.querySelectorAll('.account-tab');
+  const content = modal.querySelector('#accContent');
+
+  const render = async (id) => {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === id));
+    if (id === 'logout') {
+      content.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure?</p><button class="btn-primary" id="loConfirm" style="background:var(--danger);">Log out</button><button class="btn-primary" id="loCancel" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
+      content.querySelector('#loConfirm').onclick = async () => {
+        await state.supabase.auth.signOut();
+        close(); showToast('Logged out');
+        state.chats = []; state.messages = []; state.activeChatId = null;
+        renderChatList(); renderMessages();
+      };
+      content.querySelector('#loCancel').onclick = () => render('profile');
+      return;
+    }
+    let html = '';
+    if (id === 'profile') {
+      html = `<h2>Profile</h2><div class="profile-info"><p><strong>Name:</strong> ${profile.full_name || state.currentUser.email}</p><p><strong>Email:</strong> ${state.currentUser.email}</p><p><strong>Member since:</strong> ${new Date(state.currentUser.created_at).toLocaleDateString()}</p></div>`;
+    } else if (id === 'account') {
+      html = `<h2>Account Settings</h2><div class="account-section"><label>Email</label><input type="email" id="newEmail" value="${state.currentUser.email}" /><button class="btn-primary" id="changeEmailBtn">Change Email</button><div id="emailVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="emailCode" /><button class="btn-primary" id="emailVerifyBtn">Verify & Change</button></div><hr /><label>Current Password</label><div id="curPwWrap"></div><label>New Password</label><div id="newPwWrap"></div><button class="btn-primary" id="changePwBtn">Change Password</button><div id="pwVerify" style="display:none;margin-top:.5rem;"><label>Verification code</label><input type="text" id="pwCode" /><button class="btn-primary" id="pwVerifyBtn">Verify & Change</button></div></div>`;
+    } else if (id === 'security') {
+      const en = profile.two_factor_enabled;
+      html = `<h2>Security</h2><div class="security-section"><h3>Two-Factor Authentication</h3><p>${en ? 'Enabled.' : 'Disabled.'}</p>${en ? `<button class="btn-primary btn-danger" id="dis2fa">Disable 2FA</button>` : `<button class="btn-primary" id="en2fa">Enable 2FA</button><div id="twofaSetup" style="display:none;margin-top:1rem;"><div class="twofa-setup"><p>Scan with your authenticator app:</p><div id="qrCode"></div><label>Enter 6-digit code:</label><input type="text" id="twofaCodeIn" /><button class="btn-primary" id="verify2faBtn">Verify & Enable</button></div></div>`}</div>`;
+    } else if (id === 'sessions') {
+      try {
+        const res = await apiFetch('/api/auth/sessions');
+        const data = await res.json();
+        const cur = data.current || {};
+        const acc = data.account || {};
+        html = `<h2>Active Sessions</h2>
+          <div class="sessions-list">
+            <h3>Current device</h3>
+            <p><strong>Email:</strong> ${cur.email || state.currentUser.email}</p>
+            <p><strong>Browser:</strong> ${(cur.user_agent || '').substring(0, 80)}</p>
+            <p><strong>IP:</strong> ${cur.ip || 'Unknown'}</p>
+            <hr />
+            <h3>Account</h3>
+            <p><strong>Created:</strong> ${acc.created_at ? new Date(acc.created_at).toLocaleString() : '—'}</p>
+            <p><strong>Last sign in:</strong> ${acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleString() : '—'}</p>
+            <p style="font-size:.8rem;color:var(--text-muted);margin-top:.5rem;">Note: Supabase free tier does not allow listing all active devices. Sessions are managed automatically per device.</p>
+          </div>`;
+      } catch (e) {
+        html = `<h2>Active Sessions</h2><p>Unable to load: ${e.message}</p>`;
+      }
+    }
+    content.innerHTML = html;
+    window.refreshIcons();
+
+    if (id === 'account') {
+      document.getElementById('curPwWrap').appendChild(createPasswordField('curPw', 'Current password'));
+      document.getElementById('newPwWrap').appendChild(createPasswordField('newPw', 'New password'));
+      window.refreshIcons();
+      document.getElementById('changeEmailBtn').onclick = async () => {
+        const newEmail = document.getElementById('newEmail').value.trim();
+        if (!newEmail || newEmail === state.currentUser.email) { showToast('Different email required', true); return; }
+        try {
+          await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
+          showToast('Code sent.'); document.getElementById('emailVerify').style.display = 'block';
+          document.getElementById('emailVerifyBtn').onclick = async () => {
+            const code = document.getElementById('emailCode').value.trim();
+            try {
+              await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-email' }) });
+              await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail }) });
+              showToast('Email changed.'); close();
+            } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      };
+      document.getElementById('changePwBtn').onclick = async () => {
+        const cur = document.getElementById('curPw').value, np = document.getElementById('newPw').value;
+        if (!cur || !np) { showToast('Fill both fields', true); return; }
+        if (np.length < 8) { showToast('Min 8 chars', true); return; }
+        try {
+          await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
+          showToast('Code sent.'); document.getElementById('pwVerify').style.display = 'block';
+          document.getElementById('pwVerifyBtn').onclick = async () => {
+            const code = document.getElementById('pwCode').value.trim();
+            try {
+              await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ code, action: 'change-password' }) });
+              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: np }) });
+              showToast('Password changed.'); close();
+            } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      };
+    }
+    if (id === 'security') {
+      document.getElementById('en2fa')?.addEventListener('click', async () => {
+        try {
+          const res = await apiFetch('/api/auth/2fa/enable', { method: 'POST' });
+          const d = await res.json();
+          document.getElementById('qrCode').innerHTML = `<img src="${d.qrCodeDataUrl}" class="qr-code" />`;
+          document.getElementById('twofaSetup').style.display = 'block';
+          document.getElementById('verify2faBtn').onclick = async () => {
+            const code = document.getElementById('twofaCodeIn').value.trim();
+            try { await apiFetch('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }); showToast('2FA enabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
+          };
+        } catch (e) { showToast(e.message, true); }
+      });
+      document.getElementById('dis2fa')?.addEventListener('click', async () => {
+        try { await apiFetch('/api/auth/2fa/disable', { method: 'POST' }); showToast('2FA disabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
+      });
+    }
+  };
+  tabs.forEach(t => t.onclick = () => render(t.dataset.tab));
+  render('profile');
+}
+
+// ============ ATTACH BUTTON ============
+attachBtn.onclick = () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*,.pdf,.txt,.doc,.docx';
+  input.multiple = true;
+  input.onchange = () => {
+    const files = Array.from(input.files);
+    if (files.some(f => f.size > 10 * 1024 * 1024)) { showToast('Max 10MB per file', true); return; }
+    if (state.attachments.length + files.length > MAX_ATTACHMENTS) { showToast(`Max ${MAX_ATTACHMENTS} files`, true); return; }
+    state.attachments.push(...files);
+    renderAttachments(); updateSendButton();
+  };
+  input.click();
+};
+
+// ============ SIDEBAR ============
+sidebarToggle.onclick = () => {
+  sidebar.classList.toggle('collapsed');
+  const c = sidebar.classList.contains('collapsed');
+  sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = c ? 'none' : 'inline';
+  sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = c ? 'inline' : 'none';
+};
+openSidebarBtn.onclick = () => sidebar.classList.toggle('mobile-open');
+document.addEventListener('click', (e) => {
+  if (window.innerWidth < 768 && sidebar.classList.contains('mobile-open') && !sidebar.contains(e.target) && e.target !== openSidebarBtn) sidebar.classList.remove('mobile-open');
+});
+
+// ============ OTHER LISTENERS ============
+newChatBtn.onclick = handleNewChat;
+sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!state.isGenerating) sendMessage(); }
+});
+messageInput.addEventListener('input', () => { resizeComposer(); updateSendButton(); });
+chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; updateSendButton(); sendMessage(); });
+document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
+shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
+
+// ============ SHARE VIEW ============
+async function checkShareView() {
+  const path = window.location.pathname;
+  if (!path.startsWith('/share/')) return false;
+  const token = path.split('/share/')[1];
+  if (!token) return false;
+  state.isShareView = true;
+  document.body.classList.add('share-view');
+  try {
+    const res = await fetch(`/api/share/${token}`);
+    if (!res.ok) throw new Error('Share not found');
+    const data = await res.json();
+    state.shareMessages = data.messages || [];
+    renderMessages();
+    document.title = 'Shared Chat — AgriDeepAI';
+  } catch (err) {
+    messageList.innerHTML = `<p style="color:var(--danger);text-align:center;padding:2rem;">Error loading share: ${err.message}</p>`;
+  }
+  return true;
+}
+
+// ============ INIT ============
+(async function init() {
+  const isShare = await checkShareView();
+  if (!isShare) { await initSupabase(); updateSendButton(); }
+})();
