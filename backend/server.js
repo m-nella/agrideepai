@@ -920,16 +920,41 @@ app.post('/api/auth/forgot-password-verify-code', async (req, res) => {
   }
 });
 
+// ==================================================================
+// RESET PASSWORD
+// Rejects if newPassword is the same as the user's CURRENT password.
+// Verified by attempting a signInWithPassword behind the scenes — if
+// it succeeds, the entered password IS the current one → reject.
+// ==================================================================
 app.post('/api/auth/reset-password', async (req, res) => {
   try {
     const { newPassword, grantedToken } = req.body;
     const g = verifyPending(grantedToken);
-    if (!g || g.type !== 'forgot-password-granted' || !g.userId) {
+    if (!g || g.type !== 'forgot-password-granted' || !g.userId || !g.email) {
       return res.status(400).json({ error: 'Please verify your code first.' });
     }
     if (!newPassword || newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
     }
+
+    // Verify the new password is NOT the user's current password.
+    // signInWithPassword succeeds only when email+password match.
+    try {
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: g.email,
+        password: newPassword,
+      });
+      if (!signInErr) {
+        // Password matched → user is trying to "reset" to their current password
+        log(`[FORGOT-PW-RESET] Rejected: new password equals current password for ${g.email}`, 'warn');
+        return res.status(400).json({ error: 'New password must be different from your current password' });
+      }
+      // Otherwise: it's a different password → safe to proceed
+    } catch (checkErr) {
+      // If the check itself errored (network etc.), log and continue — better to allow the reset than block the user
+      log(`[FORGOT-PW-RESET] Password-similarity check failed with error: ${checkErr.message}`, 'warn');
+    }
+
     const { error } = await supabase.auth.admin.updateUserById(g.userId, { password: newPassword });
     if (error) throw error;
     log(`[FORGOT-PW-RESET] ✅ Password reset for ${g.email}`, 'info');
