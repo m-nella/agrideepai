@@ -156,6 +156,104 @@
     <div id="shareStatus">Loading shared chat…</div>
     <div id="shareMessages"></div>
   </main>
-  <script src="share.js"></script>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var statusEl = document.getElementById('shareStatus');
+      var listEl = document.getElementById('shareMessages');
+
+      console.log('[SHARE] Script running. Path:', window.location.pathname);
+
+      function setStatus(text, isError) {
+        if (!statusEl) return;
+        statusEl.textContent = text;
+        statusEl.style.display = '';
+        if (isError) statusEl.classList.add('error');
+      }
+
+      function safeMd(text) {
+        try {
+          if (window.marked && typeof window.marked.parse === 'function') {
+            var html = String(window.marked.parse(text || ''));
+            return html.replace(/<hr\s*\/?>/g, '');
+          }
+        } catch (e) { console.warn('[SHARE] marked.parse error:', e); }
+        return String(text || '').replace(/[<>&]/g, function (c) {
+          return c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;';
+        });
+      }
+
+      if (!statusEl || !listEl) {
+        console.error('[SHARE] Missing #shareStatus or #shareMessages');
+        return;
+      }
+
+      var path = window.location.pathname;
+      var token = path.replace(/^\/share\//, '').split('/')[0].split('?')[0];
+      if (!token) { setStatus('Invalid share link.', true); return; }
+
+      var apiUrl = '/api/share/' + encodeURIComponent(token);
+      console.log('[SHARE] Fetching', apiUrl);
+
+      var ctrl = new AbortController();
+      var timer = setTimeout(function () {
+        try { ctrl.abort(); } catch (e) {}
+      }, 15000);
+
+      fetch(apiUrl, { cache: 'no-store', signal: ctrl.signal })
+        .then(function (res) {
+          clearTimeout(timer);
+          console.log('[SHARE] Response status:', res.status, res.headers.get('content-type'));
+          if (!res.ok) {
+            return res.text().then(function (body) {
+              var msg = 'HTTP ' + res.status;
+              try {
+                var parsed = JSON.parse(body);
+                if (parsed && parsed.error) msg = parsed.error;
+              } catch (e) {}
+              throw new Error(msg);
+            });
+          }
+          return res.json();
+        })
+        .then(function (data) {
+          console.log('[SHARE] Data received:', data);
+          var messages = (data && Array.isArray(data.messages)) ? data.messages : [];
+          if (!messages.length) {
+            setStatus('This shared chat is empty.', false);
+            return;
+          }
+          statusEl.style.display = 'none';
+          messages.forEach(function (msg) {
+            if (!msg || !msg.role) return;
+            var row = document.createElement('div');
+            row.className = 'msg-row ' + msg.role;
+            if (msg.role === 'assistant') {
+              var h = document.createElement('div');
+              h.className = 'msg-header';
+              h.innerHTML = '<img src="/logo.png" alt="" /><span>agrideepai</span>';
+              row.appendChild(h);
+            }
+            var bubble = document.createElement('div');
+            bubble.className = 'msg-bubble ' + msg.role;
+            var content = (msg.content == null) ? '' : String(msg.content);
+            if (msg.role === 'assistant') bubble.innerHTML = safeMd(content);
+            else bubble.textContent = content;
+            row.appendChild(bubble);
+            listEl.appendChild(row);
+          });
+          document.title = 'Shared Chat — AgriDeepAI';
+          console.log('[SHARE] Rendered', messages.length, 'messages');
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          var msg = (err && err.name === 'AbortError') ? 'Request timed out' : (err && err.message) || 'unknown error';
+          console.error('[SHARE] Error:', err);
+          setStatus('Unable to load this shared chat: ' + msg, true);
+        });
+    })();
+  </script>
 </body>
 </html>
