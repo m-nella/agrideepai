@@ -368,8 +368,9 @@ function renderMessages() {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${msg.role}`;
 
-    if (state.editingMessageId === msg.id && msg.role === 'user') {
-      const area = document.createElement('div'); area.style.width = '100%';
+        if (state.editingMessageId === msg.id && msg.role === 'user') {
+      const area = document.createElement('div');
+      area.className = 'edit-area';
       if (msg.files?.length) {
         const atts = document.createElement('div'); atts.className = 'attachments-above';
         msg.files.forEach(f => {
@@ -387,22 +388,22 @@ function renderMessages() {
         area.appendChild(atts); window.refreshIcons();
       }
       const ta = document.createElement('textarea');
+      ta.className = 'edit-textarea';
       ta.value = state.editingValue;
-      ta.style.cssText = 'width:100%;padding:.6rem .8rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:16px;line-height:1.5;min-height:80px;max-height:none;overflow-y:auto;box-sizing:border-box;';
       const autoGrow = () => {
         ta.style.height = 'auto';
         const maxH = Math.min(window.innerHeight * 0.6, 600);
         const want = Math.min(ta.scrollHeight + 2, maxH);
-        ta.style.height = Math.max(want, 80) + 'px';
+        ta.style.height = Math.max(want, 44) + 'px';
         ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
       };
       ta.addEventListener('input', autoGrow);
-      const g = document.createElement('div'); g.style.cssText = 'display:flex;gap:.5rem;margin-top:.5rem;justify-content:flex-end;';
+      const g = document.createElement('div'); g.className = 'edit-actions';
       const cancel = document.createElement('button'); cancel.textContent = 'Cancel';
-      cancel.style.cssText = 'padding:.5rem 1.1rem;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-weight:500;font-size:.9rem;';
+      cancel.className = 'edit-btn-cancel';
       cancel.onclick = () => { state.editingMessageId = null; renderMessages(); };
       const send = document.createElement('button'); send.textContent = 'Send';
-      send.style.cssText = 'padding:.5rem 1.4rem;background:var(--accent);color:#fff;border:none;border-radius:10px;font-weight:600;font-size:.9rem;cursor:pointer;box-shadow:0 2px 8px rgba(47,143,70,.35);';
+      send.className = 'edit-btn-send';
       send.onclick = async () => {
         const newContent = ta.value.trim(); if (!newContent) return;
         if (!state.messageVersions[msg.id]) state.messageVersions[msg.id] = { versions: [msg.content], currentIndex: 0 };
@@ -419,6 +420,8 @@ function renderMessages() {
       };
       g.appendChild(cancel); g.appendChild(send);
       area.appendChild(ta); area.appendChild(g); msgDiv.appendChild(area);
+      // Mark the bubble so CSS can keep the same box width/position
+      msgDiv.classList.add('message-editing');
       row.appendChild(msgDiv); messageList.appendChild(row);
       setTimeout(() => { ta.focus(); autoGrow(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 50); return;
     }
