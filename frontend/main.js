@@ -950,11 +950,6 @@ function renderAttachments() {
   window.refreshIcons();
 }
 
-// ==================================================================
-// FIXED: sendMessage() — no longer overrides the chat title on the
-// client for logged-in users. The backend generates the smart title
-// via generateChatTitle() and the reload after streaming picks it up.
-// ==================================================================
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text && !state.attachments.length) return;
@@ -974,7 +969,6 @@ async function sendMessage() {
     }
   }
 
-  // Detect whether this is the first message in the chat
   const isFirstMessage = isNewlyCreated || (chat.title === 'New Chat' || !chat.title);
 
   const localFiles = state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size, public_url: URL.createObjectURL(f) }));
@@ -992,7 +986,7 @@ async function sendMessage() {
   renderMessages(); updateSendButton();
   state.abortController = new AbortController();
 
-  // --- GUEST: ask the backend for a smart title in parallel ---
+  // Guest: ask the backend for a smart title in parallel
   if (isFirstMessage && !state.currentUser && text) {
     const localChatId = chat.id;
     fetch('/api/chat/title', {
@@ -1009,7 +1003,6 @@ async function sendMessage() {
       })
       .catch(() => {});
   }
-  // --- END guest title request ---
 
   try {
     let response;
@@ -1156,21 +1149,30 @@ function renderAuthForm(mode) {
     attachCountdown(resendBtn);
     resendBtn.onclick = async () => {
       if (resendBtn.disabled) return;
+      const token = getToken();
+      if (!token) {
+        errDiv.textContent = 'Your session expired. Please sign in again.';
+        errDiv.style.display = 'block';
+        return;
+      }
       statDiv.textContent = 'Resending...'; statDiv.style.display = 'block'; errDiv.style.display = 'none';
       try {
         const rr = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
-          body: JSON.stringify({ pendingToken: getToken() }),
+          body: JSON.stringify({ pendingToken: token }),
         });
-        const rd = await rr.json();
-        if (!rr.ok) throw new Error(rd.error || 'Failed to resend');
+        const rd = await rr.json().catch(() => ({}));
+        if (!rr.ok) throw new Error(rd.error || `Resend failed (${rr.status})`);
         setToken(rd.pendingToken);
         statDiv.textContent = 'New code sent. Check your email.';
         showToast('New code sent.');
         attachCountdown(resendBtn);
       } catch (e) {
-        errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none';
+        console.error('[RESEND] Failed:', e);
+        errDiv.textContent = e.message || 'Failed to resend code.';
+        errDiv.style.display = 'block';
+        statDiv.style.display = 'none';
         resendBtn.disabled = false;
         if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; }
         resendBtn.textContent = resendBtn.dataset.originalText || 'Resend code';
@@ -1444,8 +1446,9 @@ async function openAccountModal() {
           attachCountdown(resendBtn);
           resendBtn.onclick = async () => {
             if (resendBtn.disabled) return;
+            if (!emailPendingToken) { showToast('Session expired. Try again.', true); return; }
             try {
-              const r = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email' }) });
+              const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken }) });
               const rd = await r.json();
               emailPendingToken = rd.pendingToken;
               showToast('New code sent.');
@@ -1487,8 +1490,9 @@ async function openAccountModal() {
           attachCountdown(resendBtn);
           resendBtn.onclick = async () => {
             if (resendBtn.disabled) return;
+            if (!pwPendingToken) { showToast('Session expired. Try again.', true); return; }
             try {
-              const r = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
+              const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: pwPendingToken }) });
               const rd = await r.json();
               pwPendingToken = rd.pendingToken;
               showToast('New code sent.');
@@ -1522,8 +1526,9 @@ async function openAccountModal() {
           attachCountdown(resendBtn);
           resendBtn.onclick = async () => {
             if (resendBtn.disabled) return;
+            if (!delPendingToken) { showToast('Session expired. Try again.', true); return; }
             try {
-              const r = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'delete-account' }) });
+              const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: delPendingToken }) });
               const rd = await r.json();
               delPendingToken = rd.pendingToken;
               showToast('New code sent.');
