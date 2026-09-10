@@ -692,19 +692,51 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
   }
 }
 
-async function shareConversation(messagesToShare = null) {
-  const chat = state.chats.find(c => c.id === state.activeChatId);
-  if (!chat && !messagesToShare) { showToast('No chat to share', true); return; }
-  let messages = messagesToShare || state.messages.map(m => ({ role: m.role, content: m.content }));
-  messages = messages.filter(m => m.content && String(m.content).trim());
+async function shareConversation(messagesToShare = null, chatId = null) {
+  const targetChatId = chatId || state.activeChatId;
+  const chat = state.chats.find(c => c.id === targetChatId);
+
+  // Logged-in share of a saved (server) chat: use the server-side link
+  if (!messagesToShare && chat && state.currentUser && !chat.id.startsWith('local_')) {
+    try {
+      const response = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
+      if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'Failed'); }
+      const data = await response.json();
+      shareLinkDisplay.textContent = data.url;
+      shareModal.classList.remove('hidden');
+      copyShareLink.onclick = () => navigator.clipboard.writeText(data.url).then(() => showToast('Link copied!'));
+      return;
+    } catch (err) { showToast('Failed to share: ' + err.message, true); return; }
+  }
+
+  // Guest / single-message / local chat: build a messages array and post it
+  let messages;
+  if (messagesToShare) {
+    messages = messagesToShare;
+  } else if (chat && Array.isArray(chat.messages) && chat.messages.length > 0) {
+    messages = chat.messages.map(m => ({ role: m.role, content: m.content }));
+  } else if (chat && state.currentUser && !chat.id.startsWith('local_')) {
+    // Chat exists on server but messages aren't loaded locally — fetch them
+    try {
+      const res = await apiFetch(`/api/chat/conversations/${chat.id}/messages`);
+      const data = await res.json();
+      messages = (data || []).map(m => ({ role: m.role, content: m.content }));
+    } catch (e) { showToast('Failed to load chat: ' + e.message, true); return; }
+  } else if (state.activeChatId === targetChatId) {
+    messages = state.messages.map(m => ({ role: m.role, content: m.content }));
+  } else {
+    messages = [];
+  }
+
+  messages = (messages || []).filter(m => m.content && String(m.content).trim());
   if (!messages.length) { showToast('Nothing to share', true); return; }
+
   try {
-    let response;
-    if (state.currentUser && !messagesToShare && chat) {
-      response = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
-    } else {
-      response = await fetch('/api/share/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }) });
-    }
+    const response = await fetch('/api/share/guest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages })
+    });
     if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'Failed'); }
     const data = await response.json();
     shareLinkDisplay.textContent = data.url;
@@ -791,7 +823,7 @@ function openChatMenu(e, chatId) {
       btn.textContent = c?.pinned ? 'Unpin' : 'Pin';
       btn.innerHTML = `<i data-lucide="${c?.pinned ? 'pin-off' : 'pin'}"></i> ${c?.pinned ? 'Unpin' : 'Pin'}`;
       btn.onclick = () => { chatMenu.classList.add('hidden'); togglePin(chatId); };
-    } else if (a === 'share') { btn.onclick = () => { chatMenu.classList.add('hidden'); shareConversation(); }; }
+    } else if (a === 'share') { btn.onclick = () => { chatMenu.classList.add('hidden'); shareConversation(null, chatId); }; }
     else if (a === 'rename') { btn.onclick = () => { chatMenu.classList.add('hidden'); renameChat(chatId); }; }
     else if (a === 'delete') { btn.onclick = () => { chatMenu.classList.add('hidden'); deleteChat(chatId); }; }
   });
