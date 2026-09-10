@@ -41,6 +41,14 @@ const JWT_SECRET = process.env.JWT_SECRET || 'agrideepai-set-JWT_SECRET-in-env';
 const signPending = (payload, ttl = 900) => jwt.sign(payload, JWT_SECRET, { expiresIn: ttl });
 const verifyPending = (token) => { try { return jwt.verify(token, JWT_SECRET); } catch { return null; } };
 
+// Strip JWT reserved claims before re-signing a verified payload.
+// jwt.sign() refuses to add a new `exp`/`iat` if the payload already has one.
+function stripJwtClaims(p) {
+  if (!p || typeof p !== 'object') return {};
+  const { exp, iat, nbf, aud, iss, sub, jti, ...rest } = p;
+  return rest;
+}
+
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'groq/compound'];
@@ -442,7 +450,6 @@ async function tryIdentityShortcut(messages, res) {
   return false;
 }
 
-// ============ CHAT TITLE GENERATOR ============
 async function generateChatTitle(userMessage) {
   const msg = (userMessage || '').trim();
   if (!msg) return 'New Chat';
@@ -566,7 +573,6 @@ Title:`;
   return firstWords + (msg.split(/\s+/).length > 5 ? '…' : '');
 }
 
-// ============ EMAIL ============
 async function sendEmail(to, subject, htmlContent) {
   const sendSmtpEmail = new brevo.SendSmtpEmail();
   sendSmtpEmail.subject = subject;
@@ -577,7 +583,6 @@ async function sendEmail(to, subject, htmlContent) {
   return result;
 }
 
-// Wraps email send with one retry on failure
 async function sendVerificationEmailWithRetry(email, code, action = 'verify', extra = '') {
   try {
     await sendVerificationEmail(email, code, action, extra);
@@ -757,7 +762,9 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const newToken = signPending({ ...p, code });
+    // Strip JWT reserved claims (exp/iat/nbf/etc) before re-signing
+    const payload = { ...stripJwtClaims(p), code };
+    const newToken = signPending(payload);
     log(`[RESEND-SIGNUP] Sending new code to ${p.email}`, 'info');
     await sendVerificationEmailWithRetry(p.email, code, 'signup', 'Resend: complete your registration.');
     log(`[RESEND-SIGNUP] ✅ Success for ${p.email}`, 'info');
@@ -777,7 +784,6 @@ app.post('/api/auth/login', async (req, res) => {
     if (error) throw error;
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', data.user.id).single();
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    // Trim pending token: only the essentials (avoids huge JWT)
     const pendingToken = signPending({
       type: 'login',
       email,
@@ -825,7 +831,9 @@ app.post('/api/auth/resend-login-code', async (req, res) => {
     }
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const newToken = signPending({ ...p, code });
+    // Strip JWT reserved claims (exp/iat/nbf/etc) before re-signing
+    const payload = { ...stripJwtClaims(p), code };
+    const newToken = signPending(payload);
     log(`[RESEND-LOGIN] Sending new code to ${p.email}`, 'info');
     await sendVerificationEmailWithRetry(p.email, code, 'login', 'Resend: use the code below to complete your sign-in.');
     log(`[RESEND-LOGIN] ✅ Success for ${p.email}`, 'info');
@@ -843,7 +851,6 @@ app.post('/api/auth/verify-login', async (req, res) => {
     const p = verifyPending(pendingToken);
     if (!p || p.type !== 'login') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
     if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
-    // Reconstruct a minimal user object from token
     const user = {
       id: p.userId,
       email: p.userEmail || p.email,
@@ -900,7 +907,9 @@ app.post('/api/auth/resend-action-code', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Your session expired. Please try again.' });
     }
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const newToken = signPending({ ...p, code });
+    // Strip JWT reserved claims (exp/iat/nbf/etc) before re-signing
+    const payload = { ...stripJwtClaims(p), code };
+    const newToken = signPending(payload);
     await sendVerificationEmailWithRetry(req.user.email, code, p.action);
     log(`[RESEND-ACTION] ✅ Sent new code for action ${p.action}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
