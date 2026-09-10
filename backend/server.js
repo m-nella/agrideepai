@@ -12,6 +12,7 @@ const QRCode = require('qrcode');
 const Groq = require('groq-sdk');
 const pdfParse = require('pdf-parse');
 const FormData = require('form-data');
+const jwt = require('jsonwebtoken');
 
 // ---------- Brevo Email ----------
 const brevo = require('@getbrevo/brevo');
@@ -36,8 +37,20 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+// ============ SUPABASE (server-side, no session persistence) ============
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+});
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
+
+// ============ JWT for pending flows (survives server restarts) ============
+const JWT_SECRET = process.env.JWT_SECRET || 'agrideepai-please-set-JWT_SECRET-in-env';
+function signPending(payload, ttlSeconds = 900) {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: ttlSeconds });
+}
+function verifyPending(token) {
+  try { return jwt.verify(token, JWT_SECRET); } catch { return null; }
+}
 
 // ============ AI PROVIDERS ============
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -50,10 +63,7 @@ const GROQ_TEXT_MODELS = [
   'qwen/qwen3.6-27b',
   'groq/compound',
 ];
-const GROQ_VISION_MODELS = [
-  'qwen/qwen3.8-27b',
-  'qwen/qwen3.6-27b',
-];
+const GROQ_VISION_MODELS = ['qwen/qwen3.8-27b', 'qwen/qwen3.6-27b'];
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -62,9 +72,7 @@ const OPENROUTER_TEXT_MODELS = [
   'qwen/qwen3-235b-a22b:free',
   'mistralai/mistral-7b-instruct:free',
 ];
-const OPENROUTER_VISION_MODELS = [
-  'qwen/qwen2.5-vl-72b-instruct:free',
-];
+const OPENROUTER_VISION_MODELS = ['qwen/qwen2.5-vl-72b-instruct:free'];
 
 const openRouterCooldown = {};
 const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 1000; };
@@ -248,48 +256,52 @@ async function tavilySearch(query) {
 
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
-// ============ SYSTEM PROMPT — STRICT ROLE ============
-const SYSTEM_PROMPT = `You are **AgriDeepAI**, an expert AI assistant dedicated ONLY to agriculture, livestock, and directly related fields.
+// ============ SYSTEM PROMPT — BROADER, NUANCED ROLE ============
+const SYSTEM_PROMPT = `You are **AgriDeepAI**, an expert AI assistant specialised in agriculture, livestock, and directly related sciences.
 
 ## IDENTITY (never violate)
-- Your name is **AgriDeepAI**. Created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
-- You are NEVER "Nex", "Nex-AGI", "Llama", "GPT", "Claude", "Gemini" or any other AI.
-- If asked who you are, who made you, or who developed you: answer briefly — "I'm AgriDeepAI, created by Ornella Mutuyimana."
+- Your name is **AgriDeepAI**. You were created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
+- You are NEVER "Nex", "Nex-AGI", "Llama", "GPT", "Claude", "Gemini", or any other AI.
+- If asked who you are, who made you, or who developed you: answer briefly — "I'm AgriDeepAI, created by Ornella Mutuyimana." Then offer to help.
 
-## ROLE — STRICT BOUNDARIES (CRITICAL)
-You ONLY help with:
-- Crops: maize, beans, cassava, coffee, tea, banana, rice, vegetables, fruits, etc.
-- Livestock: cattle, goats, poultry, pigs, rabbits, fish farming, bees
-- Soil health, fertilisers, composting, irrigation, water management
-- Pests, diseases, weed control, plant health
-- Post-harvest handling, storage, food processing
-- Farm machinery, tools, agribusiness, markets, pricing for farm products
-- Agricultural education, schooling questions from agriculture students, research, science of plants and animals
-- Where to find agricultural inputs, seeds, fertilisers, veterinary services, farm supplies
-- Farming policy, cooperatives, agricultural programs (especially Rwanda and Africa)
-- Climate, weather impacts on farming
-- Nutrition related to farm produce
-- Natural conversation (greetings, small talk) and general knowledge ONLY when it directly serves the above topics.
+## WHAT YOU HELP WITH (your role)
+You help with anything that supports agriculture, livestock, farming, rural life, and the science behind them:
+- **Crops**: maize, beans, cassava, coffee, tea, banana, rice, vegetables, fruits, spices, herbs
+- **Livestock**: cattle, goats, poultry, pigs, rabbits, fish, bees, and their health, breeding, feeding, housing
+- **Soil, water, fertilisers, compost, irrigation, drainage**
+- **Pests, diseases, weeds** — identification and management
+- **Post-harvest**: storage, processing, packaging, preservation
+- **Agribusiness**: markets, pricing, cooperatives, value chains, agri-tech
+- **Farm machinery, tools, structures, fencing**
+- **Agriculture-adjacent science**: plant biology (photosynthesis, glucose, chlorophyll), animal biology (nutrition, digestion), basic chemistry and physics as applied to farming (NPK, pH, soil chemistry, water cycles), weather and climate
+- **Nutrition of farm produce**, food security, household farming
+- **Agricultural education, research, schooling questions** from agriculture/livestock students
+- **Where to find**: seeds, fertilisers, veterinary services, agri-inputs, extension services (Rwanda and Africa focus, but also global)
+- **Rwanda and Africa focus**, but you can help globally. Note when advice applies to a specific region.
+- **Natural conversation** in English, Kinyarwanda, French, Swahili, and other languages — greetings, small talk, general knowledge, and any casual exchange that keeps the conversation flowing. Reply in the language the user is using when possible.
 
-## OFF-TOPIC — MUST REFUSE (VERY IMPORTANT)
-If the user asks about anything NOT in the list above — for example:
-- Music artists, songs, entertainment, movies, celebrities
+## WHAT YOU REFUSE
+You politely decline questions that have **no meaningful connection** to agriculture, livestock, rural life, or the sciences that support them, for example:
+- Music, songs, artists, entertainment, movies, celebrities
 - Sports, politics, religion, personal gossip
-- General programming, unrelated tech, unrelated history
 - Fashion, relationships, personal advice unrelated to farming
-- Any topic with NO connection to agriculture, livestock, or rural life
+- Programming, unrelated tech, unrelated world history
 
-You MUST politely refuse and redirect. Use a short reply like:
+When refusing, use a short, warm reply like:
 "I'm AgriDeepAI, specialised in agriculture and livestock, so I can't help with that. If you have a question about crops, livestock, soil, farming, or agribusiness, I'd be glad to help."
 
-**Never** provide the actual off-topic answer. Never mix it in. Just decline and offer help in your domain.
+Do NOT provide the actual off-topic answer. Do NOT lecture. Keep it short and offer to help in your domain.
 
 ## IMAGES & DOCUMENTS
-- If an uploaded image or document is clearly NOT related to agriculture, livestock, farming, or rural life, tell the user politely: "This doesn't appear to be related to agriculture or livestock. If you have a farming question, feel free to share it."
-- If the image/document IS related (crop photo, livestock photo, soil sample, farm document), analyse it carefully and help.
+- If the uploaded image/document IS related to agriculture, livestock, farming, or rural life (crop photo, livestock photo, soil sample, farm document, plant disease), analyse it fully and help.
+- If it is clearly unrelated, reply briefly: "This doesn't appear to be related to agriculture or livestock. If you have a farming question, feel free to share it."
 
 ## STYLE
-Warm, professional, concise. Use Markdown when it helps. For disease questions, ask for symptoms/age/weather first. Include brief disclaimers for chemicals and animal health.`;
+- Warm, professional, concise. Use Markdown when it helps.
+- For disease questions, ask for symptoms/age/weather before advising.
+- Include short disclaimers for chemicals and animal health.
+- Match the user's language when you can (English, Kinyarwanda, French, Swahili, etc.).
+- Never invent statistics or prices. Say "check current market prices" when unsure.`;
 
 // ---------- Multer ----------
 const storage = multer.memoryStorage();
@@ -314,20 +326,16 @@ async function authenticate(req, res, next) {
   next();
 }
 
-// ---------- Stores ----------
-function generateCode() { return Math.floor(100000 + Math.random() * 900000).toString(); }
-const verificationStore = {};
-const pendingLogins = {};
-const twoFactorStore = {};
-
 // ---------- Identity guards ----------
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
-  return ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy'].includes(t);
+  const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
+    'muraho','mwaramutse','mwiriwe','amakuru','bite','salam','bonjour','salut','jambo','habari'];
+  return greetings.includes(t) || greetings.some(g => t.startsWith(g + ' '));
 }
 function isCreatorQuestion(text) {
   const t = (text || '').toLowerCase();
-  const keys = ['who made you','who built you','who created you','who is your creator','who is your developer','who is behind','who founded','who develops','who is the creator of','who is the developer of','who made this','who built this','who created this','who are you','what are you','who is your maker','who is your owner','who owns you'];
+  const keys = ['who made you','who built you','who created you','who is your creator','who is your developer','who is behind','who founded','who develops','who is the creator of','who is the developer of','who made this','who built this','who created this','who are you','what are you','who is your maker','who is your owner','who owns you','witwa nde','uri nde','ni nde'];
   return keys.some(k => t.includes(k));
 }
 async function streamSimpleText(res, text) {
@@ -352,7 +360,17 @@ async function tryIdentityShortcut(messages, res) {
     return true;
   }
   if (isGreeting(last.content)) {
-    await streamSimpleText(res, `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`);
+    // Reply in same language when possible
+    const t = last.content.toLowerCase();
+    if (t.includes('muraho') || t.includes('mwaramutse') || t.includes('mwiriwe') || t.includes('amakuru') || t.includes('bite')) {
+      await streamSimpleText(res, `Muraho! Ni **AgriDeepAI**. Ni gute nashobora kugufasha ku bijyanye n'ubuhinzi cyangwa ubworozi uyu munsi?`);
+    } else if (t.includes('bonjour') || t.includes('salut')) {
+      await streamSimpleText(res, `Bonjour ! Je suis **AgriDeepAI**. Comment puis-je vous aider aujourd'hui avec l'agriculture ou l'élevage ?`);
+    } else if (t.includes('jambo') || t.includes('habari')) {
+      await streamSimpleText(res, `Habari! Mimi ni **AgriDeepAI**. Ninaweza kukusaidia vipi leo kuhusu kilimo au ufugaji?`);
+    } else {
+      await streamSimpleText(res, `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`);
+    }
     return true;
   }
   return false;
@@ -392,7 +410,9 @@ async function sendVerificationEmail(email, code, action = 'verify', extra = '')
   } catch (err) { log(`Email send error: ${err.message}`, 'error'); throw err; }
 }
 
-// ============ AUTH ROUTES ============
+// ============ AUTH ROUTES (JWT-based, survives restarts) ============
+
+// -------- SIGNUP --------
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -402,30 +422,32 @@ app.post('/api/auth/signup', async (req, res) => {
     const { data: existingUsers } = await supabase.auth.admin.listUsers();
     if (existingUsers.users.some(u => u.email === email))
       return res.status(400).json({ error: 'Email already registered. Please sign in.' });
-    const code = generateCode();
-    verificationStore[email] = { code, expires: Date.now() + 10 * 60 * 1000, action: 'signup',
-      data: { email, password, fullName: fullName || email.split('@')[0] } };
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const pendingToken = signPending({
+      type: 'signup', email, code,
+      password, fullName: fullName || email.split('@')[0],
+    }, 900);
     await sendVerificationEmail(email, code, 'signup', 'To complete your registration, use the code below.');
-    res.status(200).json({ message: 'Verification code sent to your email.', email });
+    res.status(200).json({ message: 'Verification code sent to your email.', email, pendingToken });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/auth/confirm-signup', async (req, res) => {
   try {
-    const { email, code } = req.body;
-    const stored = verificationStore[email];
-    if (!stored || stored.action !== 'signup') return res.status(400).json({ error: 'No pending registration found.' });
-    if (stored.code !== code || Date.now() > stored.expires) return res.status(400).json({ error: 'Invalid or expired code.' });
-    const { email: userEmail, password, fullName } = stored.data;
-    const { data, error } = await supabase.auth.signUp({ email: userEmail, password,
+    const { pendingToken, code } = req.body;
+    const p = verifyPending(pendingToken);
+    if (!p || p.type !== 'signup') return res.status(400).json({ error: 'Pending session expired. Please sign up again.' });
+    if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
+    const { email, password, fullName } = p;
+    const { data, error } = await supabase.auth.signUp({ email, password,
       options: { data: { full_name: fullName }, email_confirm: true } });
     if (error) throw error;
     const user = data.user;
     if (!user) throw new Error('User creation failed');
     await supabase.auth.admin.updateUserById(user.id, { email_confirm: true });
     await supabase.from('profiles').insert({ id: user.id, full_name: fullName });
-    delete verificationStore[email];
-    const { data: sd, error: se } = await supabase.auth.signInWithPassword({ email: userEmail, password });
+    // Sign in to get a session for the user
+    const { data: sd, error: se } = await supabase.auth.signInWithPassword({ email, password });
     if (se) throw se;
     res.status(201).json({ user: sd.user, session: sd.session });
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -433,131 +455,156 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
 
 app.post('/api/auth/resend-verification', async (req, res) => {
   try {
-    const { email } = req.body;
-    const stored = verificationStore[email];
-    if (!stored || stored.action !== 'signup') return res.status(400).json({ error: 'No pending registration found.' });
-    const code = generateCode();
-    stored.code = code; stored.expires = Date.now() + 10 * 60 * 1000;
-    await sendVerificationEmail(email, code, 'signup', 'Resend: complete your registration.');
-    res.json({ message: 'New code sent.' });
+    const { pendingToken } = req.body;
+    const p = verifyPending(pendingToken);
+    if (!p || p.type !== 'signup') return res.status(400).json({ error: 'No pending registration found.' });
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const newToken = signPending({ ...p, code }, 900);
+    await sendVerificationEmail(p.email, code, 'signup', 'Resend: complete your registration.');
+    res.json({ message: 'New code sent.', pendingToken: newToken });
   } catch (err) { res.status(500).json({ error: 'Failed to resend code.' }); }
 });
 
+// -------- LOGIN --------
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    // Authenticate with Supabase
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    // Check 2FA
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', data.user.id).single();
-    const code = generateCode();
-    pendingLogins[email] = {
-      code, expires: Date.now() + 10 * 60 * 1000,
-      session: data.session, user: data.user,
-      twoFactorEnabled: !!profile?.two_factor_enabled,
-    };
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Sign a JWT containing code + session tokens. Do NOT sign out.
+    const pendingToken = signPending({
+      type: 'login', email, code,
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      user: data.user,
+      two_factor_enabled: !!profile?.two_factor_enabled,
+    }, 900);
     await sendVerificationEmail(email, code, 'login', 'Use the code below to complete your sign-in.');
-    await supabase.auth.signOut();
-    res.json({ requiresCode: true, email, message: 'Verification code sent to your email.' });
-  } catch (err) { res.status(401).json({ error: err.message }); }
+    res.json({ requiresCode: true, email, pendingToken, message: 'Verification code sent to your email.' });
+  } catch (err) {
+    log(`Login error: ${err.message}`, 'warn');
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/resend-login-code', async (req, res) => {
+  try {
+    const { pendingToken } = req.body;
+    const p = verifyPending(pendingToken);
+    if (!p || p.type !== 'login') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const newToken = signPending({ ...p, code }, 900);
+    await sendVerificationEmail(p.email, code, 'login', 'Resend: use the code below to complete your sign-in.');
+    res.json({ message: 'New code sent.', pendingToken: newToken });
+  } catch (err) { res.status(500).json({ error: 'Failed to resend code.' }); }
 });
 
 app.post('/api/auth/verify-login', async (req, res) => {
   try {
-    const { email, code } = req.body;
-    const pending = pendingLogins[email];
-    if (!pending) return res.status(400).json({ error: 'No pending login. Please sign in again.' });
-    if (pending.code !== code || Date.now() > pending.expires)
-      return res.status(400).json({ error: 'Invalid or expired code.' });
-    if (pending.twoFactorEnabled) {
-      const tempToken = crypto.randomBytes(32).toString('hex');
-      twoFactorStore[tempToken] = { email, expires: Date.now() + 10 * 60 * 1000 };
-      return res.json({ requires2fa: true, tempToken, message: 'Email verified. Now enter your 2FA code.' });
+    const { pendingToken, code } = req.body;
+    const p = verifyPending(pendingToken);
+    if (!p || p.type !== 'login') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
+    if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
+    if (p.two_factor_enabled) {
+      // Issue a short-lived token for the 2FA step
+      const twoFactorToken = signPending({
+        type: '2fa', email: p.email,
+        access_token: p.access_token,
+        refresh_token: p.refresh_token,
+        user: p.user,
+      }, 900);
+      return res.json({ requires2fa: true, twoFactorToken, message: 'Email verified. Now enter your 2FA code.' });
     }
-    const session = pending.session;
-    const user = pending.user;
-    delete pendingLogins[email];
-    res.json({ user, session, message: 'Login successful' });
+    // Complete login — return the session tokens
+    const session = { access_token: p.access_token, refresh_token: p.refresh_token };
+    res.json({ user: p.user, session, message: 'Login successful' });
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
 });
 
 app.post('/api/auth/2fa/validate-login', async (req, res) => {
   try {
-    const { tempToken, code } = req.body;
-    const entry = twoFactorStore[tempToken];
-    if (!entry || Date.now() > entry.expires) return res.status(400).json({ error: 'Invalid or expired token' });
-    const pending = pendingLogins[entry.email];
-    if (!pending) return res.status(400).json({ error: 'Session expired.' });
-    const { data: p2 } = await supabase.from('profiles').select('two_factor_secret').eq('id', pending.user.id).single();
-    if (!p2?.two_factor_secret) return res.status(400).json({ error: '2FA not set up' });
-    const verified = speakeasy.totp.verify({ secret: p2.two_factor_secret, encoding: 'base32', token: code, window: 1 });
+    const { twoFactorToken, code } = req.body;
+    const p = verifyPending(twoFactorToken);
+    if (!p || p.type !== '2fa') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
+    const { data: profile } = await supabase.from('profiles').select('two_factor_secret').eq('id', p.user.id).single();
+    if (!profile?.two_factor_secret) return res.status(400).json({ error: '2FA not set up' });
+    const verified = speakeasy.totp.verify({ secret: profile.two_factor_secret, encoding: 'base32', token: code, window: 1 });
     if (!verified) return res.status(400).json({ error: 'Invalid 2FA code' });
-    delete twoFactorStore[tempToken];
-    const session = pending.session;
-    const user = pending.user;
-    delete pendingLogins[entry.email];
-    res.json({ user, session, message: 'Login successful' });
+    const session = { access_token: p.access_token, refresh_token: p.refresh_token };
+    res.json({ user: p.user, session, message: 'Login successful' });
   } catch (err) { res.status(500).json({ error: 'Failed to validate 2FA' }); }
 });
 
+// -------- Authenticated actions (verify-code via JWT too) --------
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
     const { action } = req.body;
-    const code = generateCode();
-    verificationStore[`${req.user.id}_${action}`] = { code, expires: Date.now() + 10 * 60 * 1000, action, verified: false };
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const pendingToken = signPending({
+      type: 'action', action, userId: req.user.id, email: req.user.email, code,
+    }, 900);
     await sendVerificationEmail(req.user.email, code, action);
-    res.json({ message: 'Verification code sent.' });
+    res.json({ message: 'Verification code sent.', pendingToken });
   } catch (err) { res.status(500).json({ error: 'Failed to send code.' }); }
 });
 
 app.post('/api/auth/verify-code', authenticate, async (req, res) => {
   try {
-    const { code, action } = req.body;
-    const key = `${req.user.id}_${action}`;
-    const stored = verificationStore[key];
-    if (!stored || stored.code !== code || Date.now() > stored.expires)
-      return res.status(400).json({ error: 'Invalid or expired code' });
-    stored.verified = true;
-    res.json({ message: 'Code verified.' });
+    const { pendingToken, code, action } = req.body;
+    const p = verifyPending(pendingToken);
+    if (!p || p.type !== 'action' || p.userId !== req.user.id) return res.status(400).json({ error: 'Pending session expired. Please request a new code.' });
+    if (p.code !== code || p.action !== action) return res.status(400).json({ error: 'Invalid or expired code' });
+    // Issue a verification-granted token
+    const grantedToken = signPending({
+      type: 'granted', action, userId: req.user.id,
+    }, 600);
+    res.json({ message: 'Code verified.', grantedToken });
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
 });
 
 app.post('/api/auth/change-password', authenticate, async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-    const key = `${req.user.id}_change-password`;
-    if (!verificationStore[key]?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
+    const { currentPassword, newPassword, grantedToken } = req.body;
+    const g = verifyPending(grantedToken);
+    if (!g || g.type !== 'granted' || g.action !== 'change-password' || g.userId !== req.user.id)
+      return res.status(400).json({ error: 'Please verify your code first.' });
     const { error: si } = await supabase.auth.signInWithPassword({ email: req.user.email, password: currentPassword });
     if (si) return res.status(401).json({ error: 'Current password incorrect' });
     if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword))
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
     await supabase.auth.updateUser({ password: newPassword });
-    delete verificationStore[key];
     res.json({ message: 'Password changed successfully' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/auth/change-email', authenticate, async (req, res) => {
   try {
-    const { newEmail } = req.body;
-    const key = `${req.user.id}_change-email`;
-    if (!verificationStore[key]?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
+    const { newEmail, grantedToken } = req.body;
+    const g = verifyPending(grantedToken);
+    if (!g || g.type !== 'granted' || g.action !== 'change-email' || g.userId !== req.user.id)
+      return res.status(400).json({ error: 'Please verify your code first.' });
     await supabase.auth.updateUser({ email: newEmail });
-    delete verificationStore[key];
     res.json({ message: 'Email change requested.' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
   try {
-    const key = `${req.user.id}_delete-account`;
-    if (!verificationStore[key]?.verified) return res.status(400).json({ error: 'Please verify your code first.' });
+    const { grantedToken } = req.body;
+    const g = verifyPending(grantedToken);
+    if (!g || g.type !== 'granted' || g.action !== 'delete-account' || g.userId !== req.user.id)
+      return res.status(400).json({ error: 'Please verify your code first.' });
     await supabase.auth.admin.deleteUser(req.user.id);
-    delete verificationStore[key];
     res.json({ message: 'Account deleted successfully' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// -------- 2FA enable/verify/disable (immediate, no email code needed) --------
 app.post('/api/auth/2fa/enable', authenticate, async (req, res) => {
   try {
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', req.user.id).single();
@@ -611,7 +658,7 @@ app.get('/api/config', (req, res) => res.json({
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
 }));
 
-// ============ CHAT HELPERS ============
+// ============ CHAT ============
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT) {
   const history = messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -723,9 +770,17 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
 
     if (message && (isCreatorQuestion(message) || isGreeting(message))) {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
-      const reply = isCreatorQuestion(message)
-        ? `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`
-        : `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
+      let reply;
+      if (isCreatorQuestion(message)) {
+        reply = `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
+      } else {
+        const t = message.toLowerCase();
+        if (t.includes('muraho') || t.includes('mwaramutse') || t.includes('mwiriwe') || t.includes('amakuru') || t.includes('bite')) {
+          reply = `Muraho! Ni **AgriDeepAI**. Ni gute nashobora kugufasha ku bijyanye n'ubuhinzi cyangwa ubworozi uyu munsi?`;
+        } else {
+          reply = `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
+        }
+      }
       await supabase.from('messages').insert({
         conversation_id: conversationId, role: 'assistant', content: reply,
         versions: [reply], current_version_index: 0,
@@ -761,7 +816,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.single('fi
     if (fileMetadata) messageData.files = [fileMetadata];
     await supabase.from('messages').insert(messageData);
 
-    // Auto-rename if still 'New Chat'
     if (conv.title === 'New Chat' && message) {
       const newTitle = message.substring(0, 50);
       await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
@@ -890,4 +944,5 @@ app.listen(PORT, () => {
   log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
   log(`Primary: ${GROQ_API_KEY ? 'Groq' : 'none'} | Fallback: ${OPENROUTER_API_KEY ? 'OpenRouter' : 'none'}`, 'info');
   log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'}`, 'info');
+  log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
 });
