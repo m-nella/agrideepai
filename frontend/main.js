@@ -69,17 +69,13 @@ function isNearBottom(container, threshold = 200) {
 function smartScroll(force = false) {
   if (!chatContainer) return;
   if (!force && !state.shouldScrollToBottom && !isNearBottom(chatContainer)) return;
-  // Defer to next frame so layout has settled after content change
   requestAnimationFrame(() => {
     if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
   });
   state.shouldScrollToBottom = false;
 }
-
-// Detect user intent to scroll up
 if (chatContainer) {
   chatContainer.addEventListener('scroll', () => {
-    // If user scrolls away from bottom, disable auto-follow
     if (!isNearBottom(chatContainer, 80)) state.shouldScrollToBottom = false;
   }, { passive: true });
 }
@@ -341,33 +337,7 @@ function appendChatItem(container, chat) {
   container.appendChild(div);
 }
 
-// === Share-view bulletproof rendering ===
-function renderShareMessages() {
-  messageList.style.display = 'flex';
-  messageList.innerHTML = '';
-  const msgs = state.shareMessages || [];
-  if (!msgs.length) {
-    messageList.innerHTML = '<div style="text-align:center;padding:3rem 1rem;color:#98a2ad;font-size:1rem;line-height:1.6;">This shared chat is empty or the link has expired.</div>';
-    return;
-  }
-  msgs.forEach(msg => {
-    const row = document.createElement('div');
-    row.className = `message-row ${msg.role}`;
-    if (msg.role === 'assistant') {
-      const h = document.createElement('div'); h.className = 'assistant-header-row';
-      h.innerHTML = '<img src="/logo.png" alt="agrideepai" class="assistant-avatar" /> <span class="assistant-name">agrideepai</span>';
-      row.appendChild(h);
-    }
-    const div = document.createElement('div'); div.className = `message ${msg.role}`;
-    const c = document.createElement('div'); c.className = 'message-content';
-    c.innerHTML = safeMarkdown(msg.content);
-    div.appendChild(c); row.appendChild(div); messageList.appendChild(row);
-  });
-}
-
 function renderMessages() {
-  if (state.isShareView) { renderShareMessages(); return; }
-
   messageList.innerHTML = '';
   if (!state.messages.length) {
     welcomeScreen.style.display = 'flex'; messageList.style.display = 'none'; return;
@@ -544,7 +514,6 @@ function renderMessages() {
   smartScroll();
 }
 
-// Streaming update: only touch the last assistant bubble, don't rebuild all
 function updateStreamingLast(fullContent) {
   const rows = messageList.querySelectorAll('.message-row.assistant');
   const row = rows[rows.length - 1];
@@ -670,14 +639,13 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
           const last = state.messages[state.messages.length - 1];
           if (last && last.role === 'assistant') {
             last.content = full; chat.messages = state.messages;
-            updateStreamingLast(full);   // <-- targeted update, preserves scroll
+            updateStreamingLast(full);
           }
           if (versionData) { versionData.versions[versionData.versions.length - 1] = full; }
         }
       } catch (e) {}
     }
   }
-  // Final render with full message (adds action buttons)
   const last = state.messages[state.messages.length - 1];
   if (last && last.role === 'assistant' && last.content) {
     if (!state.messageVersions[last.id]) state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
@@ -696,7 +664,6 @@ async function shareConversation(messagesToShare = null, chatId = null) {
   const targetChatId = chatId || state.activeChatId;
   const chat = state.chats.find(c => c.id === targetChatId);
 
-  // Logged-in share of a saved (server) chat: use the server-side link
   if (!messagesToShare && chat && state.currentUser && !chat.id.startsWith('local_')) {
     try {
       const response = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
@@ -709,14 +676,12 @@ async function shareConversation(messagesToShare = null, chatId = null) {
     } catch (err) { showToast('Failed to share: ' + err.message, true); return; }
   }
 
-  // Guest / single-message / local chat: build a messages array and post it
   let messages;
   if (messagesToShare) {
     messages = messagesToShare;
   } else if (chat && Array.isArray(chat.messages) && chat.messages.length > 0) {
     messages = chat.messages.map(m => ({ role: m.role, content: m.content }));
   } else if (chat && state.currentUser && !chat.id.startsWith('local_')) {
-    // Chat exists on server but messages aren't loaded locally — fetch them
     try {
       const res = await apiFetch(`/api/chat/conversations/${chat.id}/messages`);
       const data = await res.json();
@@ -830,7 +795,6 @@ function openChatMenu(e, chatId) {
   window.refreshIcons();
 }
 
-// FIXED: use contains() so inner SVG clicks don't close the sidebar
 document.addEventListener('click', (e) => {
   if (window.innerWidth < 768
       && sidebar.classList.contains('mobile-open')
@@ -842,10 +806,8 @@ document.addEventListener('click', (e) => {
   if (!chatMenu.contains(e.target) && !e.target.closest('.chat-item .actions')) chatMenu.classList.add('hidden');
 });
 
-// FIXED: always create a new chat unless current one is already blank
 async function handleNewChat() {
   if (state.activeChatId && state.messages.length === 0 && !state.editingMessageId) {
-    // Current chat is already blank — just focus it
     messageInput.focus();
     if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
     return;
@@ -918,15 +880,6 @@ async function sendMessage() {
     } else {
       chat = createLocalChat(title); state.activeChatId = chat.id;
     }
-  }
-
-  if ((chat.title === 'New Chat' || !chat.title) && text) {
-    const newTitle = text.substring(0, 42) + (text.length > 42 ? '…' : '');
-    chat.title = newTitle;
-    if (state.currentUser && !chat.id.startsWith('local_')) {
-      try { await apiFetch(`/api/chat/conversations/${chat.id}`, { method: 'PUT', body: JSON.stringify({ title: newTitle }) }); } catch (e) {}
-    }
-    renderChatList();
   }
 
   const localFiles = state.attachments.map(f => ({ filename: f.name, mime_type: f.type, size: f.size, public_url: URL.createObjectURL(f) }));
@@ -1183,6 +1136,7 @@ function renderAuthForm(mode) {
   };
 }
 
+// ============ ACCOUNT MODAL ============
 async function openAccountModal() {
   if (!state.currentUser) return;
   let profile = {};
@@ -1213,12 +1167,14 @@ async function openAccountModal() {
 
   const render = async (id) => {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === id));
+
     if (id === 'logout') {
       content.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure?</p><button class="btn-primary" id="loConfirm" style="background:var(--danger);">Log out</button><button class="btn-primary" id="loCancel" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
       content.querySelector('#loConfirm').onclick = async () => { await state.supabase.auth.signOut(); close(); showToast('Logged out'); };
       content.querySelector('#loCancel').onclick = () => render('profile');
       return;
     }
+
     let html = '';
     if (id === 'profile') {
       html = `<h2>Profile</h2><div class="profile-info"><p><strong>Name:</strong> ${profile.full_name || state.currentUser.email}</p><p><strong>Email:</strong> ${state.currentUser.email}</p><p><strong>Member since:</strong> ${new Date(state.currentUser.created_at).toLocaleDateString()}</p></div>`;
@@ -1270,19 +1226,32 @@ async function openAccountModal() {
         const all = data.all || [];
         html = `<h2>Active Sessions</h2>
           <div class="sessions-list">
+            <div class="sessions-actions">
+              <button class="btn-primary btn-danger sessions-logout-all" id="logoutAllBtn">
+                <i data-lucide="log-out"></i> Log out all other sessions
+              </button>
+            </div>
             <h3>Current device</h3>
             <p><strong>Email:</strong> ${cur.email || state.currentUser.email}</p>
             <p><strong>Browser:</strong> ${(cur.user_agent || '').substring(0, 80)}</p>
             <p><strong>IP:</strong> ${cur.ip || 'Unknown'}</p>
             <hr />
             <h3>All recent sessions (${all.length})</h3>
+            <div id="sessionsListBody">
             ${all.length === 0 ? '<p style="color:var(--text-muted);font-size:.85rem;">No other sessions recorded.</p>' : all.map(s => `
-              <div class="session-item">
-                <p><strong>Device:</strong> ${(s.device || 'Unknown').substring(0, 60)}</p>
-                <p><strong>IP:</strong> ${s.ip || 'Unknown'}</p>
-                <p style="font-size:.8rem;color:var(--text-muted);">Last active: ${new Date(s.last_active || s.created_at).toLocaleString()}</p>
+              <div class="session-item" data-session-id="${s.id}">
+                <div class="session-info">
+                  <p><strong>Device:</strong> ${(s.device || 'Unknown').substring(0, 60)}</p>
+                  <p><strong>IP:</strong> ${s.ip || 'Unknown'}</p>
+                  <p style="font-size:.8rem;color:var(--text-muted);">Last active: ${new Date(s.last_active || s.created_at).toLocaleString()}</p>
+                </div>
+                <button class="session-logout-btn" data-session-id="${s.id}" title="Log out this session">
+                  <i data-lucide="log-out" style="width:16px;height:16px;"></i>
+                  <span>Log out</span>
+                </button>
               </div>
             `).join('')}
+            </div>
             <hr />
             <h3>Account</h3>
             <p><strong>Created:</strong> ${acc.created_at ? new Date(acc.created_at).toLocaleString() : '—'}</p>
@@ -1425,6 +1394,7 @@ async function openAccountModal() {
         } catch (e) { showToast(e.message, true); }
       };
     }
+
     if (id === 'security') {
       document.getElementById('en2fa')?.addEventListener('click', async () => {
         try {
@@ -1442,6 +1412,54 @@ async function openAccountModal() {
       });
       document.getElementById('dis2fa')?.addEventListener('click', async () => {
         try { await apiFetch('/api/auth/2fa/disable', { method: 'POST' }); showToast('2FA disabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
+      });
+    }
+
+    // --- SESSIONS tab handlers ---
+    if (id === 'sessions') {
+      // Log out all other sessions
+      document.getElementById('logoutAllBtn')?.addEventListener('click', async () => {
+        const ok = await showCustomModal(
+          'Log out all other sessions',
+          'This will sign out every device except this one. You may need to sign in again on those devices. Continue?',
+          'Log out all others', 'Cancel', true
+        );
+        if (!ok) return;
+        const btn = document.getElementById('logoutAllBtn');
+        if (btn) { btn.disabled = true; btn.innerHTML = 'Logging out…'; }
+        try {
+          const r = await apiFetch('/api/auth/sessions/all', { method: 'DELETE' });
+          const d = await r.json();
+          showToast(d.removed > 0 ? `Logged out ${d.removed} session${d.removed === 1 ? '' : 's'}` : 'No other sessions to log out');
+          render('sessions');
+        } catch (e) {
+          showToast('Failed: ' + e.message, true);
+          if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="log-out"></i> Log out all other sessions'; window.refreshIcons(); }
+        }
+      });
+
+      // Log out a single session
+      content.querySelectorAll('.session-logout-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const sid = btn.dataset.sessionId;
+          if (!sid) return;
+          const ok = await showCustomModal(
+            'Log out this session',
+            'This device will be signed out. Continue?',
+            'Log out', 'Cancel', true
+          );
+          if (!ok) return;
+          btn.disabled = true; btn.innerHTML = 'Logging out…';
+          try {
+            await apiFetch(`/api/auth/sessions/${sid}`, { method: 'DELETE' });
+            showToast('Session logged out');
+            render('sessions');
+          } catch (e) {
+            showToast('Failed: ' + e.message, true);
+            btn.disabled = false; btn.innerHTML = '<i data-lucide="log-out" style="width:16px;height:16px;"></i><span>Log out</span>';
+            window.refreshIcons();
+          }
+        });
       });
     }
   };
@@ -1480,35 +1498,10 @@ chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; up
 document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
 shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
 
-async function checkShareView() {
-  const path = window.location.pathname;
-  if (!path.startsWith('/share/')) return false;
-  const token = path.split('/share/')[1].split('/')[0].split('?')[0];
-  if (!token) return false;
-  state.isShareView = true;
-  document.body.classList.add('share-view');
-  messageList.style.display = 'flex';
-  messageList.innerHTML = '<div style="text-align:center;padding:3rem 1rem;color:#98a2ad;">Loading shared chat…</div>';
-  try {
-    const res = await fetch(`/api/share/${token}`);
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || `Not found (${res.status})`);
-    }
-    const data = await res.json();
-    state.shareMessages = Array.isArray(data.messages) ? data.messages : [];
-    renderShareMessages();
-    document.title = 'Shared Chat — AgriDeepAI';
-  } catch (err) {
-    messageList.style.display = 'flex';
-    messageList.innerHTML = `<div style="text-align:center;padding:3rem 1rem;color:#e85d5d;line-height:1.6;">Unable to load this shared chat:<br><span style="opacity:.75;font-size:.85rem;">${err.message}</span></div>`;
-  }
-  return true;
-}
-
 (async function init() {
   try {
-    const isShare = await checkShareView();
-    if (!isShare) { await initSupabase(); updateSendButton(); resizeComposer(); }
+    await initSupabase();
+    updateSendButton();
+    resizeComposer();
   } catch (e) { log(`Init error: ${e.message}`, 'error'); }
 })();
