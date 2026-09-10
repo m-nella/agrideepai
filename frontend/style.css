@@ -373,3 +373,45 @@ html.is-share-view body::before, body.share-view::before {
 
 .session-item { padding: .5rem; border-radius: 6px; background: var(--surface-hover); margin-bottom: .4rem; font-size: .85rem; }
 .session-item p { margin: .15rem 0; word-break: break-word; }
+
+/* ===== Edit-message: match the original bubble's size & position ===== */
+.message.user.message-editing {
+  width: min(780px, 85%);
+  max-width: min(780px, 85%);
+  min-width: min(360px, 80vw);
+}
+.edit-area { width: 100%; box-sizing: border-box; }
+.edit-textarea {
+  width: 100%;
+  min-width: 100%;
+  min-height: 44px;
+  padding: .6rem .8rem;
+  border-radius: 10px;
+  background: var(--background);
+  color: var(--text);
+  border: 1px solid var(--border);
+  resize: none;
+  font-family: inherit;
+  font-size: var(--body-font);
+  line-height: 1.6;
+  box-sizing: border-box;
+  overflow-y: hidden;
+  field-sizing: content;
+}
+.edit-textarea:focus { outline: none; border-color: var(--accent); }
+.edit-actions {
+  display: flex; gap: .5rem; margin-top: .5rem; justify-content: flex-end;
+}
+.edit-btn-cancel {
+  padding: .5rem 1.1rem; background: transparent;
+  border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); cursor: pointer; font-weight: 500; font-size: .9rem;
+}
+.edit-btn-send {
+  padding: .5rem 1.4rem; background: var(--accent); color: #fff;
+  border: none; border-radius: 10px; font-weight: 600; font-size: .9rem;
+  cursor: pointer; box-shadow: 0 2px 8px rgba(47,143,70,.35);
+}
+@media (max-width: 480px) {
+  .message.user.message-editing { width: 92%; max-width: 92%; min-width: 0; }
+}
