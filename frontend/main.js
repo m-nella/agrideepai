@@ -55,6 +55,7 @@ const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const authSidebarBtn = document.getElementById('authSidebarBtn');
 const attachBtn = document.getElementById('attachBtn');
+const generateImageBtn = document.getElementById('generateImageBtn');
 const chips = document.querySelectorAll('.chip');
 const authModal = document.getElementById('authModal');
 const authModalBody = document.getElementById('authModalBody');
@@ -508,6 +509,22 @@ function renderMessages() {
         c.innerHTML = safeMarkdown(msg.content);
         msgDiv.appendChild(c);
       }
+      const genFile = msg.files?.find(f => f.generated && f.public_url);
+      if (genFile) {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'margin-top:.6rem;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--background);max-width:min(560px,100%);';
+        const img = document.createElement('img');
+        img.src = genFile.public_url;
+        img.alt = genFile.prompt || 'Generated image';
+        img.style.cssText = 'display:block;width:100%;height:auto;cursor:zoom-in;';
+        img.onclick = () => openLightbox(genFile.public_url, true);
+        wrap.appendChild(img);
+        const meta = document.createElement('div');
+        meta.style.cssText = 'padding:.4rem .7rem;font-size:.75rem;color:var(--text-muted);background:var(--surface-hover);display:flex;justify-content:space-between;gap:.5rem;';
+        meta.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${genFile.prompt || ''}</span><span style="flex-shrink:0;">${genFile.provider || ''}</span>`;
+        wrap.appendChild(meta);
+        msgDiv.appendChild(wrap);
+      }
     } else {
       if (msg.files?.length) {
         const atts = document.createElement('div'); atts.className = 'attachments-above';
@@ -654,8 +671,6 @@ function startEditing(msg) {
 }
 
 function buildGuestPayload(messages) {
-  // Identify the last user message — we don't need to prefix it with
-  // attachment info because the backend adds its own enriched note.
   let lastUserId = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === 'user') { lastUserId = messages[i].id; break; }
@@ -665,7 +680,6 @@ function buildGuestPayload(messages) {
     .filter(m => m.content && String(m.content).trim().length > 0)
     .map(m => {
       let content = String(m.content);
-      // Preserve attachment context in the history so the AI remembers past images/PDFs
       if (m.files?.length && m.id !== lastUserId) {
         const names = m.files.map(f => f.filename || 'file').join(', ');
         content = `[User attached: ${names}]\n${content}`;
@@ -1599,17 +1613,12 @@ async function openAccountModal() {
         const cur = data.current || {};
         const acc = data.account || {};
         const all = data.all || [];
-
-        // Determine which rows belong to THIS browser
         const isCurrentRow = (s) => {
           if (s.client_id && s.client_id === CLIENT_ID) return true;
           if (!s.client_id && s.ip === cur.ip && s.user_agent === cur.user_agent) return true;
           return false;
         };
-
         const otherSessions = all.filter(s => !isCurrentRow(s));
-        const currentRows = all.filter(s => isCurrentRow(s));
-
         html = `<h2>Active Sessions</h2>
           <div class="sessions-list">
             <div class="sessions-actions">
@@ -1617,7 +1626,6 @@ async function openAccountModal() {
                 <i data-lucide="log-out"></i> Log out all other sessions
               </button>
             </div>
-
             <h3>This device</h3>
             <p><strong>Email:</strong> ${cur.email || state.currentUser.email}</p>
             <p><strong>Browser:</strong> ${(cur.user_agent || '').substring(0, 80)}</p>
@@ -1626,7 +1634,6 @@ async function openAccountModal() {
               To sign out this device, use the <strong>Log out</strong> tab on the left.
             </p>
             <hr />
-
             <h3>Other active sessions (${otherSessions.length})</h3>
             <div id="sessionsListBody">
             ${otherSessions.length === 0 ? '<p style="color:var(--text-muted);font-size:.85rem;">No other sessions recorded.</p>' : otherSessions.map(s => `
@@ -1675,16 +1682,11 @@ async function openAccountModal() {
         const newEmail = document.getElementById('newEmail').value.trim().toLowerCase();
         const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
         const currentEmail = (state.currentUser.email || '').toLowerCase();
-
         if (!newEmail) { showToast('Please enter the new email address', true); return; }
         if (!EMAIL_RE.test(newEmail) || newEmail.includes('..')) { showToast('Please enter a valid email address', true); return; }
         if (newEmail === currentEmail) { showToast('New email must be different from your current email', true); return; }
-
         try {
-          const res = await apiFetch('/api/auth/send-verification-code', {
-            method: 'POST',
-            body: JSON.stringify({ action: 'change-email', newEmail }),
-          });
+          const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email', newEmail }) });
           const data = await res.json();
           emailPendingToken = data.pendingToken;
           showToast(`Verification code sent to ${newEmail}`);
@@ -1844,7 +1846,6 @@ async function openAccountModal() {
         }
       });
 
-      // Note: no per-row logout for the CURRENT device — only for other sessions
       content.querySelectorAll('.session-logout-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           const sid = btn.dataset.sessionId;
@@ -1871,6 +1872,124 @@ async function openAccountModal() {
   };
   tabs.forEach(t => t.onclick = () => render(t.dataset.tab));
   render('profile');
+}
+
+// ============================================================
+// IMAGE GENERATION UI
+// ============================================================
+function ensureGenerateImageButton() {
+  if (document.getElementById('generateImageBtn')) return;
+  const composerMain = document.querySelector('.composer-main');
+  if (!composerMain) return;
+  const btn = document.createElement('button');
+  btn.id = 'generateImageBtn';
+  btn.className = 'icon-button';
+  btn.setAttribute('aria-label', 'Generate image');
+  btn.title = 'Generate image from a description';
+  btn.innerHTML = `<i data-lucide="image-plus"></i>`;
+  composerMain.insertBefore(btn, document.getElementById('attachBtn'));
+  btn.onclick = openGenerateImageModal;
+  window.refreshIcons();
+}
+
+function openGenerateImageModal() {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 560px;">
+      <button class="modal-close" id="genImgClose">&times;</button>
+      <h2 style="display:flex;align-items:center;gap:.5rem;"><i data-lucide="image-plus" style="width:22px;height:22px;color:var(--accent);"></i> Generate an Image</h2>
+      <p style="color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem;">Describe the agriculture or livestock scene you want to see. Be specific — the more detail, the better the result.</p>
+      <label>Image description</label>
+      <textarea id="genImgPrompt" rows="3" placeholder="e.g. A healthy maize field at sunrise, farmers inspecting crops, photorealistic style" style="width:100%;padding:.65rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:15px;min-height:80px;"></textarea>
+      <div id="genImgStatus" class="status-msg" style="display:none;margin-top:.5rem;"></div>
+      <div id="genImgError" class="error-msg" style="display:none;margin-top:.5rem;"></div>
+      <div style="display:flex;gap:.5rem;margin-top:1rem;">
+        <button class="btn-primary" id="genImgSubmit" style="flex:1;">
+          <i data-lucide="sparkles" style="width:16px;height:16px;display:inline-block;vertical-align:-3px;margin-right:4px;"></i>
+          Generate
+        </button>
+        <button class="btn-primary" id="genImgCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  window.refreshIcons();
+
+  const promptInput = document.getElementById('genImgPrompt');
+  const submitBtn = document.getElementById('genImgSubmit');
+  const cancelBtn = document.getElementById('genImgCancel');
+  const closeBtn = document.getElementById('genImgClose');
+  const statusEl = document.getElementById('genImgStatus');
+  const errorEl = document.getElementById('genImgError');
+
+  const close = () => modal.remove();
+  closeBtn.onclick = close;
+  cancelBtn.onclick = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
+  setTimeout(() => promptInput.focus(), 50);
+
+  promptInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitBtn.click();
+  });
+
+  submitBtn.onclick = async () => {
+    const prompt = promptInput.value.trim();
+    errorEl.style.display = 'none';
+    statusEl.style.display = 'none';
+    if (!prompt) { errorEl.textContent = 'Please describe the image you want.'; errorEl.style.display = 'block'; return; }
+    if (prompt.length < 5) { errorEl.textContent = 'Please add a bit more detail.'; errorEl.style.display = 'block'; return; }
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `<span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px;"></span>Generating…`;
+    statusEl.textContent = 'This usually takes 5–20 seconds…';
+    statusEl.style.display = 'block';
+
+    try {
+      const res = await fetch('/api/chat/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
+
+      const genMsg = {
+        id: 'gen_' + Date.now().toString(36),
+        role: 'assistant',
+        content: `Here's the image I generated for: "${prompt}"`,
+        files: [{
+          filename: `generated-${Date.now()}.jpg`,
+          mime_type: 'image/jpeg',
+          public_url: data.url,
+          generated: true,
+          prompt: data.prompt,
+          provider: data.provider,
+        }],
+        created_at: new Date().toISOString(),
+      };
+      state.messages.push(genMsg);
+      const chat = state.chats.find(c => c.id === state.activeChatId);
+      if (chat) chat.messages = state.messages;
+      state.shouldScrollToBottom = true;
+      renderMessages();
+
+      close();
+      showToast(`Image generated via ${data.provider} 🎨`);
+    } catch (err) {
+      errorEl.textContent = 'Could not generate the image: ' + err.message;
+      errorEl.style.display = 'block';
+      statusEl.style.display = 'none';
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `<i data-lucide="sparkles" style="width:16px;height:16px;display:inline-block;vertical-align:-3px;margin-right:4px;"></i>Generate`;
+      window.refreshIcons();
+    }
+  };
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', ensureGenerateImageButton, { once: true });
+} else {
+  ensureGenerateImageButton();
 }
 
 attachBtn.onclick = () => {
