@@ -403,8 +403,11 @@ Politely decline questions with no meaningful connection to agriculture, livesto
 Do NOT provide the off-topic answer.
 
 ## IMAGES & DOCUMENTS
-- If the upload IS related to agriculture/livestock, analyse it fully.
+- Users may attach images, PDFs, or documents. When they do, you will receive a note in the message describing the attachment — including any text that was extracted from it.
+- ALWAYS acknowledge the attached file(s) directly. Never claim an image was not attached when the note says one was.
+- If the attachment IS related to agriculture/livestock, analyse it fully.
 - If clearly unrelated, reply: "This doesn't appear to be related to agriculture or livestock. If you have a farming question, feel free to share it."
+- If you have vision capabilities, describe what you see. If you only received extracted text (no visual access), be transparent: say you're analysing the extracted text.
 
 ## STYLE
 Warm, professional, concise. Markdown when it helps. Ask for symptoms/age/weather for disease questions. Include short disclaimers for chemicals and animal health.`;
@@ -437,12 +440,14 @@ const getClientId = (req) => {
 const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
 const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 
+// strict: only when the WHOLE message is a greeting
 function isGreetingOnly(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,;:]/g, '').replace(/\s+/g, ' ');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
     'muraho','mwaramutse','mwiriwe','amakuru','bite','salam','bonjour','salut','jambo','habari','hi bot','hello bot'];
   return greetings.includes(t);
 }
+// loose (kept for title generation of "Hi, what is your name?")
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
@@ -468,15 +473,19 @@ async function streamSimpleText(res, text) {
   res.write('data: [DONE]\n\n');
   res.end();
 }
-async function tryIdentityShortcut(messages, res) {
+
+// hasAttachment: when true, ALWAYS bypass shortcut so the AI can see the image
+async function tryIdentityShortcut(messages, res, hasAttachment = false) {
+  if (hasAttachment) return false;
   const last = [...messages].reverse().find(m => m.role === 'user');
   if (!last) return false;
   if (isCreatorQuestion(last.content)) {
     await streamSimpleText(res, `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`);
     return true;
   }
-  if (isGreeting(last.content)) {
-    const t = last.content.toLowerCase();
+  // Only exact-match greeting triggers the shortcut
+  if (isGreetingOnly(last.content)) {
+    const t = (last.content || '').toLowerCase();
     if (t.includes('muraho') || t.includes('mwaramutse') || t.includes('mwiriwe') || t.includes('amakuru') || t.includes('bite'))
       await streamSimpleText(res, `Muraho! Ni **AgriDeepAI**. Ni gute nashobora kugufasha ku bijyanye n'ubuhinzi cyangwa ubworozi uyu munsi?`);
     else if (t.includes('bonjour') || t.includes('salut'))
@@ -866,10 +875,7 @@ app.post('/api/auth/forgot-password-request', async (req, res) => {
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const pendingToken = signPending({
-      type: 'forgot-password',
-      email: user.email,
-      userId: user.id,
-      code,
+      type: 'forgot-password', email: user.email, userId: user.id, code,
     });
     await sendVerificationEmailWithRetry(user.email, code, 'forgot-password', 'Use the code below to reset your password.');
     log(`[FORGOT-PW] Code sent to ${user.email}`, 'info');
@@ -909,9 +915,7 @@ app.post('/api/auth/forgot-password-verify-code', async (req, res) => {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
     const grantedToken = signPending({
-      type: 'forgot-password-granted',
-      email: p.email,
-      userId: p.userId,
+      type: 'forgot-password-granted', email: p.email, userId: p.userId,
     }, 600);
     res.json({ message: 'Code verified.', grantedToken });
   } catch (err) {
@@ -920,12 +924,6 @@ app.post('/api/auth/forgot-password-verify-code', async (req, res) => {
   }
 });
 
-// ==================================================================
-// RESET PASSWORD
-// Rejects if newPassword is the same as the user's CURRENT password.
-// Verified by attempting a signInWithPassword behind the scenes — if
-// it succeeds, the entered password IS the current one → reject.
-// ==================================================================
 app.post('/api/auth/reset-password', async (req, res) => {
   try {
     const { newPassword, grantedToken } = req.body;
@@ -936,25 +934,15 @@ app.post('/api/auth/reset-password', async (req, res) => {
     if (!newPassword || newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
     }
-
-    // Verify the new password is NOT the user's current password.
-    // signInWithPassword succeeds only when email+password match.
     try {
-      const { error: signInErr } = await supabase.auth.signInWithPassword({
-        email: g.email,
-        password: newPassword,
-      });
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: g.email, password: newPassword });
       if (!signInErr) {
-        // Password matched → user is trying to "reset" to their current password
         log(`[FORGOT-PW-RESET] Rejected: new password equals current password for ${g.email}`, 'warn');
         return res.status(400).json({ error: 'New password must be different from your current password' });
       }
-      // Otherwise: it's a different password → safe to proceed
     } catch (checkErr) {
-      // If the check itself errored (network etc.), log and continue — better to allow the reset than block the user
       log(`[FORGOT-PW-RESET] Password-similarity check failed with error: ${checkErr.message}`, 'warn');
     }
-
     const { error } = await supabase.auth.admin.updateUserById(g.userId, { password: newPassword });
     if (error) throw error;
     log(`[FORGOT-PW-RESET] ✅ Password reset for ${g.email}`, 'info');
@@ -965,7 +953,6 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 });
 
-// ============ SEND VERIFICATION CODE ============
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
     const { action, newEmail } = req.body;
@@ -980,19 +967,12 @@ app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
         return res.status(400).json({ error: 'Please enter the new email address' });
       }
       const trimmed = newEmail.trim().toLowerCase();
-      if (!isValidEmail(trimmed)) {
-        return res.status(400).json({ error: 'Please enter a valid email address' });
-      }
-      if (trimmed === currentEmail) {
-        return res.status(400).json({ error: 'New email must be different from your current email' });
-      }
+      if (!isValidEmail(trimmed)) return res.status(400).json({ error: 'Please enter a valid email address' });
+      if (trimmed === currentEmail) return res.status(400).json({ error: 'New email must be different from your current email' });
       const taken = await isEmailTakenByOther(trimmed, req.user.id);
-      if (taken) {
-        return res.status(400).json({ error: 'This email is already registered to another account' });
-      }
+      if (taken) return res.status(400).json({ error: 'This email is already registered to another account' });
       targetEmail = trimmed;
       tokenPayload.newEmail = trimmed;
-      log(`[SEND-CODE] change-email → code will go to NEW email ${trimmed}`, 'info');
     }
 
     const pendingToken = signPending(tokenPayload);
@@ -1007,17 +987,14 @@ app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
 app.post('/api/auth/resend-action-code', authenticate, async (req, res) => {
   try {
     const { pendingToken } = req.body;
-    log(`[RESEND-ACTION] Request received for user ${req.user.id}`, 'info');
     const p = verifyPending(pendingToken);
     if (!p || p.type !== 'action' || p.userId !== req.user.id) {
-      log(`[RESEND-ACTION] Invalid token`, 'warn');
       return res.status(400).json({ error: 'Your session expired. Please try again.' });
     }
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const newToken = signPending({ ...stripJwtClaims(p), code });
     const targetEmail = (p.action === 'change-email' && p.newEmail) ? p.newEmail : req.user.email;
     await sendVerificationEmailWithRetry(targetEmail, code, p.action);
-    log(`[RESEND-ACTION] ✅ Sent new code for action ${p.action} to ${targetEmail}`, 'info');
     res.json({ message: `New code sent to ${targetEmail}.`, pendingToken: newToken, targetEmail });
   } catch (err) {
     log(`[RESEND-ACTION] ❌ Error: ${err.message}`, 'error');
@@ -1079,8 +1056,7 @@ app.post('/api/auth/change-email', authenticate, async (req, res) => {
     if (taken) return res.status(400).json({ error: 'This email is already registered to another account' });
 
     const { error: uErr } = await supabase.auth.admin.updateUserById(req.user.id, {
-      email: finalNewEmail,
-      email_confirm: true,
+      email: finalNewEmail, email_confirm: true,
     });
     if (uErr) throw uErr;
     log(`[CHANGE-EMAIL] ✅ ${req.user.email} → ${finalNewEmail}`, 'info');
@@ -1224,8 +1200,19 @@ app.get('/api/config', (req, res) => res.json({
 }));
 
 // ============ CHAT ============
-function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT) {
-  const history = messages.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content && String(m.content).trim()).map(m => ({ role: m.role, content: String(m.content || '') }));
+// Preserve attachment context in every historical message so the AI remembers images/pdfs
+function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT, excludeId = null) {
+  const history = messages
+    .filter(m => (m.role === 'user' || m.role === 'assistant') && m.content && String(m.content).trim())
+    .map(m => {
+      let content = String(m.content || '');
+      // Don't prefix the current message — the endpoint adds its own enriched note
+      if (m.files?.length && m.id !== excludeId) {
+        const names = m.files.map(f => f.filename || 'file').join(', ');
+        content = `[User attached: ${names}]\n${content}`;
+      }
+      return { role: m.role, content };
+    });
   return [{ role: 'system', content: systemPrompt }, ...history];
 }
 async function enrichWithWebSearch(query) {
@@ -1255,17 +1242,47 @@ app.post('/api/chat/title', async (req, res) => {
   }
 });
 
+// ============ GUEST CHAT ============
 app.post('/api/chat/guest', async (req, res) => {
   try {
     const { messages, image } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) return res.status(400).json({ error: 'Messages required' });
-    if (await tryIdentityShortcut(messages, res)) return;
+
+    const hasImage = !!(image && image.base64 && image.mimeType);
+    // Bypass greeting shortcut whenever an image is attached
+    if (await tryIdentityShortcut(messages, res, hasImage)) return;
+
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     if (!lastUser) return res.status(400).json({ error: 'No user message' });
-    const enrichedPrompt = await enrichWithWebSearch(lastUser.content || '');
+
+    let imageData = null;
+    let extractedText = '';
+    if (hasImage) {
+      imageData = { base64: image.base64, mimeType: image.mimeType };
+      // OCR fallback for text-only models
+      try {
+        const buf = Buffer.from(image.base64, 'base64');
+        const ocr = await ocrImage(buf, image.filename || 'image.jpg', image.mimeType);
+        if (ocr) extractedText = ocr;
+      } catch (e) { log(`Guest OCR failed: ${e.message}`, 'warn'); }
+    }
+
+    let enrichedPrompt = await enrichWithWebSearch(lastUser.content || '');
+    if (!enrichedPrompt || !enrichedPrompt.trim()) {
+      enrichedPrompt = hasImage ? 'Please look at the attached image.' : (lastUser.content || '');
+    }
+    // Guarantee the AI knows an image is attached, even if vision fails and OCR is empty
+    if (hasImage) {
+      const filename = image.filename ? ` (filename: ${image.filename})` : '';
+      let note = `\n\n[The user has attached an image${filename}.`;
+      if (extractedText) note += ` Text extracted from it via OCR:\n---\n${extractedText}\n---`;
+      else note += ' No text could be extracted via OCR (the image may not contain text).';
+      note += ' ALWAYS acknowledge the image and provide an agriculture/livestock-related analysis. If you can see it, describe what you observe. If you cannot see it visually, use any OCR text above and clearly state you are working from extracted text.]';
+      enrichedPrompt += note;
+    }
+
     const withoutLast = messages.slice(0, messages.lastIndexOf(lastUser));
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
-    const imageData = image ? { base64: image.base64, mimeType: image.mimeType } : null;
     await streamAI(chatMessages, res, imageData);
   } catch (err) {
     log(`Guest chat error: ${err.message}`, 'error');
@@ -1323,7 +1340,8 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     const { data: conv } = await supabase.from('conversations').select('id, title').eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    if (message && files.length === 0 && (isCreatorQuestion(message) || isGreeting(message))) {
+    // Greeting/creator shortcut only when NO files attached
+    if (message && files.length === 0 && (isCreatorQuestion(message) || isGreetingOnly(message))) {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
       let reply;
       if (isCreatorQuestion(message)) reply = `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
@@ -1369,12 +1387,30 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     }
 
     const { data: history } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
-    const aiMessages = history.map(m => ({ role: m.role, content: m.content }));
+    // Preserve files metadata in the history so past attachments are remembered
+    const aiMessages = history.map(m => ({ id: m.id, role: m.role, content: m.content, files: m.files }));
 
     let enrichedPrompt = await enrichWithWebSearch(message || 'agriculture update');
-    if (extractedText) enrichedPrompt += `\n\n[Content from uploaded file]\n${extractedText}`;
+    if (!enrichedPrompt || !enrichedPrompt.trim()) enrichedPrompt = message || '';
+
+    // Attachment note: filename + OCR/PDF extracted text
+    if (filesMeta.length > 0) {
+      const imageFiles = filesMeta.filter(f => f.mime_type?.startsWith('image/'));
+      const otherFiles = filesMeta.filter(f => !f.mime_type?.startsWith('image/'));
+      const parts = [];
+      if (imageFiles.length) parts.push(`${imageFiles.length} image${imageFiles.length > 1 ? 's' : ''} (${imageFiles.map(f => f.filename).join(', ')})`);
+      if (otherFiles.length) parts.push(`${otherFiles.length} document${otherFiles.length > 1 ? 's' : ''} (${otherFiles.map(f => f.filename).join(', ')})`);
+      let note = `\n\n[User attached: ${parts.join(' and ')}.`;
+      if (extractedText) note += ` Content extracted from the attachment(s):\n---\n${extractedText}\n---`;
+      else note += ' No text could be extracted from the attachment(s).';
+      note += ' ALWAYS acknowledge the attachment(s) and provide agriculture/livestock-relevant analysis. If you cannot see the image visually, use any extracted text and clearly note that.]';
+      enrichedPrompt += note;
+    }
+
+    // Exclude the just-inserted last user message from history so we don't duplicate it
+    const lastUserId = history.length ? history[history.length - 1].id : null;
     const withoutLast = aiMessages.slice(0, -1);
-    const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt }]);
+    const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt, id: 'current' }], SYSTEM_PROMPT, 'current');
 
     await streamAI(chatMessages, res, imageData, async (full) => {
       const { error: aiMsgErr } = await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full, versions: [full], current_version_index: 0 });
