@@ -1798,4 +1798,101 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
     const { data: all } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
     if (messageIndex >= all.length || all[messageIndex].role !== 'assistant') return res.status(400).json({ error: 'Invalid index' });
     const idsToDelete = all.slice(messageIndex).map(m => m.id);
-    if (idsToDelete.length) await supabase.from('messages').delete().in('id', idsToDelete
+    if (idsToDelete.length) await supabase.from('messages').delete().in('id', idsToDelete);
+    const { data: remaining } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
+    if (!remaining.length || remaining[remaining.length - 1].role !== 'user') return res.status(400).json({ error: 'No user message' });
+    const chatMessages = buildChatMessages(remaining);
+    await streamAI(chatMessages, res, null, async (full) => {
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full });
+      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content, truncate } = req.body;
+    const { data: msg } = await supabase.from('messages').select('*, conversation_id, conversations(user_id)').eq('id', id).single();
+    if (!msg || msg.conversations.user_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
+    if (msg.role !== 'user') return res.status(400).json({ error: 'Only user messages can be edited' });
+    await supabase.from('messages').update({ content }).eq('id', id);
+    if (truncate) {
+      const { data: later } = await supabase.from('messages').select('id').eq('conversation_id', msg.conversation_id).gt('created_at', msg.created_at);
+      if (later.length) await supabase.from('messages').delete().in('id', later.map(m => m.id));
+      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', msg.conversation_id);
+    }
+    res.json({ message: 'Updated' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ==================================================================
+// SHARE
+// ==================================================================
+app.post('/api/chat/share/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: conv } = await supabase.from('conversations').select('id').eq('id', id).eq('user_id', req.user.id).single();
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+    const token = crypto.randomBytes(16).toString('hex');
+    const { error } = await supabase.from('shared_links').insert({ conversation_id: id, token }).select().single();
+    if (error) throw error;
+    res.json({ url: `${process.env.FRONTEND_URL}/share/${token}` });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/share/guest', async (req, res) => {
+  try {
+    const { messages } = req.body;
+    if (!messages?.length) return res.status(400).json({ error: 'No messages to share' });
+    const token = crypto.randomBytes(16).toString('hex');
+    const { error } = await supabase.from('guest_shares').insert({ token, messages }).select().single();
+    if (error) throw error;
+    res.json({ url: `${process.env.FRONTEND_URL}/share/${token}` });
+  } catch (err) { res.status(500).json({ error: 'Failed to generate share link.' }); }
+});
+
+app.get('/api/share/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    let { data } = await supabase.from('shared_links').select('conversation_id').eq('token', token).single();
+    if (data?.conversation_id) {
+      const { data: msgs } = await supabase.from('messages').select('*').eq('conversation_id', data.conversation_id).order('created_at', { ascending: true });
+      return res.json({ messages: msgs || [] });
+    }
+    const { data: guestData, error: ge } = await supabase.from('guest_shares').select('messages').eq('token', token).single();
+    if (ge || !guestData) return res.status(404).json({ error: 'Share not found' });
+    res.json({ messages: guestData.messages });
+  } catch (err) { res.status(500).json({ error: 'Error retrieving shared messages' }); }
+});
+
+// ==================================================================
+// SERVE FRONTEND
+// ==================================================================
+const frontendPath = path.join(__dirname, '../frontend');
+
+app.get('/share/*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.sendFile(path.join(frontendPath, 'share.html'));
+});
+app.use(express.static(frontendPath, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html') || filePath.endsWith('.css') || filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
+app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
+
+app.listen(PORT, () => {
+  log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
+  log(`Text: Groq→FHRouter→OpenRouter | Vision: OpenRouter (${OPENROUTER_VISION_MODELS.length} models)`, 'info');
+  log(`Image gen: ${IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id).join(' → ') || 'none'} (in-chat, topic-guarded)`, 'info');
+  log(`Pollinations: ${POLLINATIONS_API_KEY ? 'clean (no watermark)' : 'watermarked'}`, 'info');
+  log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'} | Tavily: ${TAVILY_API_KEY ? 'enabled' : 'disabled'}`, 'info');
+  log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
+});
