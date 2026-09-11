@@ -89,29 +89,55 @@ async function isEmailTakenByOther(email, currentUserId) {
   } catch (e) { log(`isEmailTakenByOther error: ${e.message}`, 'warn'); return false; }
 }
 
+// ==================================================================
+// AI PROVIDERS
+// ==================================================================
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'groq/compound'];
-const GROQ_VISION_MODELS = [];
+const GROQ_VISION_MODELS = []; // No vision models on this Groq account
 
 const FHROUTER_API_KEY = process.env.FHROUTER_API_KEY;
 const FHROUTER_URL = 'https://fhrouter.com/v1/chat/completions';
 const FHROUTER_TEXT_MODELS = ['deepseek-v4-flash', 'glm-5.3-flash', 'grok-4.6'];
-const FHROUTER_VISION_MODELS = [];
+const FHROUTER_VISION_MODELS = []; // No vision models on free tier
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TEXT_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3-235b-a22b:free', 'mistralai/mistral-7b-instruct:free'];
+
+// --- FIXED: current live free vision models on OpenRouter (Sept 2026) ---
+// These change frequently — use /api/debug/openrouter-models to verify the live list.
 const OPENROUTER_VISION_MODELS = [
-  'google/gemini-2.0-flash-exp:free',
-  'meta-llama/llama-3.2-11b-vision-instruct:free',
-  'qwen/qwen-2-vl-7b-instruct:free',
-  'google/gemma-3-27b-it:free',
+  'nvidia/nemotron-nano-12b-v2-vl:free',        // confirmed free VL model, 128K context
+  'minimax/minimax-m3:free',                    // confirmed free, 1M context, text+image+video input
+  'qwen/qwen-2.5-vl-7b-instruct:free',          // reliable free VL model
+  'google/gemma-3-12b-it:free',                 // smaller Gemma fallback
+  'google/gemma-3-27b-it:free',                 // larger Gemma fallback
 ];
 
 const openRouterCooldown = {};
 const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 1000; };
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
+
+// ==================================================================
+// IMAGE GENERATION PROVIDERS (free, no-card)
+// Pollinations.ai  → no key needed
+// Cloudflare AI    → CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
+// Together AI      → TOGETHER_API_KEY
+// Hugging Face     → HUGGINGFACE_API_KEY
+// ==================================================================
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
+const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY;
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
+
+const IMAGE_GEN_PROVIDERS = [
+  { id: 'pollinations', name: 'Pollinations.ai', requiresKey: false, enabled: true },
+  { id: 'cloudflare', name: 'Cloudflare Workers AI', requiresKey: true, enabled: !!(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) },
+  { id: 'together', name: 'Together AI', requiresKey: true, enabled: !!TOGETHER_API_KEY },
+  { id: 'huggingface', name: 'Hugging Face Inference', requiresKey: true, enabled: !!HUGGINGFACE_API_KEY },
+];
 
 const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY;
 async function ocrImage(buffer, filename, mimeType) {
@@ -130,6 +156,9 @@ async function ocrImage(buffer, filename, mimeType) {
   } catch (err) { log(`OCR.space error: ${err.message}`, 'warn'); return null; }
 }
 
+// ==================================================================
+// DIAGNOSTIC ENDPOINTS
+// ==================================================================
 app.get('/api/debug/groq-models', async (req, res) => {
   if (!groq) return res.json({ error: 'GROQ_API_KEY not set' });
   try {
@@ -139,6 +168,55 @@ app.get('/api/debug/groq-models', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/debug/openrouter-models', async (req, res) => {
+  if (!OPENROUTER_API_KEY) return res.json({ error: 'OPENROUTER_API_KEY not set' });
+  try {
+    const r = await axios.get('https://openrouter.ai/api/v1/models', {
+      headers: { 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
+      timeout: 15000,
+    });
+    const all = r.data?.data || [];
+    const freeWithVision = all
+      .filter(m => {
+        const id = m.id || '';
+        if (!id.endsWith(':free')) return false;
+        const modalities = m.architecture?.input_modalities || [];
+        return modalities.includes('image');
+      })
+      .map(m => m.id)
+      .sort();
+
+    res.json({
+      total_free_vision_models: freeWithVision.length,
+      free_vision_models: freeWithVision,
+      your_current_list: OPENROUTER_VISION_MODELS,
+      your_list_status: OPENROUTER_VISION_MODELS.map(id => ({
+        id,
+        found_in_catalog: all.some(m => m.id === id),
+      })),
+      hint: 'Copy free_vision_models[] into OPENROUTER_VISION_MODELS in server.js and redeploy.',
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/debug/image-providers', async (req, res) => {
+  res.json({
+    providers: IMAGE_GEN_PROVIDERS.map(p => ({
+      id: p.id,
+      name: p.name,
+      enabled: p.enabled,
+      env_vars_needed: p.id === 'cloudflare' ? ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN']
+        : p.id === 'together' ? ['TOGETHER_API_KEY']
+        : p.id === 'huggingface' ? ['HUGGINGFACE_API_KEY']
+        : [],
+    })),
+    active_providers: IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id),
+  });
+});
+
+// ==================================================================
+// AI STREAMING (text + vision)
+// ==================================================================
 async function getAIStream(chatMessages, imageData = null, isVisionRetry = false) {
   const errors = [];
   const usingVision = !!imageData && !isVisionRetry;
@@ -203,7 +281,7 @@ async function getAIStream(chatMessages, imageData = null, isVisionRetry = false
           return { stream: response.data, provider: 'openrouter', model };
         } catch (err) {
           const status = err.response?.status;
-          errors.push(`openrouter:${model}`);
+          errors.push(`openrouter:${model}:${status || err.message}`);
           if (status === 429) markCooldown(cdKey, 120);
           if (status === 404 || status === 400) markCooldown(cdKey, 300);
         }
@@ -391,26 +469,24 @@ Help with:
 - **Post-harvest**: storage, processing, packaging
 - **Agribusiness**: markets, pricing, cooperatives, value chains, agri-tech
 - **Farm machinery, tools, structures**
-- **Agriculture-adjacent science**: plant/animal biology (photosynthesis, glucose, chlorophyll, digestion), chemistry (NPK, pH, soil chemistry), physics (water cycles), weather, climate
+- **Agriculture-adjacent science**: plant/animal biology, chemistry, physics, weather, climate
 - **Nutrition of farm produce**, food security
 - **Agricultural education, research, schooling questions**
 - **Where to find**: seeds, fertilisers, veterinary services, extension services
-- **Natural conversation** in English, Kinyarwanda, French, Swahili — greetings, small talk, general knowledge that keeps the conversation flowing. Reply in the user's language when possible.
+- **Natural conversation** in English, Kinyarwanda, French, Swahili — reply in the user's language when possible.
 
 ## REFUSE
-Politely decline questions with no meaningful connection to agriculture, livestock, rural life, or their sciences (music, sports, politics, unrelated tech, unrelated history, fashion, personal advice). Short reply:
+Politely decline questions with no meaningful connection to agriculture, livestock, rural life, or their sciences. Short reply:
 "I'm AgriDeepAI, specialised in agriculture and livestock, so I can't help with that. If you have a question about crops, livestock, soil, farming, or agribusiness, I'd be glad to help."
-Do NOT provide the off-topic answer.
 
 ## IMAGES & DOCUMENTS
-- Users may attach images, PDFs, or documents. When they do, you will receive a note in the message describing the attachment — including any text that was extracted from it.
-- ALWAYS acknowledge the attached file(s) directly. Never claim an image was not attached when the note says one was.
+- Users may attach images, PDFs, or documents. The system gives you a note describing the attachment — including any text extracted from it.
+- ALWAYS acknowledge attached files directly. Never claim an image was not attached when the note says one was.
 - If the attachment IS related to agriculture/livestock, analyse it fully.
 - If clearly unrelated, reply: "This doesn't appear to be related to agriculture or livestock. If you have a farming question, feel free to share it."
-- If you have vision capabilities, describe what you see. If you only received extracted text (no visual access), be transparent: say you're analysing the extracted text.
 
 ## STYLE
-Warm, professional, concise. Markdown when it helps. Ask for symptoms/age/weather for disease questions. Include short disclaimers for chemicals and animal health.`;
+Warm, professional, concise. Markdown when it helps. Include short disclaimers for chemicals and animal health.`;
 
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -440,14 +516,12 @@ const getClientId = (req) => {
 const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
 const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 
-// strict: only when the WHOLE message is a greeting
 function isGreetingOnly(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,;:]/g, '').replace(/\s+/g, ' ');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
     'muraho','mwaramutse','mwiriwe','amakuru','bite','salam','bonjour','salut','jambo','habari','hi bot','hello bot'];
   return greetings.includes(t);
 }
-// loose (kept for title generation of "Hi, what is your name?")
 function isGreeting(text) {
   const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
@@ -474,7 +548,6 @@ async function streamSimpleText(res, text) {
   res.end();
 }
 
-// hasAttachment: when true, ALWAYS bypass shortcut so the AI can see the image
 async function tryIdentityShortcut(messages, res, hasAttachment = false) {
   if (hasAttachment) return false;
   const last = [...messages].reverse().find(m => m.role === 'user');
@@ -483,7 +556,6 @@ async function tryIdentityShortcut(messages, res, hasAttachment = false) {
     await streamSimpleText(res, `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`);
     return true;
   }
-  // Only exact-match greeting triggers the shortcut
   if (isGreetingOnly(last.content)) {
     const t = (last.content || '').toLowerCase();
     if (t.includes('muraho') || t.includes('mwaramutse') || t.includes('mwiriwe') || t.includes('amakuru') || t.includes('bite'))
@@ -502,7 +574,6 @@ async function tryIdentityShortcut(messages, res, hasAttachment = false) {
 async function generateChatTitle(userMessage) {
   const msg = (userMessage || '').trim();
   if (!msg) return 'New Chat';
-
   if (isGreetingOnly(msg)) return 'Greeting';
   if (isCreatorQuestion(msg)) return 'About AgriDeepAI';
 
@@ -513,7 +584,7 @@ Read the USER MESSAGE below. Reply with ONLY the conversation title — never re
 Strict rules:
 - 2 to 6 words. Title Case or sentence case.
 - Focus on the TOPIC or INTENT (what they are asking about), not a quote of their sentence.
-- No quotation marks, no trailing period, no prefix like "Title:" or "Chat:".
+- No quotation marks, no trailing period, no prefix like "Title:".
 - If the message is a greeting or small talk, reply exactly: Greeting
 - If the message asks who you are / who made you, reply exactly: About AgriDeepAI
 - If the message asks for the meaning/definition of something, use the pattern: Meaning of X
@@ -561,7 +632,6 @@ Title:`;
         const raw = completion.choices?.[0]?.message?.content;
         const title = cleanTitle(raw);
         if (title) { log(`Title (groq ${model}): "${title}"`, 'debug'); return title; }
-        log(`Title gen (groq ${model}) produced empty/unusable response: ${JSON.stringify(raw).slice(0, 120)}`, 'warn');
       } catch (err) { log(`Title gen (groq ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn'); }
     }
   }
@@ -576,7 +646,7 @@ Title:`;
         });
         const raw = r.data?.choices?.[0]?.message?.content;
         const title = cleanTitle(raw);
-        if (title) { log(`Title (fhrouter ${model}): "${title}"`, 'debug'); return title; }
+        if (title) return title;
       } catch (err) { log(`Title gen (fhrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn'); }
     }
   }
@@ -596,7 +666,7 @@ Title:`;
         });
         const raw = r.data?.choices?.[0]?.message?.content;
         const title = cleanTitle(raw);
-        if (title) { log(`Title (openrouter ${model}): "${title}"`, 'debug'); return title; }
+        if (title) return title;
       } catch (err) { log(`Title gen (openrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn'); }
     }
   }
@@ -604,6 +674,9 @@ Title:`;
   return firstWords + (msg.split(/\s+/).length > 5 ? '…' : '');
 }
 
+// ==================================================================
+// EMAIL
+// ==================================================================
 async function sendEmail(to, subject, htmlContent) {
   const sendSmtpEmail = new brevo.SendSmtpEmail();
   sendSmtpEmail.subject = subject;
@@ -720,7 +793,9 @@ async function trackSession(userId, email, req) {
   } catch (err) { log(`trackSession error: ${err.message}`, 'warn'); }
 }
 
-// ============ AUTH ROUTES ============
+// ==================================================================
+// AUTH ROUTES
+// ==================================================================
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName } = req.body;
@@ -762,7 +837,6 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
 app.post('/api/auth/resend-verification', async (req, res) => {
   try {
     const { pendingToken } = req.body;
-    log(`[RESEND-SIGNUP] Request received. Token length: ${pendingToken ? pendingToken.length : 0}`, 'info');
     if (!pendingToken) return res.status(400).json({ error: 'Your session expired. Please sign up again.' });
     const p = verifyPending(pendingToken);
     if (!p) return res.status(400).json({ error: 'Your session expired. Please sign up again.' });
@@ -771,7 +845,6 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const newToken = signPending({ ...stripJwtClaims(p), code });
     await sendVerificationEmailWithRetry(p.email, code, 'signup', 'Resend: complete your registration.');
-    log(`[RESEND-SIGNUP] ✅ Success for ${p.email}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
   } catch (err) {
     log(`[RESEND-SIGNUP] ❌ Error: ${err.message}`, 'error');
@@ -797,7 +870,6 @@ app.post('/api/auth/login', async (req, res) => {
       userLastSignInAt: data.user.last_sign_in_at || null,
       two_factor_enabled: !!profile?.two_factor_enabled,
     });
-    log(`[LOGIN] Issued pending token (${pendingToken.length} chars) for ${email}`, 'debug');
     await sendVerificationEmailWithRetry(email, code, 'login', 'Use the code below to complete your sign-in.');
     res.json({ requiresCode: true, email, pendingToken, message: 'Verification code sent to your email.' });
   } catch (err) {
@@ -809,16 +881,13 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/auth/resend-login-code', async (req, res) => {
   try {
     const { pendingToken } = req.body;
-    log(`[RESEND-LOGIN] Request received. Token length: ${pendingToken ? pendingToken.length : 0}`, 'info');
     if (!pendingToken) return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
     const p = verifyPending(pendingToken);
-    if (!p) return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
-    if (p.type !== 'login') return res.status(400).json({ error: 'Invalid session. Please sign in again.' });
+    if (!p || p.type !== 'login') return res.status(400).json({ error: 'Your session expired. Please sign in again.' });
     if (!p.email) return res.status(400).json({ error: 'Session data missing email. Please sign in again.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const newToken = signPending({ ...stripJwtClaims(p), code });
     await sendVerificationEmailWithRetry(p.email, code, 'login', 'Resend: use the code below to complete your sign-in.');
-    log(`[RESEND-LOGIN] ✅ Success for ${p.email}`, 'info');
     res.json({ message: 'New code sent.', pendingToken: newToken });
   } catch (err) {
     log(`[RESEND-LOGIN] ❌ Error: ${err.message}`, 'error');
@@ -859,26 +928,17 @@ app.post('/api/auth/2fa/validate-login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to validate 2FA' }); }
 });
 
-// ============ FORGOT PASSWORD ============
 app.post('/api/auth/forgot-password-request', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email || typeof email !== 'string') return res.status(400).json({ error: 'Please enter your email address' });
     const target = email.trim().toLowerCase();
     if (!isValidEmail(target)) return res.status(400).json({ error: 'Please enter a valid email address' });
-
     const user = await findUserByEmail(target);
-    if (!user) {
-      log(`[FORGOT-PW] Email not registered: ${target}`, 'warn');
-      return res.status(404).json({ error: 'This email is not registered. Please sign up first.' });
-    }
-
+    if (!user) return res.status(404).json({ error: 'This email is not registered. Please sign up first.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const pendingToken = signPending({
-      type: 'forgot-password', email: user.email, userId: user.id, code,
-    });
+    const pendingToken = signPending({ type: 'forgot-password', email: user.email, userId: user.id, code });
     await sendVerificationEmailWithRetry(user.email, code, 'forgot-password', 'Use the code below to reset your password.');
-    log(`[FORGOT-PW] Code sent to ${user.email}`, 'info');
     res.json({ message: `Verification code sent to ${user.email}`, pendingToken, email: user.email });
   } catch (err) {
     log(`[FORGOT-PW] ❌ ${err.message}`, 'error');
@@ -890,13 +950,10 @@ app.post('/api/auth/resend-forgot-password-code', async (req, res) => {
   try {
     const { pendingToken } = req.body;
     const p = verifyPending(pendingToken);
-    if (!p || p.type !== 'forgot-password') {
-      return res.status(400).json({ error: 'Your session expired. Please start again.' });
-    }
+    if (!p || p.type !== 'forgot-password') return res.status(400).json({ error: 'Your session expired. Please start again.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const newToken = signPending({ ...stripJwtClaims(p), code });
     await sendVerificationEmailWithRetry(p.email, code, 'forgot-password', 'Resend: use the code below to reset your password.');
-    log(`[FORGOT-PW-RESEND] Code resent to ${p.email}`, 'info');
     res.json({ message: `New code sent to ${p.email}`, pendingToken: newToken, email: p.email });
   } catch (err) {
     log(`[FORGOT-PW-RESEND] ❌ ${err.message}`, 'error');
@@ -908,15 +965,9 @@ app.post('/api/auth/forgot-password-verify-code', async (req, res) => {
   try {
     const { pendingToken, code } = req.body;
     const p = verifyPending(pendingToken);
-    if (!p || p.type !== 'forgot-password') {
-      return res.status(400).json({ error: 'Session expired. Please start again.' });
-    }
-    if (p.code !== code) {
-      return res.status(400).json({ error: 'Invalid or expired code' });
-    }
-    const grantedToken = signPending({
-      type: 'forgot-password-granted', email: p.email, userId: p.userId,
-    }, 600);
+    if (!p || p.type !== 'forgot-password') return res.status(400).json({ error: 'Session expired. Please start again.' });
+    if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code' });
+    const grantedToken = signPending({ type: 'forgot-password-granted', email: p.email, userId: p.userId }, 600);
     res.json({ message: 'Code verified.', grantedToken });
   } catch (err) {
     log(`[FORGOT-PW-VERIFY] ❌ ${err.message}`, 'error');
@@ -928,24 +979,16 @@ app.post('/api/auth/reset-password', async (req, res) => {
   try {
     const { newPassword, grantedToken } = req.body;
     const g = verifyPending(grantedToken);
-    if (!g || g.type !== 'forgot-password-granted' || !g.userId || !g.email) {
+    if (!g || g.type !== 'forgot-password-granted' || !g.userId || !g.email)
       return res.status(400).json({ error: 'Please verify your code first.' });
-    }
-    if (!newPassword || newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
+    if (!newPassword || newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword))
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
-    }
     try {
       const { error: signInErr } = await supabase.auth.signInWithPassword({ email: g.email, password: newPassword });
-      if (!signInErr) {
-        log(`[FORGOT-PW-RESET] Rejected: new password equals current password for ${g.email}`, 'warn');
-        return res.status(400).json({ error: 'New password must be different from your current password' });
-      }
-    } catch (checkErr) {
-      log(`[FORGOT-PW-RESET] Password-similarity check failed with error: ${checkErr.message}`, 'warn');
-    }
+      if (!signInErr) return res.status(400).json({ error: 'New password must be different from your current password' });
+    } catch (checkErr) { log(`[FORGOT-PW-RESET] check error: ${checkErr.message}`, 'warn'); }
     const { error } = await supabase.auth.admin.updateUserById(g.userId, { password: newPassword });
     if (error) throw error;
-    log(`[FORGOT-PW-RESET] ✅ Password reset for ${g.email}`, 'info');
     res.json({ message: 'Password reset successfully. You can now sign in.' });
   } catch (err) {
     log(`[FORGOT-PW-RESET] ❌ ${err.message}`, 'error');
@@ -958,14 +1001,10 @@ app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
     const { action, newEmail } = req.body;
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const currentEmail = (req.user.email || '').toLowerCase();
-
     const tokenPayload = { type: 'action', action, userId: req.user.id, email: req.user.email, code };
     let targetEmail = req.user.email;
-
     if (action === 'change-email') {
-      if (!newEmail || typeof newEmail !== 'string') {
-        return res.status(400).json({ error: 'Please enter the new email address' });
-      }
+      if (!newEmail || typeof newEmail !== 'string') return res.status(400).json({ error: 'Please enter the new email address' });
       const trimmed = newEmail.trim().toLowerCase();
       if (!isValidEmail(trimmed)) return res.status(400).json({ error: 'Please enter a valid email address' });
       if (trimmed === currentEmail) return res.status(400).json({ error: 'New email must be different from your current email' });
@@ -974,7 +1013,6 @@ app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
       targetEmail = trimmed;
       tokenPayload.newEmail = trimmed;
     }
-
     const pendingToken = signPending(tokenPayload);
     await sendVerificationEmailWithRetry(targetEmail, code, action);
     res.json({ message: `Verification code sent to ${targetEmail}.`, pendingToken, targetEmail });
@@ -988,9 +1026,7 @@ app.post('/api/auth/resend-action-code', authenticate, async (req, res) => {
   try {
     const { pendingToken } = req.body;
     const p = verifyPending(pendingToken);
-    if (!p || p.type !== 'action' || p.userId !== req.user.id) {
-      return res.status(400).json({ error: 'Your session expired. Please try again.' });
-    }
+    if (!p || p.type !== 'action' || p.userId !== req.user.id) return res.status(400).json({ error: 'Your session expired. Please try again.' });
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const newToken = signPending({ ...stripJwtClaims(p), code });
     const targetEmail = (p.action === 'change-email' && p.newEmail) ? p.newEmail : req.user.email;
@@ -1035,8 +1071,7 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
     if (si) return res.status(401).json({ error: 'Current password incorrect' });
     if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword))
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
-    if (newPassword === currentPassword)
-      return res.status(400).json({ error: 'New password must be different from current password' });
+    if (newPassword === currentPassword) return res.status(400).json({ error: 'New password must be different from current password' });
     await supabase.auth.updateUser({ password: newPassword });
     res.json({ message: 'Password changed successfully' });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1050,16 +1085,11 @@ app.post('/api/auth/change-email', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Please verify your code first.' });
     const finalNewEmail = String(g.newEmail || newEmail || '').trim().toLowerCase();
     if (!isValidEmail(finalNewEmail)) return res.status(400).json({ error: 'Invalid new email address' });
-    if (finalNewEmail === (req.user.email || '').toLowerCase())
-      return res.status(400).json({ error: 'New email must be different from your current email' });
+    if (finalNewEmail === (req.user.email || '').toLowerCase()) return res.status(400).json({ error: 'New email must be different from your current email' });
     const taken = await isEmailTakenByOther(finalNewEmail, req.user.id);
     if (taken) return res.status(400).json({ error: 'This email is already registered to another account' });
-
-    const { error: uErr } = await supabase.auth.admin.updateUserById(req.user.id, {
-      email: finalNewEmail, email_confirm: true,
-    });
+    const { error: uErr } = await supabase.auth.admin.updateUserById(req.user.id, { email: finalNewEmail, email_confirm: true });
     if (uErr) throw uErr;
-    log(`[CHANGE-EMAIL] ✅ ${req.user.email} → ${finalNewEmail}`, 'info');
     res.json({ message: 'Email changed successfully.', newEmail: finalNewEmail });
   } catch (err) {
     log(`[CHANGE-EMAIL] ❌ Error: ${err.message}`, 'error');
@@ -1139,9 +1169,7 @@ app.get('/api/auth/session-check', authenticate, async (req, res) => {
       return res.json({ valid: true });
     }
     return res.json({ valid: false });
-  } catch (err) {
-    return res.json({ valid: true, error: err.message });
-  }
+  } catch (err) { return res.json({ valid: true, error: err.message }); }
 });
 
 app.delete('/api/auth/sessions/all', authenticate, async (req, res) => {
@@ -1151,14 +1179,11 @@ app.delete('/api/auth/sessions/all', authenticate, async (req, res) => {
     const clientId = getClientId(req);
     const { data: sessions } = await supabase.from('sessions').select('*').eq('user_id', req.user.id).order('last_active', { ascending: false });
     const list = sessions || [];
-    const mine = clientId
-      ? list.filter(s => s.client_id === clientId)
-      : list.filter(s => s.ip === ip && s.user_agent === ua);
+    const mine = clientId ? list.filter(s => s.client_id === clientId) : list.filter(s => s.ip === ip && s.user_agent === ua);
     const keepId = mine[0]?.id;
     const idsToDelete = list.filter(s => s.id !== keepId).map(s => s.id);
     if (idsToDelete.length > 0) await supabase.from('sessions').delete().in('id', idsToDelete);
-    try { await supabase.auth.admin.signOut(req.token, 'others'); }
-    catch (e) { log(`Supabase signOut(others) failed: ${e.message}`, 'warn'); }
+    try { await supabase.auth.admin.signOut(req.token, 'others'); } catch (e) { log(`Supabase signOut(others) failed: ${e.message}`, 'warn'); }
     res.json({ message: 'All other sessions logged out', removed: idsToDelete.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1170,12 +1195,8 @@ app.delete('/api/auth/sessions/current', authenticate, async (req, res) => {
     const clientId = getClientId(req);
     const { data: sessions } = await supabase.from('sessions').select('*').eq('user_id', req.user.id);
     const list = sessions || [];
-    const mine = clientId
-      ? list.filter(s => s.client_id === clientId)
-      : list.filter(s => s.ip === ip && s.user_agent === ua);
-    if (mine[0]?.id) {
-      await supabase.from('sessions').delete().eq('id', mine[0].id).eq('user_id', req.user.id);
-    }
+    const mine = clientId ? list.filter(s => s.client_id === clientId) : list.filter(s => s.ip === ip && s.user_agent === ua);
+    if (mine[0]?.id) await supabase.from('sessions').delete().eq('id', mine[0].id).eq('user_id', req.user.id);
     res.json({ message: 'Current session removed' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1199,14 +1220,130 @@ app.get('/api/config', (req, res) => res.json({
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
 }));
 
-// ============ CHAT ============
-// Preserve attachment context in every historical message so the AI remembers images/pdfs
+// ==================================================================
+// IMAGE GENERATION (Pollinations → Cloudflare → Together → HF)
+// ==================================================================
+async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
+  const ext = mimeType.includes('png') ? 'png' : 'jpg';
+  const fileName = `gen-${Date.now()}-${Math.random().toString(36).substring(2, 8)}.${ext}`;
+  const filePath = `generated/${fileName}`;
+  const { error } = await supabase.storage.from(storageBucket).upload(filePath, buffer, { contentType: mimeType, upsert: false });
+  if (error) throw error;
+  const { data } = supabase.storage.from(storageBucket).getPublicUrl(filePath);
+  return data.publicUrl;
+}
+
+async function generateImageWithPollinations(prompt) {
+  const encoded = encodeURIComponent(prompt);
+  const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=flux&nologo=true&private=true&enhance=true`;
+  const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000, maxRedirects: 5 });
+  const buffer = Buffer.from(res.data);
+  if (buffer.length < 1000) throw new Error('Pollinations returned too small a response');
+  const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
+  return { url: publicUrl, provider: 'pollinations' };
+}
+
+async function generateImageWithCloudflare(prompt) {
+  if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) throw new Error('Cloudflare not configured');
+  const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
+  const res = await axios.post(url, { prompt, num_steps: 4 }, {
+    headers: { 'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+    responseType: 'arraybuffer', timeout: 60000,
+  });
+  const buffer = Buffer.from(res.data);
+  if (buffer.length < 1000) throw new Error('Cloudflare returned too small a response');
+  const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
+  return { url: publicUrl, provider: 'cloudflare' };
+}
+
+async function generateImageWithTogether(prompt) {
+  if (!TOGETHER_API_KEY) throw new Error('Together AI not configured');
+  const res = await axios.post('https://api.together.ai/v1/images/generations', {
+    model: 'black-forest-labs/FLUX.1-schnell-Free',
+    prompt,
+    width: 1024,
+    height: 1024,
+    steps: 4,
+    n: 1,
+    response_format: 'b64_json',
+  }, {
+    headers: { 'Authorization': `Bearer ${TOGETHER_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: 60000,
+  });
+  const b64 = res.data?.data?.[0]?.b64_json;
+  if (!b64) throw new Error('No image in Together response');
+  const buffer = Buffer.from(b64, 'base64');
+  const publicUrl = await uploadGeneratedImage(buffer, 'image/png');
+  return { url: publicUrl, provider: 'together' };
+}
+
+async function generateImageWithHuggingFace(prompt) {
+  if (!HUGGINGFACE_API_KEY) throw new Error('Hugging Face not configured');
+  const res = await axios.post(
+    'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell',
+    { inputs: prompt },
+    {
+      headers: { 'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`, 'Content-Type': 'application/json' },
+      responseType: 'arraybuffer',
+      timeout: 60000,
+    }
+  );
+  const buffer = Buffer.from(res.data);
+  if (buffer.length < 1000) throw new Error('Hugging Face returned too small a response');
+  const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
+  return { url: publicUrl, provider: 'huggingface' };
+}
+
+async function generateImage(prompt) {
+  const errors = [];
+  const providers = [
+    { id: 'pollinations', fn: () => generateImageWithPollinations(prompt) },
+    { id: 'cloudflare', fn: () => generateImageWithCloudflare(prompt) },
+    { id: 'together', fn: () => generateImageWithTogether(prompt) },
+    { id: 'huggingface', fn: () => generateImageWithHuggingFace(prompt) },
+  ];
+  for (const p of providers) {
+    try {
+      const result = await p.fn();
+      log(`🎨 Image generated via ${result.provider}`, 'info');
+      return result;
+    } catch (e) {
+      log(`Image gen (${p.id}) failed: ${String(e.message).slice(0, 200)}`, 'warn');
+      errors.push(`${p.id}: ${e.message}`);
+    }
+  }
+  throw new Error(`All image providers failed: ${errors.join(' | ')}`);
+}
+
+// Public endpoint — works for both guest and authenticated users
+app.post('/api/chat/generate-image', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+      return res.status(400).json({ error: 'Please provide a description for the image' });
+    }
+    const cleanPrompt = prompt.trim().substring(0, 800);
+    const result = await generateImage(cleanPrompt);
+    res.json({
+      url: result.url,
+      provider: result.provider,
+      prompt: cleanPrompt,
+      generated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    log(`generate-image error: ${err.message}`, 'error');
+    res.status(500).json({ error: 'Image generation failed. Please try again.' });
+  }
+});
+
+// ==================================================================
+// CHAT
+// ==================================================================
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT, excludeId = null) {
   const history = messages
     .filter(m => (m.role === 'user' || m.role === 'assistant') && m.content && String(m.content).trim())
     .map(m => {
       let content = String(m.content || '');
-      // Don't prefix the current message — the endpoint adds its own enriched note
       if (m.files?.length && m.id !== excludeId) {
         const names = m.files.map(f => f.filename || 'file').join(', ');
         content = `[User attached: ${names}]\n${content}`;
@@ -1242,14 +1379,12 @@ app.post('/api/chat/title', async (req, res) => {
   }
 });
 
-// ============ GUEST CHAT ============
 app.post('/api/chat/guest', async (req, res) => {
   try {
     const { messages, image } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) return res.status(400).json({ error: 'Messages required' });
 
     const hasImage = !!(image && image.base64 && image.mimeType);
-    // Bypass greeting shortcut whenever an image is attached
     if (await tryIdentityShortcut(messages, res, hasImage)) return;
 
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
@@ -1259,7 +1394,6 @@ app.post('/api/chat/guest', async (req, res) => {
     let extractedText = '';
     if (hasImage) {
       imageData = { base64: image.base64, mimeType: image.mimeType };
-      // OCR fallback for text-only models
       try {
         const buf = Buffer.from(image.base64, 'base64');
         const ocr = await ocrImage(buf, image.filename || 'image.jpg', image.mimeType);
@@ -1271,13 +1405,12 @@ app.post('/api/chat/guest', async (req, res) => {
     if (!enrichedPrompt || !enrichedPrompt.trim()) {
       enrichedPrompt = hasImage ? 'Please look at the attached image.' : (lastUser.content || '');
     }
-    // Guarantee the AI knows an image is attached, even if vision fails and OCR is empty
     if (hasImage) {
       const filename = image.filename ? ` (filename: ${image.filename})` : '';
       let note = `\n\n[The user has attached an image${filename}.`;
       if (extractedText) note += ` Text extracted from it via OCR:\n---\n${extractedText}\n---`;
       else note += ' No text could be extracted via OCR (the image may not contain text).';
-      note += ' ALWAYS acknowledge the image and provide an agriculture/livestock-related analysis. If you can see it, describe what you observe. If you cannot see it visually, use any OCR text above and clearly state you are working from extracted text.]';
+      note += ' ALWAYS acknowledge the image and provide an agriculture/livestock-related analysis. Describe what you see if you have vision capabilities.]';
       enrichedPrompt += note;
     }
 
@@ -1340,18 +1473,12 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     const { data: conv } = await supabase.from('conversations').select('id, title').eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // Greeting/creator shortcut only when NO files attached
     if (message && files.length === 0 && (isCreatorQuestion(message) || isGreetingOnly(message))) {
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
       let reply;
       if (isCreatorQuestion(message)) reply = `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
-      else {
-        const t = message.toLowerCase();
-        if (t.includes('muraho') || t.includes('mwaramutse') || t.includes('mwiriwe') || t.includes('amakuru') || t.includes('bite')) reply = `Muraho! Ni **AgriDeepAI**. Ni gute nashobora kugufasha ku bijyanye n'ubuhinzi cyangwa ubworozi uyu munsi?`;
-        else reply = `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
-      }
-      const { error: aiErr } = await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply, versions: [reply], current_version_index: 0 });
-      if (aiErr) log(`Identity reply insert error: ${aiErr.message}`, 'error');
+      else reply = `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply, versions: [reply], current_version_index: 0 });
       if (conv.title === 'New Chat' || !conv.title) {
         const newTitle = await generateChatTitle(message);
         await supabase.from('conversations').update({ title: newTitle, updated_at: new Date().toISOString() }).eq('id', conversationId);
@@ -1387,13 +1514,11 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     }
 
     const { data: history } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
-    // Preserve files metadata in the history so past attachments are remembered
     const aiMessages = history.map(m => ({ id: m.id, role: m.role, content: m.content, files: m.files }));
 
     let enrichedPrompt = await enrichWithWebSearch(message || 'agriculture update');
     if (!enrichedPrompt || !enrichedPrompt.trim()) enrichedPrompt = message || '';
 
-    // Attachment note: filename + OCR/PDF extracted text
     if (filesMeta.length > 0) {
       const imageFiles = filesMeta.filter(f => f.mime_type?.startsWith('image/'));
       const otherFiles = filesMeta.filter(f => !f.mime_type?.startsWith('image/'));
@@ -1403,12 +1528,10 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       let note = `\n\n[User attached: ${parts.join(' and ')}.`;
       if (extractedText) note += ` Content extracted from the attachment(s):\n---\n${extractedText}\n---`;
       else note += ' No text could be extracted from the attachment(s).';
-      note += ' ALWAYS acknowledge the attachment(s) and provide agriculture/livestock-relevant analysis. If you cannot see the image visually, use any extracted text and clearly note that.]';
+      note += ' ALWAYS acknowledge the attachment(s) and provide agriculture/livestock-relevant analysis.]';
       enrichedPrompt += note;
     }
 
-    // Exclude the just-inserted last user message from history so we don't duplicate it
-    const lastUserId = history.length ? history[history.length - 1].id : null;
     const withoutLast = aiMessages.slice(0, -1);
     const chatMessages = buildChatMessages([...withoutLast, { role: 'user', content: enrichedPrompt, id: 'current' }], SYSTEM_PROMPT, 'current');
 
@@ -1459,7 +1582,9 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ============ SHARE ============
+// ==================================================================
+// SHARE
+// ==================================================================
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -1497,7 +1622,9 @@ app.get('/api/share/:token', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error retrieving shared messages' }); }
 });
 
-// ============ SERVE FRONTEND ============
+// ==================================================================
+// SERVE FRONTEND
+// ==================================================================
 const frontendPath = path.join(__dirname, '../frontend');
 
 app.get('/share/*', (req, res) => {
@@ -1519,7 +1646,8 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
-  log(`Primary: ${GROQ_API_KEY ? 'Groq' : 'none'} | Secondary: ${FHROUTER_API_KEY ? 'FHRouter' : 'none'} | Fallback: ${OPENROUTER_API_KEY ? 'OpenRouter' : 'none'}`, 'info');
+  log(`Text: Groq→FHRouter→OpenRouter | Vision: OpenRouter (${OPENROUTER_VISION_MODELS.length} models)`, 'info');
+  log(`Image gen: ${IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id).join(' → ')}`, 'info');
   log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'} | Tavily: ${TAVILY_API_KEY ? 'enabled' : 'disabled'}`, 'info');
   log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
 });
