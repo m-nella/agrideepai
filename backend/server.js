@@ -118,11 +118,7 @@ const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
 
 // ==================================================================
-// IMAGE GENERATION PROVIDERS
-// Together AI removed — no free tier (requires $5 min purchase)
-// Hugging Face removed — free hf-inference no longer serves image models
-// (FLUX removed from hf-inference in 2026; modern diffusion models only
-//  available via paid partner providers like fal-ai/Replicate/WaveSpeed)
+// IMAGE GENERATION
 // ==================================================================
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -132,6 +128,134 @@ const IMAGE_GEN_PROVIDERS = [
   { id: 'cloudflare', name: 'Cloudflare Workers AI (no watermark)', enabled: !!(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) },
   { id: 'pollinations', name: 'Pollinations.ai' + (POLLINATIONS_API_KEY ? ' (clean, no watermark)' : ' (watermarked — add POLLINATIONS_API_KEY)'), enabled: true },
 ];
+
+// ==================================================================
+// IMAGE REQUEST DETECTION + TOPIC GUARD
+// ==================================================================
+
+// Returns true if the message is asking for an image/photo/picture
+function isImageRequest(message) {
+  const t = (message || '').toLowerCase().trim();
+  if (!t) return false;
+  const patterns = [
+    // English
+    /\b(create|generate|make|produce|provide|show|give|draw|paint)\s+(me\s+)?(a\s+|an\s+|the\s+)?(photo|picture|image|illustration|drawing|artwork|painting)\b/i,
+    /\b(photo|picture|image|illustration|drawing|artwork|painting)\s+of\b/i,
+    /\bi\s+want\s+(to\s+see|a\s+photo|a\s+picture|an\s+image)\b/i,
+    /\bshow\s+me\s+(a\s+|an\s+)?(photo|picture|image)\b/i,
+    // French
+    /\b(cr[ée]e|g[ée]n[èe]re|fais|donne|montre|dessine|peins)\s+(moi\s+)?(une?\s+)?(photo|image|illustration|peinture|dessin)\b/i,
+    /\b(photo|image|illustration|peinture|dessin)\s+(de\s+|d['e]\s*)/i,
+    // Kinyarwanda
+    /\b(foto|ifoto|ishusho|shusho)\s+ya\b/i,
+    /\b(nyereka|mbwira|nkore|kora)\b.*\b(foto|ifoto|ishusho|shusho)\b/i,
+    // Swahili
+    /\b(picha|taswira|mchoro)\s+ya\b/i,
+    /\b(nionyeshe|nipa|tengeneza)\b.*\b(picha|taswira|mchoro)\b/i,
+  ];
+  return patterns.some(re => re.test(t));
+}
+
+// Returns true if the message is agriculture/livestock related
+function isAgricultureTopic(message) {
+  const t = (message || '').toLowerCase();
+  if (!t) return false;
+  const keywords = [
+    // English — crops & farming
+    'maize','corn','bean','beans','cassava','coffee','tea','banana','rice','wheat','sorghum','millet',
+    'potato','potatoes','tomato','tomatoes','onion','cabbage','carrot','vegetable','vegetables',
+    'fruit','fruits','mango','avocado','pineapple','papaya','orange','lemon','spice','spices',
+    'herb','herbs','crop','crops','plant','plants','seedling','seedlings','harvest','farm','farming',
+    'field','fields','plantation','garden','orchard','greenhouse','nursery','irrigation','fertilizer',
+    'fertiliser','manure','compost','soil','pesticide','herbicide','weed','weeds','pest','pests',
+    'agri','agriculture','agricultural','agribusiness','agritech',
+    // English — livestock
+    'livestock','cattle','cow','cows','goat','goats','sheep','pig','pigs','chicken','chickens','hen',
+    'hens','rooster','poultry','duck','ducks','rabbit','rabbits','fish','tilapia','bee','bees','honey',
+    'herd','flock','veterinary','vet','dairy','milk',
+    // French
+    'agriculture','agricole','ferme','champ','champs','culture','cultures','élevage','elevage',
+    'bétail','betail','vache','vaches','chèvre','chevre','chèvres','chevres','poule','poules','poulet',
+    'poulets','mouton','moutons','cochon','cochons','lapin','lapins','canard','canards','abeille',
+    'abeilles','miel','récolte','recolte','irrigation','engrais','sol','laitier',
+    // Kinyarwanda
+    'ubuhinzi','ubworozi','ibihingwa','amatungo','inka','ihene','intama','ingurube','inkoko','amagi',
+    'ifarashi','umurima','imirima','ishyamba','ibiti','ikigori','ibigori','ibishyimbo','imyumbati',
+    'ikawa','icyayi','umuceri','ingano','ibirayi','inyanya','itunguru','amashu','karoti','imboga',
+    'imbuto','umusaruro','ifumbire','ubutaka','amazi','indwara','ibyonnyi','uduhumyo','umuhinzi',
+    'umworozi','veterineri','amata',
+    // Swahili
+    'kilimo','shamba','mashamba','mifugo','ng\'ombe','ngombe','mbuzi','kondoo','nguruwe','kuku',
+    'bata','sungura','samaki','nyuki','asali','wadudu','magugu','mbolea','udongo','umwagiliaji',
+    'mavuno','mkulima','maziwa',
+  ];
+  return keywords.some(k => t.includes(k));
+}
+
+// Turn "create a photo of a green maize field" into "a green maize field"
+function extractImagePrompt(message) {
+  let p = (message || '').trim();
+  // Trim common "create a photo of X" patterns
+  p = p.replace(/^(please\s+)?(can\s+you\s+|could\s+you\s+|would\s+you\s+)?(create|generate|make|produce|provide|show|give|draw|paint)\s+(me\s+)?(a\s+|an\s+|the\s+)?(photo|picture|image|illustration|drawing|artwork|painting)\s+(of\s+|showing\s+)?/i, '');
+  p = p.replace(/^(please\s+)?(photo|picture|image|illustration|drawing|artwork|painting)\s+of\s+/i, '');
+  p = p.replace(/^i\s+want\s+(to\s+see|a\s+photo\s+of|a\s+picture\s+of|an\s+image\s+of)\s*/i, '');
+  p = p.replace(/^show\s+me\s+(a\s+|an\s+)?(photo|picture|image)\s+(of\s+)?/i, '');
+  // French
+  p = p.replace(/^(cr[ée]e|g[ée]n[èe]re|fais|donne|montre|dessine|peins)\s+(moi\s+)?(une?\s+)?(photo|image|illustration|peinture|dessin)\s+(de\s+|d['e]\s*)?/i, '');
+  p = p.replace(/^(photo|image|illustration|peinture|dessin)\s+(de\s+|d['e]\s*)/i, '');
+  // Kinyarwanda
+  p = p.replace(/^(foto|ifoto|ishusho|shusho)\s+ya\s+/i, '');
+  p = p.replace(/^(nyereka|mbwira|nkore|kora)\s+(foto|ifoto|ishusho|shusho)\s+ya\s+/i, '');
+  // Swahili
+  p = p.replace(/^(picha|taswira|mchoro)\s+ya\s+/i, '');
+  p = p.replace(/^(nionyeshe|nipa|tengeneza)\s+(picha|taswira|mchoro)\s+ya\s+/i, '');
+  // Trailing "and tell me..." clause
+  p = p.replace(/\s+and\s+(also\s+)?(tell\s+me|explain|describe|answer|say|show)\b.*/i, '');
+  p = p.replace(/[.!?]+$/, '').trim();
+  return p || (message || '').trim();
+}
+
+// Handle image requests inside a chat. Returns true if handled.
+async function handleImageRequestInChat(userMessage, res, options = {}) {
+  if (!isImageRequest(userMessage)) return { handled: false };
+
+  // Guard: reject non-agricultural image requests
+  if (!isAgricultureTopic(userMessage)) {
+    await streamSimpleText(res,
+      "I'm **AgriDeepAI**, specialised in agriculture and livestock. I can create images of **crops, livestock, farms, fields, soil, and other agricultural topics**, but not unrelated subjects. If you'd like an agriculture-related image, just describe what you need — for example, *\"a photo of a maize field\"* or *\"an image of a dairy cow farm\"*."
+    );
+    return { handled: true };
+  }
+
+  const imagePrompt = extractImagePrompt(userMessage);
+  try {
+    const result = await generateImage(imagePrompt);
+    log(`🎨 Chat image generated via ${result.provider} for prompt: "${imagePrompt}"`, 'info');
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const intro = `Here's the image you asked for:`;
+    const words = intro.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      res.write(`data: ${JSON.stringify({ text: (i === 0 ? '' : ' ') + words[i] })}\n\n`);
+      await new Promise(r => setTimeout(r, 20));
+    }
+    res.write(`data: ${JSON.stringify({ image: result.url, prompt: imagePrompt, provider: result.provider })}\n\n`);
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+
+    if (options.onImageDone) await options.onImageDone(result, imagePrompt, intro);
+    return { handled: true };
+  } catch (err) {
+    log(`Chat image generation failed: ${err.message}`, 'error');
+    await streamSimpleText(res, `I tried to create that image but ran into a technical issue. Please try again in a moment.`);
+    return { handled: true };
+  }
+}
 
 const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY;
 async function ocrImage(buffer, filename, mimeType) {
@@ -151,7 +275,7 @@ async function ocrImage(buffer, filename, mimeType) {
 }
 
 // ==================================================================
-// DIAGNOSTIC ENDPOINTS
+// DIAGNOSTICS
 // ==================================================================
 app.get('/api/debug/groq-models', async (req, res) => {
   if (!groq) return res.json({ error: 'GROQ_API_KEY not set' });
@@ -193,21 +317,14 @@ app.get('/api/debug/image-providers', async (req, res) => {
     providers: IMAGE_GEN_PROVIDERS,
     active_providers: IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id),
     pollinations_watermark: POLLINATIONS_API_KEY ? 'disabled (key set)' : 'visible (set POLLINATIONS_API_KEY to remove)',
-    notes: {
-      cloudflare: 'No watermark. JSON body format. 100k requests/day free.',
-      pollinations: 'No watermark when POLLINATIONS_API_KEY is set.',
-      removed: {
-        together: 'Removed — no free tier (requires $5 min purchase).',
-        huggingface: 'Removed — hf-inference no longer serves image generation models on the free tier (FLUX removed 2026). Modern diffusion models require paid HF Pro + partner providers.',
-      },
-    },
+    mode: 'in-conversation (no separate button)',
+    topic_guard: 'Only agriculture/livestock-related images are generated',
   });
 });
 
 app.get('/api/debug/image-test', async (req, res) => {
   const prompt = 'a simple green field';
   const results = {};
-
   const testCloudflare = async () => {
     if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) return { skipped: true, reason: 'not configured' };
     try {
@@ -230,7 +347,6 @@ app.get('/api/debug/image-test', async (req, res) => {
       return { ok: false, error: e.response?.data ? (Buffer.isBuffer(e.response.data) ? e.response.data.toString().slice(0, 200) : JSON.stringify(e.response.data).slice(0, 200)) : e.message };
     }
   };
-
   const testPollinations = async () => {
     if (!POLLINATIONS_API_KEY) return { skipped: true, reason: 'not configured' };
     try {
@@ -246,11 +362,34 @@ app.get('/api/debug/image-test', async (req, res) => {
       return { ok: false, error: e.response?.data ? JSON.stringify(e.response.data).slice(0, 200) : e.message };
     }
   };
-
   results.cloudflare = await testCloudflare();
   results.pollinations = await testPollinations();
-
   res.json({ prompt, results });
+});
+
+// Diagnostic endpoint to test image-request detection
+app.get('/api/debug/image-detection', (req, res) => {
+  const samples = [
+    'create a photo of maize',
+    'generate an image of cows in a field',
+    'provide a photo of a coffee farm',
+    'create a photo of waterfall',
+    'show me a picture of a tomato plant',
+    'ifoto ya ibigori',
+    'picha ya ng\'ombe',
+    'photo de vache',
+    'hi',
+    'how do I grow maize?',
+    'create a photo of a person',
+  ];
+  res.json(samples.map(m => ({
+    message: m,
+    isImageRequest: isImageRequest(m),
+    isAgriculture: isAgricultureTopic(m),
+    extractedPrompt: isImageRequest(m) ? extractImagePrompt(m) : null,
+    willHandle: isImageRequest(m) && isAgricultureTopic(m),
+    willRefuse: isImageRequest(m) && !isAgricultureTopic(m),
+  })));
 });
 
 // ==================================================================
@@ -519,7 +658,7 @@ Politely decline questions with no meaningful connection to agriculture, livesto
 "I'm AgriDeepAI, specialised in agriculture and livestock, so I can't help with that. If you have a question about crops, livestock, soil, farming, or agribusiness, I'd be glad to help."
 
 ## IMAGES & DOCUMENTS
-- Users may attach images, PDFs, or documents. The system gives you a note describing the attachment — including any text extracted from it.
+- Users may attach images, PDFs, or documents. The system gives you a note describing the attachment.
 - ALWAYS acknowledge attached files directly. Never claim an image was not attached when the note says one was.
 - If the attachment IS related to agriculture/livestock, analyse it fully.
 - If clearly unrelated, reply: "This doesn't appear to be related to agriculture or livestock. If you have a farming question, feel free to share it."
@@ -610,27 +749,32 @@ async function generateChatTitle(userMessage) {
   if (isGreetingOnly(msg)) return 'Greeting';
   if (isCreatorQuestion(msg)) return 'About AgriDeepAI';
 
+  // If it's an image request, prefix the pattern to bias toward "X Photo"
+  const isImg = isImageRequest(msg);
+
   const prompt = `You write short titles for chat conversations, in the style of ChatGPT sidebar names.
 
 Read the USER MESSAGE below. Reply with ONLY the conversation title — never repeat the user's exact words.
 
 Strict rules:
 - 2 to 6 words. Title Case or sentence case.
-- Focus on the TOPIC or INTENT (what they are asking about), not a quote of their sentence.
+- Focus on the TOPIC or INTENT, not a quote of their sentence.
 - No quotation marks, no trailing period, no prefix like "Title:".
 - If the message is a greeting or small talk, reply exactly: Greeting
 - If the message asks who you are / who made you, reply exactly: About AgriDeepAI
-- If the message asks for the meaning/definition of something, use the pattern: Meaning of X
-- If the message asks how to do something, use the pattern: How to X
-- If the message describes a problem, use the pattern: X Problem or X Diagnosis
+- If the message asks for an image/photo/picture of something, use the pattern: X Photo (e.g. "Maize Photo", "Dairy Cow Photo", "Coffee Farm Photo")
+- If the message asks for the meaning/definition of something, use: Meaning of X
+- If the message asks how to do something, use: How to X
+- If the message describes a problem, use: X Problem or X Diagnosis
 
 Examples:
 USER: "Hi, what is your name?" → Greeting and Introduction
 USER: "What is the agriculture mean?" → Meaning of Agriculture
 USER: "How do I treat tomato blight?" → Tomato Blight Treatment
 USER: "My maize leaves are yellow with brown spots, what should I do?" → Maize Leaf Yellowing Diagnosis
-USER: "how to raise chickens for eggs" → Raising Chickens for Eggs
-USER: "Tell me about dairy cow feed" → Dairy Cow Feeding
+USER: "create a photo of maize" → Maize Photo
+USER: "generate an image of cows in a field" → Cows in Field Photo
+USER: "provide a photo of a coffee farm" → Coffee Farm Photo
 USER: "Hello" → Greeting
 USER: "Who created you?" → About AgriDeepAI
 
@@ -702,6 +846,10 @@ Title:`;
         if (title) return title;
       } catch (err) { log(`Title gen (openrouter ${model}) error: ${String(err.message).slice(0, 160)}`, 'warn'); }
     }
+  }
+  if (isImg) {
+    const p = extractImagePrompt(msg).split(/\s+/).slice(0, 4).join(' ');
+    return p ? `${p} Photo` : 'Image Request';
   }
   const firstWords = msg.split(/\s+/).slice(0, 5).join(' ');
   return firstWords + (msg.split(/\s+/).length > 5 ? '…' : '');
@@ -1254,8 +1402,7 @@ app.get('/api/config', (req, res) => res.json({
 }));
 
 // ==================================================================
-// IMAGE GENERATION
-// Order: Cloudflare (reliable) → Pollinations (reliable, clean)
+// IMAGE GENERATION ENGINE
 // ==================================================================
 async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
   const ext = mimeType.includes('png') ? 'png' : 'jpg';
@@ -1270,7 +1417,6 @@ async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
 async function generateImageWithCloudflare(prompt) {
   if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) throw new Error('Cloudflare not configured');
   const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
-  // Cloudflare FLUX.1-schnell expects JSON body, not multipart form-data.
   const res = await axios.post(url, { prompt, steps: 4 }, {
     headers: {
       'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
@@ -1346,6 +1492,7 @@ async function generateImage(prompt) {
   throw new Error(`All image providers failed: ${errors.join(' | ')}`);
 }
 
+// Standalone endpoint (kept for admin/testing — no longer used by UI)
 app.post('/api/chat/generate-image', async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -1415,11 +1562,19 @@ app.post('/api/chat/guest', async (req, res) => {
     if (!Array.isArray(messages) || messages.length === 0) return res.status(400).json({ error: 'Messages required' });
 
     const hasImage = !!(image && image.base64 && image.mimeType);
-    if (await tryIdentityShortcut(messages, res, hasImage)) return;
-
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     if (!lastUser) return res.status(400).json({ error: 'No user message' });
 
+    // --- 1. Image-request detection (before any shortcut or AI call) ---
+    if (!hasImage && lastUser.content) {
+      const imgResult = await handleImageRequestInChat(lastUser.content, res);
+      if (imgResult.handled) return;
+    }
+
+    // --- 2. Identity/greeting shortcut ---
+    if (await tryIdentityShortcut(messages, res, hasImage)) return;
+
+    // --- 3. Normal AI text flow ---
     let imageData = null;
     let extractedText = '';
     if (hasImage) {
@@ -1440,7 +1595,7 @@ app.post('/api/chat/guest', async (req, res) => {
       let note = `\n\n[The user has attached an image${filename}.`;
       if (extractedText) note += ` Text extracted from it via OCR:\n---\n${extractedText}\n---`;
       else note += ' No text could be extracted via OCR (the image may not contain text).';
-      note += ' ALWAYS acknowledge the image and provide an agriculture/livestock-related analysis. Describe what you see if you have vision capabilities.]';
+      note += ' ALWAYS acknowledge the image and provide an agriculture/livestock-related analysis.]';
       enrichedPrompt += note;
     }
 
@@ -1503,8 +1658,55 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     const { data: conv } = await supabase.from('conversations').select('id, title').eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
+    // --- 1. Image-request detection (before any shortcut or AI call) ---
+    if (!files.length && message) {
+      // Persist the user message first so it appears in history
+      const userMessageData = { conversation_id: conversationId, role: 'user', content: message };
+      await supabase.from('messages').insert(userMessageData);
+
+      // Update title if needed
+      if (conv.title === 'New Chat' || !conv.title) {
+        const newTitle = await generateChatTitle(message);
+        await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
+      }
+
+      const imgResult = await handleImageRequestInChat(message, res, {
+        onImageDone: async (result, prompt, intro) => {
+          const imageFile = {
+            filename: `generated-${Date.now()}.jpg`,
+            mime_type: 'image/jpeg',
+            public_url: result.url,
+            generated: true,
+            prompt: prompt,
+            provider: result.provider,
+          };
+          await supabase.from('messages').insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: intro,
+            files: [imageFile],
+            versions: [intro],
+            current_version_index: 0,
+          });
+          await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
+        },
+      });
+      if (imgResult.handled) return;
+      // Otherwise, continue with normal flow but avoid double-inserting the user message
+      // (we already inserted it above) — so re-fetch and skip re-inserting.
+      // We'll short-circuit to the AI call directly.
+    }
+
+    // --- 2. Greeting/identity shortcut (no files) ---
     if (message && files.length === 0 && (isCreatorQuestion(message) || isGreetingOnly(message))) {
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
+      // User message already inserted in the image-request block? Only if that ran.
+      // To be safe, check if it exists.
+      const { data: recent } = await supabase.from('messages')
+        .select('id, content').eq('conversation_id', conversationId).eq('role', 'user')
+        .order('created_at', { ascending: false }).limit(1).single();
+      if (!recent || recent.content !== message) {
+        await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
+      }
       let reply;
       if (isCreatorQuestion(message)) reply = `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
       else reply = `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
@@ -1518,6 +1720,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       return streamSimpleText(res, reply);
     }
 
+    // --- 3. Files + user message insert ---
     let filesMeta = [], imageData = null, extractedText = '';
     for (const file of files) {
       const fileExt = file.originalname.split('.').pop();
@@ -1533,14 +1736,25 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       if (txt) extractedText += (extractedText ? '\n\n' : '') + txt;
     }
 
-    const messageData = { conversation_id: conversationId, role: 'user', content: message || '' };
-    if (filesMeta.length > 0) messageData.files = filesMeta;
-    const { error: userMsgErr } = await supabase.from('messages').insert(messageData);
-    if (userMsgErr) log(`User message insert error: ${userMsgErr.message}`, 'error');
+    // Only insert the user message if we didn't already insert it in the image-request block
+    // (i.e., only for files present OR message content differs from what's already saved)
+    let alreadyInserted = false;
+    if (!files.length && message) {
+      const { data: recent } = await supabase.from('messages')
+        .select('id, content').eq('conversation_id', conversationId).eq('role', 'user')
+        .order('created_at', { ascending: false }).limit(1).single();
+      if (recent && recent.content === message) alreadyInserted = true;
+    }
+    if (!alreadyInserted) {
+      const messageData = { conversation_id: conversationId, role: 'user', content: message || '' };
+      if (filesMeta.length > 0) messageData.files = filesMeta;
+      const { error: userMsgErr } = await supabase.from('messages').insert(messageData);
+      if (userMsgErr) log(`User message insert error: ${userMsgErr.message}`, 'error');
 
-    if ((conv.title === 'New Chat' || !conv.title) && message) {
-      const newTitle = await generateChatTitle(message);
-      await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
+      if ((conv.title === 'New Chat' || !conv.title) && message) {
+        const newTitle = await generateChatTitle(message);
+        await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
+      }
     }
 
     const { data: history } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
@@ -1584,101 +1798,4 @@ app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res
     const { data: all } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
     if (messageIndex >= all.length || all[messageIndex].role !== 'assistant') return res.status(400).json({ error: 'Invalid index' });
     const idsToDelete = all.slice(messageIndex).map(m => m.id);
-    if (idsToDelete.length) await supabase.from('messages').delete().in('id', idsToDelete);
-    const { data: remaining } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('created_at', { ascending: true });
-    if (!remaining.length || remaining[remaining.length - 1].role !== 'user') return res.status(400).json({ error: 'No user message' });
-    const chatMessages = buildChatMessages(remaining);
-    await streamAI(chatMessages, res, null, async (full) => {
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: full });
-      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
-    });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { content, truncate } = req.body;
-    const { data: msg } = await supabase.from('messages').select('*, conversation_id, conversations(user_id)').eq('id', id).single();
-    if (!msg || msg.conversations.user_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
-    if (msg.role !== 'user') return res.status(400).json({ error: 'Only user messages can be edited' });
-    await supabase.from('messages').update({ content }).eq('id', id);
-    if (truncate) {
-      const { data: later } = await supabase.from('messages').select('id').eq('conversation_id', msg.conversation_id).gt('created_at', msg.created_at);
-      if (later.length) await supabase.from('messages').delete().in('id', later.map(m => m.id));
-      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', msg.conversation_id);
-    }
-    res.json({ message: 'Updated' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ==================================================================
-// SHARE
-// ==================================================================
-app.post('/api/chat/share/:id', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { data: conv } = await supabase.from('conversations').select('id').eq('id', id).eq('user_id', req.user.id).single();
-    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
-    const token = crypto.randomBytes(16).toString('hex');
-    const { error } = await supabase.from('shared_links').insert({ conversation_id: id, token }).select().single();
-    if (error) throw error;
-    res.json({ url: `${process.env.FRONTEND_URL}/share/${token}` });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/share/guest', async (req, res) => {
-  try {
-    const { messages } = req.body;
-    if (!messages?.length) return res.status(400).json({ error: 'No messages to share' });
-    const token = crypto.randomBytes(16).toString('hex');
-    const { error } = await supabase.from('guest_shares').insert({ token, messages }).select().single();
-    if (error) throw error;
-    res.json({ url: `${process.env.FRONTEND_URL}/share/${token}` });
-  } catch (err) { res.status(500).json({ error: 'Failed to generate share link.' }); }
-});
-
-app.get('/api/share/:token', async (req, res) => {
-  try {
-    const { token } = req.params;
-    let { data } = await supabase.from('shared_links').select('conversation_id').eq('token', token).single();
-    if (data?.conversation_id) {
-      const { data: msgs } = await supabase.from('messages').select('*').eq('conversation_id', data.conversation_id).order('created_at', { ascending: true });
-      return res.json({ messages: msgs || [] });
-    }
-    const { data: guestData, error: ge } = await supabase.from('guest_shares').select('messages').eq('token', token).single();
-    if (ge || !guestData) return res.status(404).json({ error: 'Share not found' });
-    res.json({ messages: guestData.messages });
-  } catch (err) { res.status(500).json({ error: 'Error retrieving shared messages' }); }
-});
-
-// ==================================================================
-// SERVE FRONTEND
-// ==================================================================
-const frontendPath = path.join(__dirname, '../frontend');
-
-app.get('/share/*', (req, res) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  res.sendFile(path.join(frontendPath, 'share.html'));
-});
-app.use(express.static(frontendPath, {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html') || filePath.endsWith('.css') || filePath.endsWith('.js')) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
-    }
-  }
-}));
-app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
-
-app.listen(PORT, () => {
-  log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
-  log(`Text: Groq→FHRouter→OpenRouter | Vision: OpenRouter (${OPENROUTER_VISION_MODELS.length} models)`, 'info');
-  log(`Image gen: ${IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id).join(' → ') || 'none'}`, 'info');
-  log(`Pollinations: ${POLLINATIONS_API_KEY ? 'clean (no watermark)' : 'watermarked'}`, 'info');
-  log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'} | Tavily: ${TAVILY_API_KEY ? 'enabled' : 'disabled'}`, 'info');
-  log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
-});
+    if (idsToDelete.length) await supabase.from('messages').delete().in('id', idsToDelete
