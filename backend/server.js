@@ -119,18 +119,21 @@ const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCoo
 
 // ==================================================================
 // IMAGE GENERATION PROVIDERS
+// Together AI removed — no free tier exists (requires $5 min purchase)
 // ==================================================================
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
-const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY;
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
+
+// Hugging Face: current recommended model on hf-inference provider
+// (FLUX.1-schnell is deprecated — see docs recommendation list)
+const HUGGINGFACE_MODEL = process.env.HUGGINGFACE_MODEL || 'stabilityai/stable-diffusion-xl-base-1.0';
 
 const IMAGE_GEN_PROVIDERS = [
   { id: 'cloudflare', name: 'Cloudflare Workers AI (no watermark)', enabled: !!(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) },
-  { id: 'together', name: 'Together AI (no watermark)', enabled: !!TOGETHER_API_KEY },
+  { id: 'pollinations', name: 'Pollinations.ai' + (POLLINATIONS_API_KEY ? ' (clean, no watermark)' : ' (watermarked — add POLLINATIONS_API_KEY)'), enabled: true },
   { id: 'huggingface', name: 'Hugging Face (no watermark)', enabled: !!HUGGINGFACE_API_KEY },
-  { id: 'pollinations', name: 'Pollinations.ai' + (POLLINATIONS_API_KEY ? ' (clean)' : ' (watermarked — add POLLINATIONS_API_KEY to remove)'), enabled: true },
 ];
 
 const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY;
@@ -184,7 +187,6 @@ app.get('/api/debug/openrouter-models', async (req, res) => {
       free_vision_models: freeWithVision,
       your_current_list: OPENROUTER_VISION_MODELS,
       your_list_status: OPENROUTER_VISION_MODELS.map(id => ({ id, found_in_catalog: all.some(m => m.id === id) })),
-      hint: 'Copy free_vision_models[] into OPENROUTER_VISION_MODELS in server.js and redeploy.',
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -194,16 +196,15 @@ app.get('/api/debug/image-providers', async (req, res) => {
     providers: IMAGE_GEN_PROVIDERS,
     active_providers: IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id),
     pollinations_watermark: POLLINATIONS_API_KEY ? 'disabled (key set)' : 'visible (set POLLINATIONS_API_KEY to remove)',
+    huggingface_model: HUGGINGFACE_MODEL,
     notes: {
-      cloudflare: 'No watermark. Requires CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN.',
-      together: 'No watermark. Key must start with tgp_v1_. Old keys starting with key_ are invalid.',
-      huggingface: 'No watermark. Uses new router.huggingface.co endpoint.',
-      pollinations: 'Watermarked unless POLLINATIONS_API_KEY is set (get free key at auth.pollinations.ai).',
+      cloudflare: 'No watermark. JSON body format (not multipart).',
+      pollinations: 'No watermark when POLLINATIONS_API_KEY is set.',
+      huggingface: 'No watermark. Endpoint: router.huggingface.co/hf-inference/models/{model}. Set HUGGINGFACE_MODEL to override the default.',
     },
   });
 });
 
-// Test each image provider independently — returns pass/fail for each
 app.get('/api/debug/image-test', async (req, res) => {
   const prompt = 'a simple green field';
   const results = {};
@@ -212,49 +213,21 @@ app.get('/api/debug/image-test', async (req, res) => {
     if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) return { skipped: true, reason: 'not configured' };
     try {
       const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
-      const formData = new FormData();
-      formData.append('prompt', prompt);
-      formData.append('steps', '4');
-      const r = await axios.post(url, formData, {
-        headers: { 'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`, ...formData.getHeaders() },
+      // Cloudflare FLUX.1-schnell expects JSON body, not multipart form-data
+      const r = await axios.post(url, { prompt, steps: 4 }, {
+        headers: { 'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
         responseType: 'arraybuffer', timeout: 60000,
       });
-      const size = Buffer.from(r.data).length;
-      return { ok: true, bytes: size, content_type: r.headers['content-type'] };
-    } catch (e) {
-      return { ok: false, error: e.response?.data ? (Buffer.isBuffer(e.response.data) ? e.response.data.toString().slice(0, 200) : JSON.stringify(e.response.data).slice(0, 200)) : e.message };
-    }
-  };
-
-  const testTogether = async () => {
-    if (!TOGETHER_API_KEY) return { skipped: true, reason: 'not configured' };
-    try {
-      const r = await axios.post('https://api.together.xyz/v1/images/generations', {
-        model: 'black-forest-labs/FLUX.1-schnell-Free',
-        prompt, width: 512, height: 512, steps: 4, n: 1, response_format: 'b64_json',
-      }, {
-        headers: { 'Authorization': `Bearer ${TOGETHER_API_KEY}`, 'Content-Type': 'application/json' },
-        timeout: 60000,
-      });
-      const b64 = r.data?.data?.[0]?.b64_json;
-      return { ok: !!b64, bytes: b64 ? Buffer.from(b64, 'base64').length : 0 };
-    } catch (e) {
-      return { ok: false, error: e.response?.data ? JSON.stringify(e.response.data).slice(0, 200) : e.message };
-    }
-  };
-
-  const testHuggingFace = async () => {
-    if (!HUGGINGFACE_API_KEY) return { skipped: true, reason: 'not configured' };
-    try {
-      const r = await axios.post(
-        'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
-        { inputs: prompt },
-        {
-          headers: { 'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`, 'Content-Type': 'application/json' },
-          responseType: 'arraybuffer', timeout: 60000,
-        }
-      );
-      return { ok: true, bytes: Buffer.from(r.data).length, content_type: r.headers['content-type'] };
+      const ct = r.headers['content-type'] || '';
+      let bytes = 0;
+      if (ct.includes('application/json')) {
+        const json = JSON.parse(Buffer.from(r.data).toString('utf-8'));
+        const b64 = json?.result?.image || json?.image;
+        bytes = b64 ? Buffer.from(b64, 'base64').length : 0;
+      } else {
+        bytes = Buffer.from(r.data).length;
+      }
+      return { ok: bytes > 1000, bytes, content_type: ct };
     } catch (e) {
       return { ok: false, error: e.response?.data ? (Buffer.isBuffer(e.response.data) ? e.response.data.toString().slice(0, 200) : JSON.stringify(e.response.data).slice(0, 200)) : e.message };
     }
@@ -276,12 +249,28 @@ app.get('/api/debug/image-test', async (req, res) => {
     }
   };
 
-  results.cloudflare = await testCloudflare();
-  results.together = await testTogether();
-  results.huggingface = await testHuggingFace();
-  results.pollinations = await testPollinations();
+  const testHuggingFace = async () => {
+    if (!HUGGINGFACE_API_KEY) return { skipped: true, reason: 'not configured' };
+    try {
+      const r = await axios.post(
+        `https://router.huggingface.co/hf-inference/models/${HUGGINGFACE_MODEL}`,
+        { inputs: prompt },
+        {
+          headers: { 'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`, 'Content-Type': 'application/json' },
+          responseType: 'arraybuffer', timeout: 60000,
+        }
+      );
+      return { ok: Buffer.from(r.data).length > 1000, bytes: Buffer.from(r.data).length, content_type: r.headers['content-type'] };
+    } catch (e) {
+      return { ok: false, error: e.response?.data ? (Buffer.isBuffer(e.response.data) ? e.response.data.toString().slice(0, 200) : JSON.stringify(e.response.data).slice(0, 200)) : e.message };
+    }
+  };
 
-  res.json({ prompt, results });
+  results.cloudflare = await testCloudflare();
+  results.pollinations = await testPollinations();
+  results.huggingface = await testHuggingFace();
+
+  res.json({ prompt, huggingface_model: HUGGINGFACE_MODEL, results });
 });
 
 // ==================================================================
@@ -1286,6 +1275,7 @@ app.get('/api/config', (req, res) => res.json({
 
 // ==================================================================
 // IMAGE GENERATION
+// Order: Cloudflare (reliable, no watermark) → Pollinations (reliable, no watermark) → HF (if available)
 // ==================================================================
 async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
   const ext = mimeType.includes('png') ? 'png' : 'jpg';
@@ -1300,19 +1290,25 @@ async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
 async function generateImageWithCloudflare(prompt) {
   if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) throw new Error('Cloudflare not configured');
   const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
-  const formData = new FormData();
-  formData.append('prompt', prompt);
-  formData.append('steps', '4');
-  const res = await axios.post(url, formData, {
-    headers: { 'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`, ...formData.getHeaders() },
+  // CRITICAL FIX: Cloudflare FLUX.1-schnell expects a JSON body, NOT multipart form-data.
+  // The official curl example is: -d '{ "prompt": "...", "steps": 4 }'
+  const res = await axios.post(url, { prompt, steps: 4 }, {
+    headers: {
+      'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
     responseType: 'arraybuffer',
     timeout: 60000,
   });
-  const contentType = res.headers['content-type'] || '';
+  const ct = res.headers['content-type'] || '';
   let buffer;
-  if (contentType.includes('application/json')) {
+  if (ct.includes('application/json')) {
     const json = JSON.parse(Buffer.from(res.data).toString('utf-8'));
-    const b64 = json?.image || json?.result?.image || json?.result?.b64_json;
+    if (json.success === false) {
+      const errMsg = json.errors?.[0]?.message || 'Unknown Cloudflare error';
+      throw new Error(`Cloudflare: ${errMsg}`);
+    }
+    const b64 = json?.result?.image || json?.image;
     if (!b64) throw new Error('No image in Cloudflare JSON response');
     buffer = Buffer.from(b64, 'base64');
   } else {
@@ -1323,51 +1319,8 @@ async function generateImageWithCloudflare(prompt) {
   return { url: publicUrl, provider: 'cloudflare' };
 }
 
-async function generateImageWithTogether(prompt) {
-  if (!TOGETHER_API_KEY) throw new Error('Together AI not configured');
-  // Reject old-format keys early — they always fail
-  if (TOGETHER_API_KEY.startsWith('key_')) {
-    throw new Error('Together AI key is old format (key_...). Regenerate at api.together.ai/settings/api-keys (new keys start with tgp_v1_)');
-  }
-  const res = await axios.post('https://api.together.xyz/v1/images/generations', {
-    model: 'black-forest-labs/FLUX.1-schnell-Free',
-    prompt,
-    width: 1024,
-    height: 1024,
-    steps: 4,
-    n: 1,
-    response_format: 'b64_json',
-  }, {
-    headers: { 'Authorization': `Bearer ${TOGETHER_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: 60000,
-  });
-  const b64 = res.data?.data?.[0]?.b64_json;
-  if (!b64) throw new Error('No image in Together response');
-  const buffer = Buffer.from(b64, 'base64');
-  const publicUrl = await uploadGeneratedImage(buffer, 'image/png');
-  return { url: publicUrl, provider: 'together' };
-}
-
-async function generateImageWithHuggingFace(prompt) {
-  if (!HUGGINGFACE_API_KEY) throw new Error('Hugging Face not configured');
-  // New router endpoint (replaces deprecated api-inference.huggingface.co)
-  const res = await axios.post(
-    'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
-    { inputs: prompt },
-    {
-      headers: { 'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`, 'Content-Type': 'application/json' },
-      responseType: 'arraybuffer',
-      timeout: 60000,
-    }
-  );
-  const buffer = Buffer.from(res.data);
-  if (buffer.length < 1000) throw new Error('Hugging Face returned too small a response');
-  const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
-  return { url: publicUrl, provider: 'huggingface' };
-}
-
 async function generateImageWithPollinations(prompt) {
-  if (!POLLINATIONS_API_KEY) throw new Error('POLLINATIONS_API_KEY not set — legacy URL endpoint would watermark');
+  if (!POLLINATIONS_API_KEY) throw new Error('POLLINATIONS_API_KEY not set');
   const res = await axios.post('https://gen.pollinations.ai/v1/images/generations', {
     model: 'flux',
     prompt,
@@ -1375,7 +1328,10 @@ async function generateImageWithPollinations(prompt) {
     size: '1024x1024',
     response_format: 'b64_json',
   }, {
-    headers: { 'Authorization': `Bearer ${POLLINATIONS_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${POLLINATIONS_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
     timeout: 90000,
   });
   const b64 = res.data?.data?.[0]?.b64_json || res.data?.data?.[0]?.url;
@@ -1392,13 +1348,35 @@ async function generateImageWithPollinations(prompt) {
   return { url: publicUrl, provider: 'pollinations' };
 }
 
+async function generateImageWithHuggingFace(prompt) {
+  if (!HUGGINGFACE_API_KEY) throw new Error('Hugging Face not configured');
+  // New router endpoint (replaces retired api-inference.huggingface.co)
+  // Model must be one currently served by the hf-inference provider.
+  const res = await axios.post(
+    `https://router.huggingface.co/hf-inference/models/${HUGGINGFACE_MODEL}`,
+    { inputs: prompt },
+    {
+      headers: {
+        'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      responseType: 'arraybuffer',
+      timeout: 60000,
+    }
+  );
+  const buffer = Buffer.from(res.data);
+  if (buffer.length < 1000) throw new Error('Hugging Face returned too small a response');
+  const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
+  return { url: publicUrl, provider: 'huggingface' };
+}
+
 async function generateImage(prompt) {
   const errors = [];
+  // Order: Cloudflare (best, no watermark) → Pollinations (reliable, no watermark) → Hugging Face (if available)
   const providers = [
     { id: 'cloudflare', fn: () => generateImageWithCloudflare(prompt) },
-    { id: 'together', fn: () => generateImageWithTogether(prompt) },
-    { id: 'huggingface', fn: () => generateImageWithHuggingFace(prompt) },
     { id: 'pollinations', fn: () => generateImageWithPollinations(prompt) },
+    { id: 'huggingface', fn: () => generateImageWithHuggingFace(prompt) },
   ];
   for (const p of providers) {
     try {
@@ -1745,7 +1723,8 @@ app.listen(PORT, () => {
   log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
   log(`Text: Groq→FHRouter→OpenRouter | Vision: OpenRouter (${OPENROUTER_VISION_MODELS.length} models)`, 'info');
   log(`Image gen: ${IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id).join(' → ') || 'none'}`, 'info');
-  log(`Pollinations watermark: ${POLLINATIONS_API_KEY ? 'DISABLED (clean)' : 'VISIBLE (add POLLINATIONS_API_KEY)'}`, 'info');
+  log(`HF model: ${HUGGINGFACE_MODEL}`, 'info');
+  log(`Pollinations: ${POLLINATIONS_API_KEY ? 'clean' : 'watermarked'}`, 'info');
   log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'} | Tavily: ${TAVILY_API_KEY ? 'enabled' : 'disabled'}`, 'info');
   log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
 });
