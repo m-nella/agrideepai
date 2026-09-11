@@ -95,25 +95,23 @@ async function isEmailTakenByOther(email, currentUserId) {
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 const GROQ_TEXT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'groq/compound'];
-const GROQ_VISION_MODELS = []; // No vision models on this Groq account
+const GROQ_VISION_MODELS = [];
 
 const FHROUTER_API_KEY = process.env.FHROUTER_API_KEY;
 const FHROUTER_URL = 'https://fhrouter.com/v1/chat/completions';
 const FHROUTER_TEXT_MODELS = ['deepseek-v4-flash', 'glm-5.3-flash', 'grok-4.6'];
-const FHROUTER_VISION_MODELS = []; // No vision models on free tier
+const FHROUTER_VISION_MODELS = [];
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TEXT_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3-235b-a22b:free', 'mistralai/mistral-7b-instruct:free'];
 
-// --- FIXED: current live free vision models on OpenRouter (Sept 2026) ---
-// These change frequently — use /api/debug/openrouter-models to verify the live list.
 const OPENROUTER_VISION_MODELS = [
-  'nvidia/nemotron-nano-12b-v2-vl:free',        // confirmed free VL model, 128K context
-  'minimax/minimax-m3:free',                    // confirmed free, 1M context, text+image+video input
-  'qwen/qwen-2.5-vl-7b-instruct:free',          // reliable free VL model
-  'google/gemma-3-12b-it:free',                 // smaller Gemma fallback
-  'google/gemma-3-27b-it:free',                 // larger Gemma fallback
+  'nvidia/nemotron-nano-12b-v2-vl:free',
+  'minimax/minimax-m3:free',
+  'qwen/qwen-2.5-vl-7b-instruct:free',
+  'google/gemma-3-12b-it:free',
+  'google/gemma-3-27b-it:free',
 ];
 
 const openRouterCooldown = {};
@@ -121,22 +119,19 @@ const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
 
 // ==================================================================
-// IMAGE GENERATION PROVIDERS (free, no-card)
-// Pollinations.ai  → no key needed
-// Cloudflare AI    → CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
-// Together AI      → TOGETHER_API_KEY
-// Hugging Face     → HUGGINGFACE_API_KEY
+// IMAGE GENERATION PROVIDERS
 // ==================================================================
+const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY;
 const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
 
 const IMAGE_GEN_PROVIDERS = [
-  { id: 'pollinations', name: 'Pollinations.ai', requiresKey: false, enabled: true },
-  { id: 'cloudflare', name: 'Cloudflare Workers AI', requiresKey: true, enabled: !!(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) },
-  { id: 'together', name: 'Together AI', requiresKey: true, enabled: !!TOGETHER_API_KEY },
-  { id: 'huggingface', name: 'Hugging Face Inference', requiresKey: true, enabled: !!HUGGINGFACE_API_KEY },
+  { id: 'cloudflare', name: 'Cloudflare Workers AI (no watermark)', enabled: !!(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) },
+  { id: 'together', name: 'Together AI (no watermark)', enabled: !!TOGETHER_API_KEY },
+  { id: 'huggingface', name: 'Hugging Face (no watermark)', enabled: !!HUGGINGFACE_API_KEY },
+  { id: 'pollinations', name: 'Pollinations.ai' + (POLLINATIONS_API_KEY ? ' (clean)' : ' (watermarked — add POLLINATIONS_API_KEY to remove)'), enabled: true },
 ];
 
 const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY;
@@ -185,15 +180,11 @@ app.get('/api/debug/openrouter-models', async (req, res) => {
       })
       .map(m => m.id)
       .sort();
-
     res.json({
       total_free_vision_models: freeWithVision.length,
       free_vision_models: freeWithVision,
       your_current_list: OPENROUTER_VISION_MODELS,
-      your_list_status: OPENROUTER_VISION_MODELS.map(id => ({
-        id,
-        found_in_catalog: all.some(m => m.id === id),
-      })),
+      your_list_status: OPENROUTER_VISION_MODELS.map(id => ({ id, found_in_catalog: all.some(m => m.id === id) })),
       hint: 'Copy free_vision_models[] into OPENROUTER_VISION_MODELS in server.js and redeploy.',
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -201,21 +192,20 @@ app.get('/api/debug/openrouter-models', async (req, res) => {
 
 app.get('/api/debug/image-providers', async (req, res) => {
   res.json({
-    providers: IMAGE_GEN_PROVIDERS.map(p => ({
-      id: p.id,
-      name: p.name,
-      enabled: p.enabled,
-      env_vars_needed: p.id === 'cloudflare' ? ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN']
-        : p.id === 'together' ? ['TOGETHER_API_KEY']
-        : p.id === 'huggingface' ? ['HUGGINGFACE_API_KEY']
-        : [],
-    })),
+    providers: IMAGE_GEN_PROVIDERS,
     active_providers: IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id),
+    pollinations_watermark: POLLINATIONS_API_KEY ? 'disabled (key set)' : 'visible (set POLLINATIONS_API_KEY to remove)',
+    notes: {
+      cloudflare: 'No watermark. Requires CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN.',
+      together: 'No watermark. Requires TOGETHER_API_KEY.',
+      huggingface: 'No watermark. Requires HUGGINGFACE_API_KEY.',
+      pollinations: 'Watermarked unless POLLINATIONS_API_KEY is set (get free key at auth.pollinations.ai).',
+    },
   });
 });
 
 // ==================================================================
-// AI STREAMING (text + vision)
+// AI STREAMING
 // ==================================================================
 async function getAIStream(chatMessages, imageData = null, isVisionRetry = false) {
   const errors = [];
@@ -521,12 +511,6 @@ function isGreetingOnly(text) {
   const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
     'muraho','mwaramutse','mwiriwe','amakuru','bite','salam','bonjour','salut','jambo','habari','hi bot','hello bot'];
   return greetings.includes(t);
-}
-function isGreeting(text) {
-  const t = (text || '').toLowerCase().trim().replace(/[!?.,]/g, '');
-  const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
-    'muraho','mwaramutse','mwiriwe','amakuru','bite','salam','bonjour','salut','jambo','habari'];
-  return greetings.includes(t) || greetings.some(g => t.startsWith(g + ' '));
 }
 function isCreatorQuestion(text) {
   const t = (text || '').toLowerCase();
@@ -1221,7 +1205,8 @@ app.get('/api/config', (req, res) => res.json({
 }));
 
 // ==================================================================
-// IMAGE GENERATION (Pollinations → Cloudflare → Together → HF)
+// IMAGE GENERATION (Cloudflare → Together → HF → Pollinations)
+// Clean providers first, watermarked last
 // ==================================================================
 async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
   const ext = mimeType.includes('png') ? 'png' : 'jpg';
@@ -1235,12 +1220,16 @@ async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
 
 async function generateImageWithPollinations(prompt) {
   const encoded = encodeURIComponent(prompt);
-  const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=flux&nologo=true&private=true&enhance=true`;
+  let url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=flux&nologo=true&private=true&enhance=true`;
+  // Add API key if configured — removes watermark
+  if (POLLINATIONS_API_KEY) {
+    url += `&key=${encodeURIComponent(POLLINATIONS_API_KEY)}`;
+  }
   const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000, maxRedirects: 5 });
   const buffer = Buffer.from(res.data);
   if (buffer.length < 1000) throw new Error('Pollinations returned too small a response');
   const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
-  return { url: publicUrl, provider: 'pollinations' };
+  return { url: publicUrl, provider: POLLINATIONS_API_KEY ? 'pollinations-clean' : 'pollinations-watermarked' };
 }
 
 async function generateImageWithCloudflare(prompt) {
@@ -1248,9 +1237,21 @@ async function generateImageWithCloudflare(prompt) {
   const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
   const res = await axios.post(url, { prompt, num_steps: 4 }, {
     headers: { 'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
-    responseType: 'arraybuffer', timeout: 60000,
+    responseType: 'arraybuffer',
+    timeout: 60000,
   });
-  const buffer = Buffer.from(res.data);
+  const contentType = res.headers['content-type'] || '';
+  let buffer;
+  if (contentType.includes('application/json')) {
+    // FLUX returns { image: "<base64>" } or { result: { image: "<base64>" } }
+    const json = JSON.parse(Buffer.from(res.data).toString('utf-8'));
+    const b64 = json?.image || json?.result?.image;
+    if (!b64) throw new Error('No image in Cloudflare JSON response');
+    buffer = Buffer.from(b64, 'base64');
+  } else {
+    // Binary response
+    buffer = Buffer.from(res.data);
+  }
   if (buffer.length < 1000) throw new Error('Cloudflare returned too small a response');
   const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
   return { url: publicUrl, provider: 'cloudflare' };
@@ -1296,11 +1297,12 @@ async function generateImageWithHuggingFace(prompt) {
 
 async function generateImage(prompt) {
   const errors = [];
+  // Order: clean providers first (Cloudflare/Together/HF), Pollinations (clean if key) last
   const providers = [
-    { id: 'pollinations', fn: () => generateImageWithPollinations(prompt) },
     { id: 'cloudflare', fn: () => generateImageWithCloudflare(prompt) },
     { id: 'together', fn: () => generateImageWithTogether(prompt) },
     { id: 'huggingface', fn: () => generateImageWithHuggingFace(prompt) },
+    { id: 'pollinations', fn: () => generateImageWithPollinations(prompt) },
   ];
   for (const p of providers) {
     try {
@@ -1315,7 +1317,6 @@ async function generateImage(prompt) {
   throw new Error(`All image providers failed: ${errors.join(' | ')}`);
 }
 
-// Public endpoint — works for both guest and authenticated users
 app.post('/api/chat/generate-image', async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -1647,7 +1648,8 @@ app.get('*', (req, res) => res.sendFile(path.join(frontendPath, 'index.html')));
 app.listen(PORT, () => {
   log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
   log(`Text: Groq→FHRouter→OpenRouter | Vision: OpenRouter (${OPENROUTER_VISION_MODELS.length} models)`, 'info');
-  log(`Image gen: ${IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id).join(' → ')}`, 'info');
+  log(`Image gen: ${IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id).join(' → ') || 'none'}`, 'info');
+  log(`Pollinations watermark: ${POLLINATIONS_API_KEY ? 'DISABLED (clean)' : 'VISIBLE (add POLLINATIONS_API_KEY)'}`, 'info');
   log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'} | Tavily: ${TAVILY_API_KEY ? 'enabled' : 'disabled'}`, 'info');
   log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
 });
