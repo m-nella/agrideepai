@@ -654,10 +654,24 @@ function startEditing(msg) {
 }
 
 function buildGuestPayload(messages) {
+  // Identify the last user message — we don't need to prefix it with
+  // attachment info because the backend adds its own enriched note.
+  let lastUserId = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') { lastUserId = messages[i].id; break; }
+  }
   return messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
     .filter(m => m.content && String(m.content).trim().length > 0)
-    .map(m => ({ role: m.role, content: m.content }));
+    .map(m => {
+      let content = String(m.content);
+      // Preserve attachment context in the history so the AI remembers past images/PDFs
+      if (m.files?.length && m.id !== lastUserId) {
+        const names = m.files.map(f => f.filename || 'file').join(', ');
+        content = `[User attached: ${names}]\n${content}`;
+      }
+      return { role: m.role, content };
+    });
 }
 
 async function sendEditedUserMessage() {
