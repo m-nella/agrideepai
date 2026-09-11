@@ -119,21 +119,18 @@ const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCoo
 
 // ==================================================================
 // IMAGE GENERATION PROVIDERS
-// Together AI removed — no free tier exists (requires $5 min purchase)
+// Together AI removed — no free tier (requires $5 min purchase)
+// Hugging Face removed — free hf-inference no longer serves image models
+// (FLUX removed from hf-inference in 2026; modern diffusion models only
+//  available via paid partner providers like fal-ai/Replicate/WaveSpeed)
 // ==================================================================
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
-const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY;
-
-// Hugging Face: current recommended model on hf-inference provider
-// (FLUX.1-schnell is deprecated — see docs recommendation list)
-const HUGGINGFACE_MODEL = process.env.HUGGINGFACE_MODEL || 'stabilityai/stable-diffusion-xl-base-1.0';
 
 const IMAGE_GEN_PROVIDERS = [
   { id: 'cloudflare', name: 'Cloudflare Workers AI (no watermark)', enabled: !!(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) },
   { id: 'pollinations', name: 'Pollinations.ai' + (POLLINATIONS_API_KEY ? ' (clean, no watermark)' : ' (watermarked — add POLLINATIONS_API_KEY)'), enabled: true },
-  { id: 'huggingface', name: 'Hugging Face (no watermark)', enabled: !!HUGGINGFACE_API_KEY },
 ];
 
 const OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY;
@@ -196,11 +193,13 @@ app.get('/api/debug/image-providers', async (req, res) => {
     providers: IMAGE_GEN_PROVIDERS,
     active_providers: IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id),
     pollinations_watermark: POLLINATIONS_API_KEY ? 'disabled (key set)' : 'visible (set POLLINATIONS_API_KEY to remove)',
-    huggingface_model: HUGGINGFACE_MODEL,
     notes: {
-      cloudflare: 'No watermark. JSON body format (not multipart).',
+      cloudflare: 'No watermark. JSON body format. 100k requests/day free.',
       pollinations: 'No watermark when POLLINATIONS_API_KEY is set.',
-      huggingface: 'No watermark. Endpoint: router.huggingface.co/hf-inference/models/{model}. Set HUGGINGFACE_MODEL to override the default.',
+      removed: {
+        together: 'Removed — no free tier (requires $5 min purchase).',
+        huggingface: 'Removed — hf-inference no longer serves image generation models on the free tier (FLUX removed 2026). Modern diffusion models require paid HF Pro + partner providers.',
+      },
     },
   });
 });
@@ -213,7 +212,6 @@ app.get('/api/debug/image-test', async (req, res) => {
     if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) return { skipped: true, reason: 'not configured' };
     try {
       const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
-      // Cloudflare FLUX.1-schnell expects JSON body, not multipart form-data
       const r = await axios.post(url, { prompt, steps: 4 }, {
         headers: { 'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
         responseType: 'arraybuffer', timeout: 60000,
@@ -249,28 +247,10 @@ app.get('/api/debug/image-test', async (req, res) => {
     }
   };
 
-  const testHuggingFace = async () => {
-    if (!HUGGINGFACE_API_KEY) return { skipped: true, reason: 'not configured' };
-    try {
-      const r = await axios.post(
-        `https://router.huggingface.co/hf-inference/models/${HUGGINGFACE_MODEL}`,
-        { inputs: prompt },
-        {
-          headers: { 'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`, 'Content-Type': 'application/json' },
-          responseType: 'arraybuffer', timeout: 60000,
-        }
-      );
-      return { ok: Buffer.from(r.data).length > 1000, bytes: Buffer.from(r.data).length, content_type: r.headers['content-type'] };
-    } catch (e) {
-      return { ok: false, error: e.response?.data ? (Buffer.isBuffer(e.response.data) ? e.response.data.toString().slice(0, 200) : JSON.stringify(e.response.data).slice(0, 200)) : e.message };
-    }
-  };
-
   results.cloudflare = await testCloudflare();
   results.pollinations = await testPollinations();
-  results.huggingface = await testHuggingFace();
 
-  res.json({ prompt, huggingface_model: HUGGINGFACE_MODEL, results });
+  res.json({ prompt, results });
 });
 
 // ==================================================================
@@ -1275,7 +1255,7 @@ app.get('/api/config', (req, res) => res.json({
 
 // ==================================================================
 // IMAGE GENERATION
-// Order: Cloudflare (reliable, no watermark) → Pollinations (reliable, no watermark) → HF (if available)
+// Order: Cloudflare (reliable) → Pollinations (reliable, clean)
 // ==================================================================
 async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
   const ext = mimeType.includes('png') ? 'png' : 'jpg';
@@ -1290,8 +1270,7 @@ async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
 async function generateImageWithCloudflare(prompt) {
   if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) throw new Error('Cloudflare not configured');
   const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
-  // CRITICAL FIX: Cloudflare FLUX.1-schnell expects a JSON body, NOT multipart form-data.
-  // The official curl example is: -d '{ "prompt": "...", "steps": 4 }'
+  // Cloudflare FLUX.1-schnell expects JSON body, not multipart form-data.
   const res = await axios.post(url, { prompt, steps: 4 }, {
     headers: {
       'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
@@ -1348,35 +1327,11 @@ async function generateImageWithPollinations(prompt) {
   return { url: publicUrl, provider: 'pollinations' };
 }
 
-async function generateImageWithHuggingFace(prompt) {
-  if (!HUGGINGFACE_API_KEY) throw new Error('Hugging Face not configured');
-  // New router endpoint (replaces retired api-inference.huggingface.co)
-  // Model must be one currently served by the hf-inference provider.
-  const res = await axios.post(
-    `https://router.huggingface.co/hf-inference/models/${HUGGINGFACE_MODEL}`,
-    { inputs: prompt },
-    {
-      headers: {
-        'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      responseType: 'arraybuffer',
-      timeout: 60000,
-    }
-  );
-  const buffer = Buffer.from(res.data);
-  if (buffer.length < 1000) throw new Error('Hugging Face returned too small a response');
-  const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
-  return { url: publicUrl, provider: 'huggingface' };
-}
-
 async function generateImage(prompt) {
   const errors = [];
-  // Order: Cloudflare (best, no watermark) → Pollinations (reliable, no watermark) → Hugging Face (if available)
   const providers = [
     { id: 'cloudflare', fn: () => generateImageWithCloudflare(prompt) },
     { id: 'pollinations', fn: () => generateImageWithPollinations(prompt) },
-    { id: 'huggingface', fn: () => generateImageWithHuggingFace(prompt) },
   ];
   for (const p of providers) {
     try {
@@ -1723,8 +1678,7 @@ app.listen(PORT, () => {
   log(`🚀 AgriDeepAI running on port ${PORT}`, 'info');
   log(`Text: Groq→FHRouter→OpenRouter | Vision: OpenRouter (${OPENROUTER_VISION_MODELS.length} models)`, 'info');
   log(`Image gen: ${IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id).join(' → ') || 'none'}`, 'info');
-  log(`HF model: ${HUGGINGFACE_MODEL}`, 'info');
-  log(`Pollinations: ${POLLINATIONS_API_KEY ? 'clean' : 'watermarked'}`, 'info');
+  log(`Pollinations: ${POLLINATIONS_API_KEY ? 'clean (no watermark)' : 'watermarked'}`, 'info');
   log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'} | Tavily: ${TAVILY_API_KEY ? 'enabled' : 'disabled'}`, 'info');
   log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
 });
