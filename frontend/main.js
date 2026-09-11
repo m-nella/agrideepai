@@ -6,7 +6,6 @@ const log = (msg, type = 'info') => console.log(`[FRONTEND] [${new Date().toISOS
 
 const IS_SHARE_VIEW = document.documentElement.classList.contains('is-share-view');
 
-// ============ CLIENT ID (per browser) ============
 const CLIENT_ID_KEY = 'agrideepai-client-id-v1';
 function getOrCreateClientId() {
   try {
@@ -83,7 +82,6 @@ let state = {
   forgotPw: { email: null, pendingToken: null, grantedToken: null },
 };
 
-// ============ SMART SCROLL ============
 function isNearBottom(container, threshold = 200) {
   if (!container) return true;
   return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
@@ -102,7 +100,6 @@ if (chatContainer) {
   }, { passive: true });
 }
 
-// ============ COUNTDOWN TIMER ============
 function attachCountdown(btn, seconds = CODE_RESEND_SECONDS) {
   if (!btn) return;
   if (btn._cdInterval) { clearInterval(btn._cdInterval); btn._cdInterval = null; }
@@ -119,7 +116,6 @@ function attachCountdown(btn, seconds = CODE_RESEND_SECONDS) {
   }, 1000);
 }
 
-// ============ LIGHTBOX ============
 function openLightbox(src, isImage = true) {
   const overlay = document.createElement('div');
   overlay.className = 'lightbox-overlay';
@@ -142,7 +138,6 @@ function openLightbox(src, isImage = true) {
   document.body.appendChild(overlay);
 }
 
-// ============ MODALS ============
 function showCustomModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel', isDanger = false) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
@@ -194,7 +189,6 @@ function safeMarkdown(text) {
   catch (e) { return (String(text) || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 }
 
-// ============ GENERATED IMAGE DOWNLOAD ============
 async function downloadGeneratedImage(url, filename) {
   try {
     const resp = await fetch(url, { mode: 'cors' });
@@ -215,7 +209,6 @@ async function downloadGeneratedImage(url, filename) {
   }
 }
 
-// ============ SUPABASE ============
 async function initSupabase() {
   log('Initializing Supabase...', 'info');
   try {
@@ -265,7 +258,6 @@ async function initSupabase() {
   }
 }
 
-// ============ SESSION VALIDITY ============
 async function verifySessionValidity(force = false) {
   if (!state.supabase || !state.currentUser || state.isShareView) return true;
   const now = Date.now();
@@ -444,11 +436,6 @@ function appendChatItem(container, chat) {
   container.appendChild(div);
 }
 
-// ============================================================
-// RENDER: builds the assistant bubble. Generated images are
-// rendered large with a download icon overlay. No provider
-// name or branding is ever shown.
-// ============================================================
 function renderGeneratedImageBlock(genFile) {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:relative;margin-top:.6rem;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--background);max-width:min(560px,100%);';
@@ -466,7 +453,6 @@ function renderGeneratedImageBlock(genFile) {
   };
   wrap.appendChild(img);
 
-  // Download button — floating top-right of the image
   const dlBtn = document.createElement('button');
   dlBtn.title = 'Download image';
   dlBtn.setAttribute('aria-label', 'Download image');
@@ -568,7 +554,6 @@ function renderMessages() {
         c.innerHTML = safeMarkdown(msg.content);
         msgDiv.appendChild(c);
       }
-      // Generated images: rendered large with download button, no branding
       const genFiles = (msg.files || []).filter(f => f.generated && f.public_url);
       genFiles.forEach(f => {
         msgDiv.appendChild(renderGeneratedImageBlock(f));
@@ -655,7 +640,11 @@ function renderMessages() {
 
         const share = document.createElement('button'); share.className = 'icon-button-sm';
         share.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`; share.title = 'Share this message';
-        share.onclick = (e) => { e.stopPropagation(); shareConversation([{ role: msg.role, content: msg.content }]); };
+        share.onclick = (e) => {
+          e.stopPropagation();
+          // NEW: include files so generated images are visible in the shared view
+          shareConversation([{ role: msg.role, content: msg.content, files: msg.files || [] }]);
+        };
         ar.appendChild(share);
       }
 
@@ -787,17 +776,10 @@ async function regenerateMessage(index) {
   }
 }
 
-// ============================================================
-// consumeStream — handles `text` chunks, `image` events (new),
-// and terminal `done`. Generated images are attached to the
-// last assistant message as `files` entries with `generated:true`.
-// ============================================================
 async function consumeStream(response, chat, versionData = null, opts = {}) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let full = ''; let buffer = '';
-  let pendingImages = [];
-
   const ensureLastAssistant = () => {
     let last = state.messages[state.messages.length - 1];
     if (!last || last.role !== 'assistant') {
@@ -807,7 +789,6 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
     }
     return last;
   };
-
   while (true) {
     const { done, value } = await reader.read(); if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -817,16 +798,12 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
       const data = line.slice(6); if (data === '[DONE]') continue;
       try {
         const parsed = JSON.parse(data);
-
-        // Text chunk
         if (parsed.text) {
           full += parsed.text;
           const last = ensureLastAssistant();
           last.content = full; chat.messages = state.messages;
           updateStreamingLast(full);
         }
-
-        // Image chunk (new)
         if (parsed.image) {
           const last = ensureLastAssistant();
           if (!last.files) last.files = [];
@@ -836,13 +813,11 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
             public_url: parsed.image,
             generated: true,
           });
-          pendingImages.push(parsed.image);
           renderMessages();
         }
       } catch (e) {}
     }
   }
-
   const last = state.messages[state.messages.length - 1];
   if (last && last.role === 'assistant' && last.content) {
     if (!state.messageVersions[last.id]) state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
@@ -857,6 +832,9 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
   }
 }
 
+// ============================================================
+// SHARE — now includes `files` so generated images render in shared view
+// ============================================================
 async function shareConversation(messagesToShare = null, chatId = null) {
   const targetChatId = chatId || state.activeChatId;
   const chat = state.chats.find(c => c.id === targetChatId);
@@ -877,20 +855,24 @@ async function shareConversation(messagesToShare = null, chatId = null) {
   if (messagesToShare) {
     messages = messagesToShare;
   } else if (chat && Array.isArray(chat.messages) && chat.messages.length > 0) {
-    messages = chat.messages.map(m => ({ role: m.role, content: m.content }));
+    messages = chat.messages.map(m => ({ role: m.role, content: m.content, files: m.files || [] }));
   } else if (chat && state.currentUser && !chat.id.startsWith('local_')) {
     try {
       const res = await apiFetch(`/api/chat/conversations/${chat.id}/messages`);
       const data = await res.json();
-      messages = (data || []).map(m => ({ role: m.role, content: m.content }));
+      messages = (data || []).map(m => ({ role: m.role, content: m.content, files: m.files || [] }));
     } catch (e) { showToast('Failed to load chat: ' + e.message, true); return; }
   } else if (state.activeChatId === targetChatId) {
-    messages = state.messages.map(m => ({ role: m.role, content: m.content }));
+    messages = state.messages.map(m => ({ role: m.role, content: m.content, files: m.files || [] }));
   } else {
     messages = [];
   }
 
-  messages = (messages || []).filter(m => m.content && String(m.content).trim());
+  // Keep messages that have content OR a generated image attachment
+  messages = (messages || []).filter(m =>
+    (m.content && String(m.content).trim()) ||
+    (Array.isArray(m.files) && m.files.some(f => f.generated && f.public_url))
+  );
   if (!messages.length) { showToast('Nothing to share', true); return; }
 
   try {
@@ -1195,9 +1177,6 @@ function closeAuthModal() { authModal.classList.add('hidden'); }
 modalClose.forEach(b => b.addEventListener('click', closeAuthModal));
 authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuthModal(); });
 
-// ============================================================
-// SIGN IN / SIGN UP FORM
-// ============================================================
 function renderAuthForm(mode) {
   const isLogin = mode === 'login';
   authModalBody.innerHTML = `
@@ -1401,9 +1380,6 @@ function renderAuthForm(mode) {
   };
 }
 
-// ============================================================
-// FORGOT PASSWORD — 3 steps: email → code → new password
-// ============================================================
 function renderForgotPasswordForm(step) {
   const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
   const pwIsStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
@@ -1603,7 +1579,6 @@ function renderForgotPasswordForm(step) {
   }
 }
 
-// ============ ACCOUNT MODAL ============
 async function openAccountModal() {
   if (!state.currentUser) return;
   let profile = {};
@@ -1988,7 +1963,6 @@ chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; up
 document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
 shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
 
-// ============ AUTO SESSION CHECK ============
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') verifySessionValidity();
 });
