@@ -329,3 +329,86 @@
       fetch(apiUrl, { cache: 'no-store', signal: ctrl.signal })
         .then(function (res) {
           clearTimeout(timer);
+          console.log('[SHARE] Response status:', res.status, res.headers.get('content-type'));
+          if (!res.ok) {
+            return res.text().then(function (body) {
+              var msg = 'HTTP ' + res.status;
+              try {
+                var parsed = JSON.parse(body);
+                if (parsed && parsed.error) msg = parsed.error;
+              } catch (e) {}
+              throw new Error(msg);
+            });
+          }
+          return res.json();
+        })
+        .then(function (data) {
+          console.log('[SHARE] Data received:', data);
+          var messages = (data && Array.isArray(data.messages)) ? data.messages : [];
+          if (!messages.length) {
+            setStatus('This shared chat is empty.', false);
+            return;
+          }
+          statusEl.style.display = 'none';
+          messages.forEach(function (msg) {
+            if (!msg || !msg.role) return;
+            var row = document.createElement('div');
+            row.className = 'msg-row ' + msg.role;
+            if (msg.role === 'assistant') {
+              var h = document.createElement('div');
+              h.className = 'msg-header';
+              h.innerHTML = '<img src="/logo.png" alt="" /><span>agrideepai</span>';
+              row.appendChild(h);
+            }
+            var bubble = document.createElement('div');
+            bubble.className = 'msg-bubble ' + msg.role;
+            var content = (msg.content == null) ? '' : String(msg.content);
+
+            // Render text content (if any)
+            if (content) {
+              if (msg.role === 'assistant') {
+                var textWrap = document.createElement('div');
+                textWrap.innerHTML = safeMd(content);
+                bubble.appendChild(textWrap);
+              } else {
+                bubble.textContent = content;
+              }
+            }
+
+            // Render generated images (if any)
+            var files = Array.isArray(msg.files) ? msg.files : [];
+            files.forEach(function (f) {
+              if (f && f.public_url && (f.generated || (f.mime_type && f.mime_type.indexOf('image/') === 0))) {
+                if (msg.role === 'assistant' && f.generated) {
+                  bubble.appendChild(renderGeneratedImageBlock(f));
+                } else if (f.public_url) {
+                  // Non-generated image attachment in a user message — small thumbnail
+                  var thumb = document.createElement('img');
+                  thumb.src = f.public_url;
+                  thumb.alt = f.filename || 'image';
+                  thumb.style.cssText = 'display:block;max-width:200px;max-height:200px;object-fit:cover;border-radius:8px;margin-top:.4rem;cursor:zoom-in;';
+                  thumb.onclick = function () { openLightbox(f.public_url); };
+                  bubble.appendChild(thumb);
+                }
+              }
+            });
+
+            // Skip the whole bubble if there's nothing to show
+            if (!content && !bubble.querySelector('img')) return;
+
+            row.appendChild(bubble);
+            listEl.appendChild(row);
+          });
+          document.title = 'Shared Chat — AgriDeepAI';
+          console.log('[SHARE] Rendered', messages.length, 'messages');
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          var msg = (err && err.name === 'AbortError') ? 'Request timed out' : (err && err.message) || 'unknown error';
+          console.error('[SHARE] Error:', err);
+          setStatus('Unable to load this shared chat: ' + msg, true);
+        });
+    })();
+  </script>
+</body>
+</html>
