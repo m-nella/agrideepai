@@ -117,6 +117,7 @@
       border-bottom-left-radius: 4px;
       color: var(--text);
       width: 100%;
+      max-width: min(780px, 92%);
     }
     .msg-bubble.assistant h1, .msg-bubble.assistant h2, .msg-bubble.assistant h3 { margin: .6rem 0 .3rem; font-weight: 600; }
     .msg-bubble.assistant h1 { font-size: 1.3rem; }
@@ -132,6 +133,65 @@
     .msg-bubble.assistant th { background: var(--surface-hover); }
     .msg-bubble.assistant blockquote { border-left: 3px solid var(--accent); padding-left: .6rem; margin: .3rem 0; color: var(--text-muted); }
     .msg-bubble.assistant hr { display: none; }
+
+    /* Generated image inside a shared assistant bubble */
+    .gen-image-wrap {
+      position: relative;
+      margin-top: .6rem;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--background);
+      max-width: min(560px, 100%);
+    }
+    .gen-image-wrap img {
+      display: block;
+      width: 100%;
+      height: auto;
+      cursor: zoom-in;
+    }
+    .gen-download-btn {
+      position: absolute;
+      top: .5rem;
+      right: .5rem;
+      background: rgba(0,0,0,.6);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 8px;
+      padding: .4rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      min-width: 36px;
+      min-height: 36px;
+      backdrop-filter: blur(4px);
+      transition: background .15s;
+    }
+    .gen-download-btn:hover { background: rgba(0,0,0,.85); }
+    .gen-download-btn svg { width: 16px; height: 16px; }
+
+    /* Lightbox */
+    .lightbox-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      cursor: zoom-out;
+      animation: fadeIn .2s ease;
+    }
+    .lightbox-overlay img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
     @media (max-width: 480px) {
       .msg-bubble { max-width: 92%; padding: .55rem .85rem; font-size: .92rem; }
       main { padding: 1rem .75rem 2.5rem; }
@@ -185,6 +245,70 @@
         });
       }
 
+      function openLightbox(src) {
+        var overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        var closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '&times;';
+        closeBtn.style.cssText = 'position:absolute;top:1rem;right:1rem;background:rgba(255,255,255,0.12);border:none;color:#fff;font-size:2rem;cursor:pointer;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;';
+        closeBtn.onclick = function (e) { e.stopPropagation(); overlay.remove(); };
+        overlay.appendChild(closeBtn);
+        var img = document.createElement('img');
+        img.src = src;
+        overlay.appendChild(img);
+        overlay.onclick = function () { overlay.remove(); };
+        document.body.appendChild(overlay);
+      }
+
+      async function downloadImage(url, filename) {
+        try {
+          var resp = await fetch(url, { mode: 'cors' });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          var blob = await resp.blob();
+          var blobUrl = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = filename || ('agrideepai-' + Date.now() + '.jpg');
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 2000);
+        } catch (err) {
+          console.warn('[SHARE] Download fallback:', err);
+          window.open(url, '_blank');
+        }
+      }
+
+      function renderGeneratedImageBlock(genFile) {
+        var wrap = document.createElement('div');
+        wrap.className = 'gen-image-wrap';
+
+        var img = document.createElement('img');
+        img.src = genFile.public_url;
+        img.alt = 'Generated image';
+        img.onclick = function () { openLightbox(genFile.public_url); };
+        img.onerror = function () {
+          var err = document.createElement('div');
+          err.style.cssText = 'padding:1rem;color:#98a2ad;font-size:.85rem;text-align:center;';
+          err.textContent = 'Image unavailable.';
+          wrap.replaceChildren(err);
+        };
+        wrap.appendChild(img);
+
+        var btn = document.createElement('button');
+        btn.className = 'gen-download-btn';
+        btn.title = 'Download image';
+        btn.setAttribute('aria-label', 'Download image');
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+        btn.onclick = function (e) {
+          e.stopPropagation();
+          downloadImage(genFile.public_url, 'agrideepai-' + Date.now() + '.jpg');
+        };
+        wrap.appendChild(btn);
+
+        return wrap;
+      }
+
       if (!statusEl || !listEl) {
         console.error('[SHARE] Missing #shareStatus or #shareMessages');
         return;
@@ -205,55 +329,3 @@
       fetch(apiUrl, { cache: 'no-store', signal: ctrl.signal })
         .then(function (res) {
           clearTimeout(timer);
-          console.log('[SHARE] Response status:', res.status, res.headers.get('content-type'));
-          if (!res.ok) {
-            return res.text().then(function (body) {
-              var msg = 'HTTP ' + res.status;
-              try {
-                var parsed = JSON.parse(body);
-                if (parsed && parsed.error) msg = parsed.error;
-              } catch (e) {}
-              throw new Error(msg);
-            });
-          }
-          return res.json();
-        })
-        .then(function (data) {
-          console.log('[SHARE] Data received:', data);
-          var messages = (data && Array.isArray(data.messages)) ? data.messages : [];
-          if (!messages.length) {
-            setStatus('This shared chat is empty.', false);
-            return;
-          }
-          statusEl.style.display = 'none';
-          messages.forEach(function (msg) {
-            if (!msg || !msg.role) return;
-            var row = document.createElement('div');
-            row.className = 'msg-row ' + msg.role;
-            if (msg.role === 'assistant') {
-              var h = document.createElement('div');
-              h.className = 'msg-header';
-              h.innerHTML = '<img src="/logo.png" alt="" /><span>agrideepai</span>';
-              row.appendChild(h);
-            }
-            var bubble = document.createElement('div');
-            bubble.className = 'msg-bubble ' + msg.role;
-            var content = (msg.content == null) ? '' : String(msg.content);
-            if (msg.role === 'assistant') bubble.innerHTML = safeMd(content);
-            else bubble.textContent = content;
-            row.appendChild(bubble);
-            listEl.appendChild(row);
-          });
-          document.title = 'Shared Chat — AgriDeepAI';
-          console.log('[SHARE] Rendered', messages.length, 'messages');
-        })
-        .catch(function (err) {
-          clearTimeout(timer);
-          var msg = (err && err.name === 'AbortError') ? 'Request timed out' : (err && err.message) || 'unknown error';
-          console.error('[SHARE] Error:', err);
-          setStatus('Unable to load this shared chat: ' + msg, true);
-        });
-    })();
-  </script>
-</body>
-</html>
