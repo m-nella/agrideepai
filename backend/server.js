@@ -105,7 +105,6 @@ const FHROUTER_VISION_MODELS = [];
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TEXT_MODELS = ['meta-llama/llama-3.3-70b-instruct:free', 'qwen/qwen3-235b-a22b:free', 'mistralai/mistral-7b-instruct:free'];
-
 const OPENROUTER_VISION_MODELS = [
   'nvidia/nemotron-nano-12b-v2-vl:free',
   'minimax/minimax-m3:free',
@@ -1205,8 +1204,7 @@ app.get('/api/config', (req, res) => res.json({
 }));
 
 // ==================================================================
-// IMAGE GENERATION (Cloudflare → Together → HF → Pollinations)
-// Clean providers first, watermarked last
+// IMAGE GENERATION
 // ==================================================================
 async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
   const ext = mimeType.includes('png') ? 'png' : 'jpg';
@@ -1219,37 +1217,63 @@ async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
 }
 
 async function generateImageWithPollinations(prompt) {
-  const encoded = encodeURIComponent(prompt);
-  let url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&model=flux&nologo=true&private=true&enhance=true`;
-  // Add API key if configured — removes watermark
-  if (POLLINATIONS_API_KEY) {
-    url += `&key=${encodeURIComponent(POLLINATIONS_API_KEY)}`;
+  // Use the new OpenAI-compatible API at gen.pollinations.ai with Bearer auth
+  // This is what removes the watermark on the free tier.
+  if (!POLLINATIONS_API_KEY) {
+    throw new Error('POLLINATIONS_API_KEY not set — legacy URL endpoint would watermark');
   }
-  const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000, maxRedirects: 5 });
-  const buffer = Buffer.from(res.data);
+  const res = await axios.post('https://gen.pollinations.ai/v1/images/generations', {
+    model: 'flux',
+    prompt,
+    n: 1,
+    size: '1024x1024',
+    response_format: 'b64_json',
+  }, {
+    headers: {
+      'Authorization': `Bearer ${POLLINATIONS_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    timeout: 90000,
+  });
+  const b64 = res.data?.data?.[0]?.b64_json || res.data?.data?.[0]?.url;
+  if (!b64) throw new Error('No image in Pollinations response');
+  let buffer;
+  if (b64.startsWith('http')) {
+    const imgRes = await axios.get(b64, { responseType: 'arraybuffer', timeout: 60000 });
+    buffer = Buffer.from(imgRes.data);
+  } else {
+    buffer = Buffer.from(b64, 'base64');
+  }
   if (buffer.length < 1000) throw new Error('Pollinations returned too small a response');
   const publicUrl = await uploadGeneratedImage(buffer, 'image/jpeg');
-  return { url: publicUrl, provider: POLLINATIONS_API_KEY ? 'pollinations-clean' : 'pollinations-watermarked' };
+  return { url: publicUrl, provider: 'pollinations' };
 }
 
 async function generateImageWithCloudflare(prompt) {
   if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) throw new Error('Cloudflare not configured');
   const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell`;
-  const res = await axios.post(url, { prompt, num_steps: 4 }, {
-    headers: { 'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+  // Cloudflare FLUX uses multipart form data
+  const formData = new FormData();
+  formData.append('prompt', prompt);
+  formData.append('steps', '4');
+  const res = await axios.post(url, formData, {
+    headers: {
+      'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+      ...formData.getHeaders(),
+    },
     responseType: 'arraybuffer',
     timeout: 60000,
   });
   const contentType = res.headers['content-type'] || '';
   let buffer;
   if (contentType.includes('application/json')) {
-    // FLUX returns { image: "<base64>" } or { result: { image: "<base64>" } }
+    // Some Cloudflare responses wrap the image in JSON
     const json = JSON.parse(Buffer.from(res.data).toString('utf-8'));
-    const b64 = json?.image || json?.result?.image;
+    const b64 = json?.image || json?.result?.image || json?.result?.b64_json;
     if (!b64) throw new Error('No image in Cloudflare JSON response');
     buffer = Buffer.from(b64, 'base64');
   } else {
-    // Binary response
+    // Binary response (most common for FLUX)
     buffer = Buffer.from(res.data);
   }
   if (buffer.length < 1000) throw new Error('Cloudflare returned too small a response');
@@ -1259,7 +1283,7 @@ async function generateImageWithCloudflare(prompt) {
 
 async function generateImageWithTogether(prompt) {
   if (!TOGETHER_API_KEY) throw new Error('Together AI not configured');
-  const res = await axios.post('https://api.together.ai/v1/images/generations', {
+  const res = await axios.post('https://api.together.xyz/v1/images/generations', {
     model: 'black-forest-labs/FLUX.1-schnell-Free',
     prompt,
     width: 1024,
@@ -1297,7 +1321,6 @@ async function generateImageWithHuggingFace(prompt) {
 
 async function generateImage(prompt) {
   const errors = [];
-  // Order: clean providers first (Cloudflare/Together/HF), Pollinations (clean if key) last
   const providers = [
     { id: 'cloudflare', fn: () => generateImageWithCloudflare(prompt) },
     { id: 'together', fn: () => generateImageWithTogether(prompt) },
