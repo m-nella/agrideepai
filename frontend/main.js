@@ -55,7 +55,6 @@ const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const authSidebarBtn = document.getElementById('authSidebarBtn');
 const attachBtn = document.getElementById('attachBtn');
-const generateImageBtn = document.getElementById('generateImageBtn');
 const chips = document.querySelectorAll('.chip');
 const authModal = document.getElementById('authModal');
 const authModalBody = document.getElementById('authModalBody');
@@ -193,6 +192,27 @@ function cleanContent(content) {
 function safeMarkdown(text) {
   try { return (marked.parse(cleanContent(text) || '') || '').replace(/<hr\s*\/?>/g, ''); }
   catch (e) { return (String(text) || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+}
+
+// ============ GENERATED IMAGE DOWNLOAD ============
+async function downloadGeneratedImage(url, filename) {
+  try {
+    const resp = await fetch(url, { mode: 'cors' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename || `agrideepai-image-${Date.now()}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+    showToast('Image downloaded');
+  } catch (err) {
+    log(`Download failed, falling back to new tab: ${err.message}`, 'warn');
+    window.open(url, '_blank');
+  }
 }
 
 // ============ SUPABASE ============
@@ -424,6 +444,45 @@ function appendChatItem(container, chat) {
   container.appendChild(div);
 }
 
+// ============================================================
+// RENDER: builds the assistant bubble. Generated images are
+// rendered large with a download icon overlay. No provider
+// name or branding is ever shown.
+// ============================================================
+function renderGeneratedImageBlock(genFile) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;margin-top:.6rem;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--background);max-width:min(560px,100%);';
+
+  const img = document.createElement('img');
+  img.src = genFile.public_url;
+  img.alt = 'Generated image';
+  img.style.cssText = 'display:block;width:100%;height:auto;cursor:zoom-in;';
+  img.onclick = () => openLightbox(genFile.public_url, true);
+  img.onerror = () => {
+    const err = document.createElement('div');
+    err.style.cssText = 'padding:1rem;color:var(--text-muted);font-size:.85rem;text-align:center;';
+    err.textContent = 'Image unavailable.';
+    wrap.replaceChildren(err);
+  };
+  wrap.appendChild(img);
+
+  // Download button — floating top-right of the image
+  const dlBtn = document.createElement('button');
+  dlBtn.title = 'Download image';
+  dlBtn.setAttribute('aria-label', 'Download image');
+  dlBtn.innerHTML = `<i data-lucide="download" style="width:16px;height:16px;"></i>`;
+  dlBtn.style.cssText = 'position:absolute;top:.5rem;right:.5rem;background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:.4rem;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;min-width:36px;min-height:36px;backdrop-filter:blur(4px);transition:background .15s;';
+  dlBtn.onmouseenter = () => { dlBtn.style.background = 'rgba(0,0,0,.8)'; };
+  dlBtn.onmouseleave = () => { dlBtn.style.background = 'rgba(0,0,0,.6)'; };
+  dlBtn.onclick = (e) => {
+    e.stopPropagation();
+    downloadGeneratedImage(genFile.public_url, `agrideepai-${Date.now()}.jpg`);
+  };
+  wrap.appendChild(dlBtn);
+
+  return wrap;
+}
+
 function renderMessages() {
   messageList.innerHTML = '';
   if (!state.messages.length) {
@@ -499,7 +558,7 @@ function renderMessages() {
 
     if (msg.role === 'assistant') {
       const isLast = index === lastIndex;
-      const thinking = isLast && state.isGenerating && msg.content === '';
+      const thinking = isLast && state.isGenerating && msg.content === '' && !(msg.files?.some(f => f.generated));
       if (thinking) {
         const t = document.createElement('div'); t.className = 'thinking-indicator';
         t.innerHTML = `<div class="spinner"></div><span>Thinking...</span>`;
@@ -509,22 +568,11 @@ function renderMessages() {
         c.innerHTML = safeMarkdown(msg.content);
         msgDiv.appendChild(c);
       }
-      const genFile = msg.files?.find(f => f.generated && f.public_url);
-      if (genFile) {
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'margin-top:.6rem;border-radius:12px;overflow:hidden;border:1px solid var(--border);background:var(--background);max-width:min(560px,100%);';
-        const img = document.createElement('img');
-        img.src = genFile.public_url;
-        img.alt = genFile.prompt || 'Generated image';
-        img.style.cssText = 'display:block;width:100%;height:auto;cursor:zoom-in;';
-        img.onclick = () => openLightbox(genFile.public_url, true);
-        wrap.appendChild(img);
-        const meta = document.createElement('div');
-        meta.style.cssText = 'padding:.4rem .7rem;font-size:.75rem;color:var(--text-muted);background:var(--surface-hover);display:flex;justify-content:space-between;gap:.5rem;';
-        meta.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${genFile.prompt || ''}</span><span style="flex-shrink:0;">${genFile.provider || ''}</span>`;
-        wrap.appendChild(meta);
-        msgDiv.appendChild(wrap);
-      }
+      // Generated images: rendered large with download button, no branding
+      const genFiles = (msg.files || []).filter(f => f.generated && f.public_url);
+      genFiles.forEach(f => {
+        msgDiv.appendChild(renderGeneratedImageBlock(f));
+      });
     } else {
       if (msg.files?.length) {
         const atts = document.createElement('div'); atts.className = 'attachments-above';
@@ -546,7 +594,8 @@ function renderMessages() {
       msgDiv.appendChild(c);
     }
 
-    const showActions = (msg.role === 'user') || (msg.role === 'assistant' && msg.content && !(state.isGenerating && index === lastIndex && msg.content === ''));
+    const hasGenerated = msg.files?.some(f => f.generated);
+    const showActions = (msg.role === 'user') || (msg.role === 'assistant' && (msg.content || hasGenerated) && !(state.isGenerating && index === lastIndex && !msg.content && !hasGenerated));
 
     if (state.editingMessageId !== msg.id && showActions) {
       const ar = document.createElement('div'); ar.className = 'message-actions-row';
@@ -554,7 +603,8 @@ function renderMessages() {
       copy.innerHTML = `<i data-lucide="copy" style="width:16px;height:16px;"></i>`; copy.title = 'Copy';
       copy.onclick = async (e) => {
         e.stopPropagation();
-        await navigator.clipboard.writeText(msg.content);
+        const copyText = msg.content || (hasGenerated ? 'Generated image' : '');
+        try { await navigator.clipboard.writeText(copyText); } catch (e) {}
         copy.classList.add('copied'); showToast('Copied!');
         if (state.copyTimeout) clearTimeout(state.copyTimeout);
         state.copyTimeout = setTimeout(() => copy.classList.remove('copied'), 1500);
@@ -596,10 +646,12 @@ function renderMessages() {
         dislike.onclick = (e) => { e.stopPropagation(); toggleDislike(msg); };
         ar.appendChild(dislike);
 
-        const regen = document.createElement('button'); regen.className = 'icon-button-sm';
-        regen.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`; regen.title = 'Regenerate';
-        regen.onclick = (e) => { e.stopPropagation(); regenerateMessage(index); };
-        ar.appendChild(regen);
+        if (!hasGenerated) {
+          const regen = document.createElement('button'); regen.className = 'icon-button-sm';
+          regen.innerHTML = `<i data-lucide="rotate-ccw" style="width:16px;height:16px;"></i>`; regen.title = 'Regenerate';
+          regen.onclick = (e) => { e.stopPropagation(); regenerateMessage(index); };
+          ar.appendChild(regen);
+        }
 
         const share = document.createElement('button'); share.className = 'icon-button-sm';
         share.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`; share.title = 'Share this message';
@@ -735,10 +787,27 @@ async function regenerateMessage(index) {
   }
 }
 
+// ============================================================
+// consumeStream — handles `text` chunks, `image` events (new),
+// and terminal `done`. Generated images are attached to the
+// last assistant message as `files` entries with `generated:true`.
+// ============================================================
 async function consumeStream(response, chat, versionData = null, opts = {}) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let full = ''; let buffer = '';
+  let pendingImages = [];
+
+  const ensureLastAssistant = () => {
+    let last = state.messages[state.messages.length - 1];
+    if (!last || last.role !== 'assistant') {
+      last = { id: 'assist_' + Date.now().toString(36), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
+      state.messages.push(last);
+      chat.messages = state.messages;
+    }
+    return last;
+  };
+
   while (true) {
     const { done, value } = await reader.read(); if (done) break;
     buffer += decoder.decode(value, { stream: true });
@@ -748,18 +817,32 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
       const data = line.slice(6); if (data === '[DONE]') continue;
       try {
         const parsed = JSON.parse(data);
+
+        // Text chunk
         if (parsed.text) {
           full += parsed.text;
-          const last = state.messages[state.messages.length - 1];
-          if (last && last.role === 'assistant') {
-            last.content = full; chat.messages = state.messages;
-            updateStreamingLast(full);
-          }
-          if (versionData) { versionData.versions[versionData.versions.length - 1] = full; }
+          const last = ensureLastAssistant();
+          last.content = full; chat.messages = state.messages;
+          updateStreamingLast(full);
+        }
+
+        // Image chunk (new)
+        if (parsed.image) {
+          const last = ensureLastAssistant();
+          if (!last.files) last.files = [];
+          last.files.push({
+            filename: `generated-${Date.now()}.jpg`,
+            mime_type: 'image/jpeg',
+            public_url: parsed.image,
+            generated: true,
+          });
+          pendingImages.push(parsed.image);
+          renderMessages();
         }
       } catch (e) {}
     }
   }
+
   const last = state.messages[state.messages.length - 1];
   if (last && last.role === 'assistant' && last.content) {
     if (!state.messageVersions[last.id]) state.messageVersions[last.id] = { versions: [], currentIndex: 0 };
@@ -1068,7 +1151,7 @@ async function sendMessage() {
     } else {
       showToast('Error: ' + err.message, true);
       const last = state.messages[state.messages.length - 1];
-      if (last?.role === 'assistant' && (!last.content || !last.content.trim())) {
+      if (last?.role === 'assistant' && (!last.content || !last.content.trim()) && !(last.files && last.files.length)) {
         state.messages.pop(); chat.messages = state.messages; renderMessages();
       }
     }
@@ -1872,124 +1955,6 @@ async function openAccountModal() {
   };
   tabs.forEach(t => t.onclick = () => render(t.dataset.tab));
   render('profile');
-}
-
-// ============================================================
-// IMAGE GENERATION UI
-// ============================================================
-function ensureGenerateImageButton() {
-  if (document.getElementById('generateImageBtn')) return;
-  const composerMain = document.querySelector('.composer-main');
-  if (!composerMain) return;
-  const btn = document.createElement('button');
-  btn.id = 'generateImageBtn';
-  btn.className = 'icon-button';
-  btn.setAttribute('aria-label', 'Generate image');
-  btn.title = 'Generate image from a description';
-  btn.innerHTML = `<i data-lucide="image-plus"></i>`;
-  composerMain.insertBefore(btn, document.getElementById('attachBtn'));
-  btn.onclick = openGenerateImageModal;
-  window.refreshIcons();
-}
-
-function openGenerateImageModal() {
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  modal.innerHTML = `
-    <div class="modal-content" style="max-width: 560px;">
-      <button class="modal-close" id="genImgClose">&times;</button>
-      <h2 style="display:flex;align-items:center;gap:.5rem;"><i data-lucide="image-plus" style="width:22px;height:22px;color:var(--accent);"></i> Generate an Image</h2>
-      <p style="color:var(--text-muted);font-size:.88rem;margin:.25rem 0 .75rem;">Describe the agriculture or livestock scene you want to see. Be specific — the more detail, the better the result.</p>
-      <label>Image description</label>
-      <textarea id="genImgPrompt" rows="3" placeholder="e.g. A healthy maize field at sunrise, farmers inspecting crops, photorealistic style" style="width:100%;padding:.65rem;border-radius:10px;background:var(--background);color:var(--text);border:1px solid var(--border);resize:vertical;font-family:inherit;font-size:15px;min-height:80px;"></textarea>
-      <div id="genImgStatus" class="status-msg" style="display:none;margin-top:.5rem;"></div>
-      <div id="genImgError" class="error-msg" style="display:none;margin-top:.5rem;"></div>
-      <div style="display:flex;gap:.5rem;margin-top:1rem;">
-        <button class="btn-primary" id="genImgSubmit" style="flex:1;">
-          <i data-lucide="sparkles" style="width:16px;height:16px;display:inline-block;vertical-align:-3px;margin-right:4px;"></i>
-          Generate
-        </button>
-        <button class="btn-primary" id="genImgCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  window.refreshIcons();
-
-  const promptInput = document.getElementById('genImgPrompt');
-  const submitBtn = document.getElementById('genImgSubmit');
-  const cancelBtn = document.getElementById('genImgCancel');
-  const closeBtn = document.getElementById('genImgClose');
-  const statusEl = document.getElementById('genImgStatus');
-  const errorEl = document.getElementById('genImgError');
-
-  const close = () => modal.remove();
-  closeBtn.onclick = close;
-  cancelBtn.onclick = close;
-  modal.onclick = (e) => { if (e.target === modal) close(); };
-  setTimeout(() => promptInput.focus(), 50);
-
-  promptInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitBtn.click();
-  });
-
-  submitBtn.onclick = async () => {
-    const prompt = promptInput.value.trim();
-    errorEl.style.display = 'none';
-    statusEl.style.display = 'none';
-    if (!prompt) { errorEl.textContent = 'Please describe the image you want.'; errorEl.style.display = 'block'; return; }
-    if (prompt.length < 5) { errorEl.textContent = 'Please add a bit more detail.'; errorEl.style.display = 'block'; return; }
-
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = `<span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px;"></span>Generating…`;
-    statusEl.textContent = 'This usually takes 5–20 seconds…';
-    statusEl.style.display = 'block';
-
-    try {
-      const res = await fetch('/api/chat/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
-        body: JSON.stringify({ prompt }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
-
-      const genMsg = {
-        id: 'gen_' + Date.now().toString(36),
-        role: 'assistant',
-        content: `Here's the image I generated for: "${prompt}"`,
-        files: [{
-          filename: `generated-${Date.now()}.jpg`,
-          mime_type: 'image/jpeg',
-          public_url: data.url,
-          generated: true,
-          prompt: data.prompt,
-          provider: data.provider,
-        }],
-        created_at: new Date().toISOString(),
-      };
-      state.messages.push(genMsg);
-      const chat = state.chats.find(c => c.id === state.activeChatId);
-      if (chat) chat.messages = state.messages;
-      state.shouldScrollToBottom = true;
-      renderMessages();
-
-      close();
-      showToast(`Image generated via ${data.provider} 🎨`);
-    } catch (err) {
-      errorEl.textContent = 'Could not generate the image: ' + err.message;
-      errorEl.style.display = 'block';
-      statusEl.style.display = 'none';
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = `<i data-lucide="sparkles" style="width:16px;height:16px;display:inline-block;vertical-align:-3px;margin-right:4px;"></i>Generate`;
-      window.refreshIcons();
-    }
-  };
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', ensureGenerateImageButton, { once: true });
-} else {
-  ensureGenerateImageButton();
 }
 
 attachBtn.onclick = () => {
