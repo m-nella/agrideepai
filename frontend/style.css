@@ -512,3 +512,78 @@ html.is-share-view body::before, body.share-view::before {
   .session-logout-btn { align-self: flex-start; }
   .sessions-list .sessions-logout-all { width: 100%; justify-content: center; align-self: stretch; }
 }
+
+/* ===== Code blocks: dark theme + modern top-right copy button ===== */
+.code-block-wrap {
+  position: relative;
+  margin: .65rem 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #0f1318;
+}
+
+.code-block-wrap pre,
+.message-content .code-block-wrap pre {
+  margin: 0 !important;
+  padding: 2.35rem .9rem .85rem !important;
+  background: #0f1318 !important;
+  color: #e6edf3 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, 'Courier New', monospace;
+  font-size: .84rem;
+  line-height: 1.55;
+}
+
+.code-block-wrap pre code,
+.message-content .code-block-wrap pre code {
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0 !important;
+  font-size: inherit;
+}
+
+/* Modern top-right copy button */
+.code-copy-btn {
+  position: absolute;
+  top: .5rem;
+  right: .5rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  padding: .3rem;
+  background: rgba(255, 255, 255, .08);
+  color: #c9d1d9;
+  border: 1px solid rgba(255, 255, 255, .15);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease, transform .12s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.code-copy-btn svg { display: block; width: 14px; height: 14px; pointer-events: none; }
+.code-copy-btn:hover {
+  background: rgba(255, 255, 255, .16);
+  color: #fff;
+  border-color: rgba(255, 255, 255, .3);
+}
+.code-copy-btn:active { transform: scale(.94); }
+.code-copy-btn.copied {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* Responsive: keep the button comfortably tappable on small screens */
+@media (max-width: 480px) {
+  .code-copy-btn { min-width: 34px; min-height: 34px; top: .45rem; right: .45rem; }
+  .code-block-wrap pre { padding: 2.5rem .75rem .75rem !important; font-size: .8rem; }
+}
+
+/* Remove the old plain <pre> styling so it doesn't fight the wrapper */
+.message-content > pre { margin: .65rem 0; padding: .85rem; background: #0f1318; border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
