@@ -480,27 +480,51 @@ async function reloadAfterSend(chatId, expectedMinCount, maxAttempts = 6) {
   return false;
 }
 
+// Rebuilds state.messageVersions from either:
+//   (a) server-stored arrays (version_files / ai_replies / ai_files) — authoritative
+//   (b) local reconstruction for messages that only have `versions` but no
+//       server-side version arrays (guest mode, or pre-migration rows).
 function rebuildVersions() {
   state.messageVersions = {};
   state.messages.forEach((msg, idx) => {
-    if (msg.versions && msg.versions.length > 0) {
-      const curIdx = msg.current_version_index ?? msg.currentVersionIndex ?? 0;
-      const aiReplies = new Array(msg.versions.length).fill('');
-      const aiFiles = new Array(msg.versions.length).fill(null).map(() => []);
-      if (curIdx >= 0 && curIdx < msg.versions.length) {
+    if (!msg.versions || msg.versions.length === 0) return;
+
+    const curIdx = msg.current_version_index ?? msg.currentVersionIndex ?? 0;
+    const versions = msg.versions.slice();
+
+    // Server-side arrays (snake_case from DB)
+    let serverVersionFiles = Array.isArray(msg.version_files) ? msg.version_files : null;
+    let serverAiReplies = Array.isArray(msg.ai_replies) ? msg.ai_replies : null;
+    let serverAiFiles = Array.isArray(msg.ai_files) ? msg.ai_files : null;
+
+    const useServer = serverVersionFiles && serverAiReplies && serverAiFiles
+      && serverVersionFiles.length === versions.length
+      && serverAiReplies.length === versions.length
+      && serverAiFiles.length === versions.length;
+
+    let aiReplies, aiFiles, files;
+
+    if (useServer) {
+      aiReplies = serverAiReplies.map(r => (typeof r === 'string' ? r : ''));
+      aiFiles = serverAiFiles.map(a => Array.isArray(a) ? a.slice() : []);
+      files = serverVersionFiles.map(a => Array.isArray(a) ? a.slice() : []);
+    } else {
+      // Fallback reconstruction for legacy/guest data — only the active version.
+      aiReplies = new Array(versions.length).fill('');
+      aiFiles = new Array(versions.length).fill(null).map(() => []);
+      files = new Array(versions.length).fill(null).map(() => []);
+      if (curIdx >= 0 && curIdx < versions.length) {
         const aiMsg = state.messages[idx + 1];
         if (aiMsg && aiMsg.role === 'assistant') {
           aiReplies[curIdx] = aiMsg.content || '';
           if (Array.isArray(aiMsg.files)) aiFiles[curIdx] = aiMsg.files.slice();
         }
+        if (Array.isArray(msg.files)) files[curIdx] = msg.files.slice();
       }
-      const files = new Array(msg.versions.length).fill(null).map(() => []);
-      if (curIdx >= 0 && curIdx < msg.versions.length && Array.isArray(msg.files)) {
-        files[curIdx] = msg.files.slice();
-      }
-      state.messageVersions[msg.id] = { versions: msg.versions, aiReplies, aiFiles, files, currentIndex: curIdx };
-      msg.content = msg.versions[curIdx] || '';
     }
+
+    state.messageVersions[msg.id] = { versions, aiReplies, aiFiles, files, currentIndex: curIdx };
+    msg.content = versions[curIdx] || '';
   });
 }
 
@@ -622,7 +646,12 @@ function renderMessages() {
         ta.style.height = Math.max(want, 44) + 'px';
         ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
       };
-      ta.addEventListener('input', autoGrow);
+      // Keep state.editingValue in sync with every keystroke so a re-render
+      // (session check, tab focus, etc.) can restore exactly what was typed.
+      ta.addEventListener('input', () => {
+        state.editingValue = ta.value;
+        autoGrow();
+      });
       const g = document.createElement('div'); g.className = 'edit-actions';
       const cancel = document.createElement('button'); cancel.textContent = 'Cancel'; cancel.className = 'edit-btn-cancel';
       cancel.onclick = () => { state.editingMessageId = null; renderMessages(); };
@@ -903,6 +932,39 @@ function buildGuestPayload(messages) {
     });
 }
 
+// After an edit + AI stream completes, syncs the whole version record to the
+// backend so it survives page reloads for logged-in users.
+async function syncVersionsToBackend(userMsg, assistantMsg) {
+  if (!state.currentUser) return;
+  if (!userMsg || !userMsg.id || userMsg.id.startsWith('user_') || userMsg.id.startsWith('assist_') || userMsg.id.startsWith('local_')) return;
+
+  const v = state.messageVersions[userMsg.id];
+  const payload = {
+    userMessageContent: userMsg.content || '',
+    userMessageFiles: Array.isArray(userMsg.files) ? userMsg.files : [],
+    versions: v ? v.versions.slice() : [userMsg.content || ''],
+    versionFiles: v ? v.files.map(f => Array.isArray(f) ? f.slice() : []) : [],
+    aiReplies: v ? v.aiReplies.slice() : (assistantMsg ? [assistantMsg.content || ''] : []),
+    aiFiles: v ? v.aiFiles.map(f => Array.isArray(f) ? f.slice() : []) : (assistantMsg && Array.isArray(assistantMsg.files) ? [assistantMsg.files.slice()] : []),
+    currentVersionIndex: v ? v.currentIndex : 0,
+    assistantContent: assistantMsg ? (assistantMsg.content || '') : '',
+    assistantFiles: assistantMsg && Array.isArray(assistantMsg.files) ? assistantMsg.files : [],
+  };
+  try {
+    const res = await apiFetch(`/api/chat/messages/${userMsg.id}/sync-versions`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    // Update the local assistant message id to match the server's, if it changed.
+    if (data && data.assistantMessageId && assistantMsg && assistantMsg.id !== data.assistantMessageId) {
+      assistantMsg.id = data.assistantMessageId;
+    }
+  } catch (e) {
+    log(`sync-versions failed: ${e.message}`, 'warn');
+  }
+}
+
 async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId); if (!chat) return;
 
@@ -941,6 +1003,15 @@ async function sendEditedUserMessage() {
     state.isGenerating = false; sendBtn.classList.remove('generating'); sendBtn.disabled = false;
     state.abortController = null; updateSendButton();
   }
+
+  // Persist the version record to the backend for logged-in users.
+  try {
+    if (state.currentUser && lastUserMsg) {
+      const uIdx = state.messages.indexOf(lastUserMsg);
+      const aMsg = uIdx >= 0 ? state.messages[uIdx + 1] : null;
+      await syncVersionsToBackend(lastUserMsg, aMsg && aMsg.role === 'assistant' ? aMsg : null);
+    }
+  } catch (e) { log(`post-edit sync failed: ${e.message}`, 'warn'); }
 }
 
 async function regenerateMessage(index) {
@@ -1036,7 +1107,6 @@ async function shareConversation(messagesToShare = null, chatId = null) {
   const targetChatId = chatId || state.activeChatId;
   const chat = state.chats.find(c => c.id === targetChatId);
 
-  // --- Resolve the raw list of messages to share ---
   let rawMessages;
   if (messagesToShare) {
     rawMessages = messagesToShare.slice();
@@ -1054,22 +1124,40 @@ async function shareConversation(messagesToShare = null, chatId = null) {
     rawMessages = [];
   }
 
-  // --- Enrich user messages with version data from local state ---
   const messages = rawMessages.map(m => {
     const base = { role: m.role, content: m.content || '', files: Array.isArray(m.files) ? m.files : [] };
-    if (m.role === 'user' && m.id && state.messageVersions[m.id]) {
-      const v = state.messageVersions[m.id];
-      if (Array.isArray(v.versions) && v.versions.length > 1) {
-        const curIdx = (typeof v.currentIndex === 'number' && v.currentIndex >= 0 && v.currentIndex < v.versions.length)
-          ? v.currentIndex : 0;
+    if (m.role === 'user') {
+      // Prefer fresh local state if present
+      const localV = m.id && state.messageVersions[m.id];
+      if (localV && Array.isArray(localV.versions) && localV.versions.length > 1) {
+        const curIdx = (typeof localV.currentIndex === 'number' && localV.currentIndex >= 0 && localV.currentIndex < localV.versions.length)
+          ? localV.currentIndex : 0;
         return {
           role: 'user',
-          content: v.versions[curIdx] || '',
-          files: (Array.isArray(v.files) && Array.isArray(v.files[curIdx])) ? v.files[curIdx].slice() : base.files,
-          versions: v.versions.slice(),
-          versionFiles: (Array.isArray(v.files) ? v.files : []).map(f => Array.isArray(f) ? f.slice() : []),
-          aiReplies: (Array.isArray(v.aiReplies) ? v.aiReplies : []).slice(),
-          aiFiles: (Array.isArray(v.aiFiles) ? v.aiFiles : []).map(f => Array.isArray(f) ? f.slice() : []),
+          content: localV.versions[curIdx] || '',
+          files: (Array.isArray(localV.files) && Array.isArray(localV.files[curIdx])) ? localV.files[curIdx].slice() : base.files,
+          versions: localV.versions.slice(),
+          versionFiles: (Array.isArray(localV.files) ? localV.files : []).map(f => Array.isArray(f) ? f.slice() : []),
+          aiReplies: (Array.isArray(localV.aiReplies) ? localV.aiReplies : []).slice(),
+          aiFiles: (Array.isArray(localV.aiFiles) ? localV.aiFiles : []).map(f => Array.isArray(f) ? f.slice() : []),
+          currentVersionIndex: curIdx,
+        };
+      }
+      // Fallback: server-stored version arrays (snake_case from DB)
+      if (Array.isArray(m.versions) && m.versions.length > 1) {
+        const curIdx = (typeof m.current_version_index === 'number' && m.current_version_index >= 0 && m.current_version_index < m.versions.length)
+          ? m.current_version_index : 0;
+        const sVF = Array.isArray(m.version_files) ? m.version_files : [];
+        const sAR = Array.isArray(m.ai_replies) ? m.ai_replies : [];
+        const sAF = Array.isArray(m.ai_files) ? m.ai_files : [];
+        return {
+          role: 'user',
+          content: m.versions[curIdx] || '',
+          files: Array.isArray(sVF[curIdx]) ? sVF[curIdx].slice() : base.files,
+          versions: m.versions.slice(),
+          versionFiles: sVF.map(f => Array.isArray(f) ? f.slice() : []),
+          aiReplies: sAR.slice(),
+          aiFiles: sAF.map(f => Array.isArray(f) ? f.slice() : []),
           currentVersionIndex: curIdx,
         };
       }
