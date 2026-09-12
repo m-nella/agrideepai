@@ -701,7 +701,12 @@ const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 // GREETING DETECTION (broadened, verified via /api/debug/detection)
 // ==================================================================
 function isGreetingOnly(text) {
-  const t = (text || '').toLowerCase().trim().replace(/[!?.,;:]+/g, '').replace(/\s+/g, ' ').replace(/['’]/g, '');
+  const t = (text || '')
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[!?.,;:]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!t || t.length > 90) return false;
 
   const exact = new Set([
