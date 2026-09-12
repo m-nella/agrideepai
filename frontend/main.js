@@ -502,7 +502,13 @@ function rebuildVersions() {
           aiReplies[curIdx] = aiMsg.content || '';
         }
       }
-      state.messageVersions[msg.id] = { versions: msg.versions, aiReplies, currentIndex: curIdx };
+      // Same for files: only the currently active version can be reconstructed
+      // from the DB (older versions' attachments aren't stored server-side).
+      const files = new Array(msg.versions.length).fill(null).map(() => []);
+      if (curIdx >= 0 && curIdx < msg.versions.length && Array.isArray(msg.files)) {
+        files[curIdx] = msg.files.slice();
+      }
+      state.messageVersions[msg.id] = { versions: msg.versions, aiReplies, files, currentIndex: curIdx };
       msg.content = msg.versions[curIdx] || '';
     }
   });
@@ -641,35 +647,46 @@ function renderMessages() {
           ? state.messages[curIdx + 1]
           : null;
 
-        // Initialise the version record, capturing the ORIGINAL user text
-        // and its ORIGINAL AI reply as version 0.
+        // Initialise the version record, capturing the ORIGINAL user text,
+        // its ORIGINAL files, and its ORIGINAL AI reply as version 0.
         if (!state.messageVersions[msg.id]) {
           state.messageVersions[msg.id] = {
             versions: [msg.content],
             aiReplies: [oldAiMsg ? (oldAiMsg.content || '') : ''],
+            files: [Array.isArray(msg.files) ? msg.files.slice() : []],
             currentIndex: 0,
           };
         }
         const v = state.messageVersions[msg.id];
         if (!Array.isArray(v.aiReplies)) v.aiReplies = new Array(v.versions.length).fill('');
+        if (!Array.isArray(v.files)) v.files = new Array(v.versions.length).fill(null).map(() => []);
         while (v.aiReplies.length < v.versions.length) v.aiReplies.push('');
+        while (v.files.length < v.versions.length) v.files.push([]);
 
         // Make sure the AI reply for the version we're leaving is captured before truncation.
         if ((v.aiReplies[v.currentIndex] === undefined || v.aiReplies[v.currentIndex] === '') && oldAiMsg) {
           v.aiReplies[v.currentIndex] = oldAiMsg.content || '';
         }
+        // Make sure the current version's files are also captured.
+        if ((!v.files[v.currentIndex] || v.files[v.currentIndex].length === 0) && Array.isArray(msg.files) && msg.files.length > 0) {
+          v.files[v.currentIndex] = msg.files.slice();
+        }
 
         // Push the new user text as a fresh version with an empty AI slot
         // (filled in by sendEditedUserMessage after the stream completes).
+        // Attachments are carried forward into the new version.
         if (v.versions[v.versions.length - 1] !== newContent) {
           v.versions.push(newContent);
           v.aiReplies.push('');
+          v.files.push(Array.isArray(msg.files) ? msg.files.slice() : []);
           v.currentIndex = v.versions.length - 1;
         } else {
           v.currentIndex = v.versions.length - 1;
         }
 
         msg.content = newContent;
+        // Ensure the active version's files are the ones on the message.
+        if (Array.isArray(v.files[v.currentIndex])) msg.files = v.files[v.currentIndex].slice();
         const i = state.messages.indexOf(msg);
         state.messages = state.messages.slice(0, i + 1);
         state.editingMessageId = null;
@@ -747,38 +764,39 @@ function renderMessages() {
         if (state.messageVersions[msg.id]?.versions.length > 1) {
           const v = state.messageVersions[msg.id];
           const vc = document.createElement('div'); vc.className = 'version-controls';
+
+          const applyVersion = (newIdx) => {
+            v.currentIndex = newIdx;
+            msg.content = v.versions[newIdx] || '';
+            // Restore the correct attachments for this version.
+            if (Array.isArray(v.files) && Array.isArray(v.files[newIdx])) {
+              msg.files = v.files[newIdx].slice();
+            } else {
+              msg.files = [];
+            }
+            // Restore the following assistant message's content to match this version.
+            const aiMsg = state.messages[index + 1];
+            if (aiMsg && aiMsg.role === 'assistant' && Array.isArray(v.aiReplies) && v.aiReplies[newIdx] !== undefined) {
+              aiMsg.content = v.aiReplies[newIdx];
+            }
+            renderMessages();
+          };
+
           const prev = document.createElement('button');
           prev.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
           prev.disabled = v.currentIndex === 0;
-          prev.onclick = () => {
-            if (v.currentIndex > 0) {
-              v.currentIndex--;
-              msg.content = v.versions[v.currentIndex];
-              // Swap the following assistant message's content to match this version's AI reply.
-              const aiMsg = state.messages[index + 1];
-              if (aiMsg && aiMsg.role === 'assistant' && Array.isArray(v.aiReplies) && v.aiReplies[v.currentIndex] !== undefined) {
-                aiMsg.content = v.aiReplies[v.currentIndex];
-              }
-              renderMessages();
-            }
-          };
+          prev.onclick = () => { if (v.currentIndex > 0) applyVersion(v.currentIndex - 1); };
           vc.appendChild(prev);
+
           const lbl = document.createElement('span'); lbl.textContent = `${v.currentIndex + 1} / ${v.versions.length}`; vc.appendChild(lbl);
+
           const next = document.createElement('button');
           next.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
           next.disabled = v.currentIndex === v.versions.length - 1;
-          next.onclick = () => {
-            if (v.currentIndex < v.versions.length - 1) {
-              v.currentIndex++;
-              msg.content = v.versions[v.currentIndex];
-              const aiMsg = state.messages[index + 1];
-              if (aiMsg && aiMsg.role === 'assistant' && Array.isArray(v.aiReplies) && v.aiReplies[v.currentIndex] !== undefined) {
-                aiMsg.content = v.aiReplies[v.currentIndex];
-              }
-              renderMessages();
-            }
-          };
-          vc.appendChild(next); ar.appendChild(vc);
+          next.onclick = () => { if (v.currentIndex < v.versions.length - 1) applyVersion(v.currentIndex + 1); };
+          vc.appendChild(next);
+
+          ar.appendChild(vc);
         }
       }
 
