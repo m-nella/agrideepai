@@ -488,11 +488,22 @@ async function reloadAfterSend(chatId, expectedMinCount, maxAttempts = 6) {
 
 function rebuildVersions() {
   state.messageVersions = {};
-  state.messages.forEach(msg => {
+  state.messages.forEach((msg, idx) => {
     if (msg.versions && msg.versions.length > 0) {
-      const idx = msg.current_version_index ?? msg.currentVersionIndex ?? 0;
-      state.messageVersions[msg.id] = { versions: msg.versions, currentIndex: idx };
-      msg.content = msg.versions[idx] || '';
+      const curIdx = msg.current_version_index ?? msg.currentVersionIndex ?? 0;
+      // Best-effort reconstruction: put the current assistant reply (if any) into
+      // the aiReplies slot for the current version index. Older versions will have
+      // an empty slot; that's expected because the backend only stores the currently
+      // active branch.
+      const aiReplies = new Array(msg.versions.length).fill('');
+      if (curIdx >= 0 && curIdx < msg.versions.length) {
+        const aiMsg = state.messages[idx + 1];
+        if (aiMsg && aiMsg.role === 'assistant') {
+          aiReplies[curIdx] = aiMsg.content || '';
+        }
+      }
+      state.messageVersions[msg.id] = { versions: msg.versions, aiReplies, currentIndex: curIdx };
+      msg.content = msg.versions[curIdx] || '';
     }
   });
 }
@@ -622,10 +633,42 @@ function renderMessages() {
       const send = document.createElement('button'); send.textContent = 'Send'; send.className = 'edit-btn-send';
       send.onclick = async () => {
         const newContent = ta.value.trim(); if (!newContent) return;
-        if (!state.messageVersions[msg.id]) state.messageVersions[msg.id] = { versions: [msg.content], currentIndex: 0 };
+
+        // Identify the assistant message currently paired with this user message
+        // so we can store the original AI reply alongside the original version.
+        const curIdx = state.messages.indexOf(msg);
+        const oldAiMsg = (state.messages[curIdx + 1] && state.messages[curIdx + 1].role === 'assistant')
+          ? state.messages[curIdx + 1]
+          : null;
+
+        // Initialise the version record, capturing the ORIGINAL user text
+        // and its ORIGINAL AI reply as version 0.
+        if (!state.messageVersions[msg.id]) {
+          state.messageVersions[msg.id] = {
+            versions: [msg.content],
+            aiReplies: [oldAiMsg ? (oldAiMsg.content || '') : ''],
+            currentIndex: 0,
+          };
+        }
         const v = state.messageVersions[msg.id];
-        if (v.versions[v.versions.length - 1] !== newContent) { v.versions.push(newContent); v.currentIndex = v.versions.length - 1; }
-        else v.currentIndex = v.versions.length - 1;
+        if (!Array.isArray(v.aiReplies)) v.aiReplies = new Array(v.versions.length).fill('');
+        while (v.aiReplies.length < v.versions.length) v.aiReplies.push('');
+
+        // Make sure the AI reply for the version we're leaving is captured before truncation.
+        if ((v.aiReplies[v.currentIndex] === undefined || v.aiReplies[v.currentIndex] === '') && oldAiMsg) {
+          v.aiReplies[v.currentIndex] = oldAiMsg.content || '';
+        }
+
+        // Push the new user text as a fresh version with an empty AI slot
+        // (filled in by sendEditedUserMessage after the stream completes).
+        if (v.versions[v.versions.length - 1] !== newContent) {
+          v.versions.push(newContent);
+          v.aiReplies.push('');
+          v.currentIndex = v.versions.length - 1;
+        } else {
+          v.currentIndex = v.versions.length - 1;
+        }
+
         msg.content = newContent;
         const i = state.messages.indexOf(msg);
         state.messages = state.messages.slice(0, i + 1);
@@ -707,13 +750,34 @@ function renderMessages() {
           const prev = document.createElement('button');
           prev.innerHTML = `<i data-lucide="chevron-left" style="width:16px;height:16px;"></i>`;
           prev.disabled = v.currentIndex === 0;
-          prev.onclick = () => { if (v.currentIndex > 0) { v.currentIndex--; msg.content = v.versions[v.currentIndex]; renderMessages(); } };
+          prev.onclick = () => {
+            if (v.currentIndex > 0) {
+              v.currentIndex--;
+              msg.content = v.versions[v.currentIndex];
+              // Swap the following assistant message's content to match this version's AI reply.
+              const aiMsg = state.messages[index + 1];
+              if (aiMsg && aiMsg.role === 'assistant' && Array.isArray(v.aiReplies) && v.aiReplies[v.currentIndex] !== undefined) {
+                aiMsg.content = v.aiReplies[v.currentIndex];
+              }
+              renderMessages();
+            }
+          };
           vc.appendChild(prev);
           const lbl = document.createElement('span'); lbl.textContent = `${v.currentIndex + 1} / ${v.versions.length}`; vc.appendChild(lbl);
           const next = document.createElement('button');
           next.innerHTML = `<i data-lucide="chevron-right" style="width:16px;height:16px;"></i>`;
           next.disabled = v.currentIndex === v.versions.length - 1;
-          next.onclick = () => { if (v.currentIndex < v.versions.length - 1) { v.currentIndex++; msg.content = v.versions[v.currentIndex]; renderMessages(); } };
+          next.onclick = () => {
+            if (v.currentIndex < v.versions.length - 1) {
+              v.currentIndex++;
+              msg.content = v.versions[v.currentIndex];
+              const aiMsg = state.messages[index + 1];
+              if (aiMsg && aiMsg.role === 'assistant' && Array.isArray(v.aiReplies) && v.aiReplies[v.currentIndex] !== undefined) {
+                aiMsg.content = v.aiReplies[v.currentIndex];
+              }
+              renderMessages();
+            }
+          };
           vc.appendChild(next); ar.appendChild(vc);
         }
       }
@@ -832,6 +896,11 @@ function buildGuestPayload(messages) {
 
 async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId); if (!chat) return;
+
+  // Remember which user message we're generating the reply for, so we can
+  // store the final AI content into its aiReplies array at the correct index.
+  const lastUserMsg = [...state.messages].reverse().find(m => m.role === 'user');
+
   const assist = { id: 'assist_' + Date.now().toString(36), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
   state.messages.push(assist); chat.messages = state.messages;
   state.isGenerating = true; state.shouldScrollToBottom = true;
@@ -842,7 +911,16 @@ async function sendEditedUserMessage() {
     const payload = { messages: buildGuestPayload(cleanMessages) };
     const response = await fetch('/api/chat/guest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: state.abortController.signal });
     if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'AI failed'); }
-    await consumeStream(response, chat, null, { skipCloudReload: true });
+    await consumeStream(response, chat, null, {
+      skipCloudReload: true,
+      onComplete: (finalContent) => {
+        if (lastUserMsg && state.messageVersions[lastUserMsg.id]) {
+          const v = state.messageVersions[lastUserMsg.id];
+          if (!Array.isArray(v.aiReplies)) v.aiReplies = [];
+          v.aiReplies[v.currentIndex] = finalContent || '';
+        }
+      },
+    });
   } catch (err) { if (err.name !== 'AbortError') showToast('Error: ' + err.message, true); }
   finally {
     state.isGenerating = false; sendBtn.classList.remove('generating'); sendBtn.disabled = false;
@@ -925,6 +1003,9 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
     const v = state.messageVersions[last.id];
     if (v.versions.length === 0 || v.versions[v.versions.length - 1] !== last.content) { v.versions.push(last.content); v.currentIndex = v.versions.length - 1; }
     renderMessages();
+    if (typeof opts.onComplete === 'function') {
+      try { opts.onComplete(last.content); } catch (e) { log(`onComplete error: ${e.message}`, 'warn'); }
+    }
   }
   if (state.currentUser && !opts.skipCloudReload && !chat.id.startsWith('local_')) {
     await reloadAfterSend(chat.id, state.messages.length);
@@ -934,7 +1015,7 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
 }
 
 // ============================================================
-// SHARE — now includes `files` so generated images render in shared view
+// SHARE — includes `files` so generated images render in shared view
 // ============================================================
 async function shareConversation(messagesToShare = null, chatId = null) {
   const targetChatId = chatId || state.activeChatId;
@@ -969,7 +1050,6 @@ async function shareConversation(messagesToShare = null, chatId = null) {
     messages = [];
   }
 
-  // Keep messages that have content OR a generated image attachment
   messages = (messages || []).filter(m =>
     (m.content && String(m.content).trim()) ||
     (Array.isArray(m.files) && m.files.some(f => f.generated && f.public_url))
