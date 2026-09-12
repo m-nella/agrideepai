@@ -184,9 +184,108 @@ function cleanContent(content) {
   return out.join('\n').trim();
 }
 
+// Escapes HTML tags that appear in normal text (outside fenced/inline code),
+// so the AI can never inject raw <div>/<pre>/<button>/<script> into the chat.
+function escapeRawHtmlOutsideCode(text) {
+  if (!text) return '';
+  const lines = String(text).split('\n');
+  let inFence = false;
+  let fenceChar = '';
+  const out = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
+
+    if (fenceMatch) {
+      const char = fenceMatch[1][0];
+      if (!inFence) {
+        inFence = true; fenceChar = char; out.push(line); continue;
+      } else if (char === fenceChar) {
+        inFence = false; fenceChar = ''; out.push(line); continue;
+      }
+      out.push(line); continue;
+    }
+
+    if (inFence) { out.push(line); continue; }
+
+    // Split on inline code spans (`...`) — leave those untouched.
+    const parts = line.split(/(`+[^`]*`+)/g);
+    const escaped = parts.map(part => {
+      if (/^`+[^`]*`+$/.test(part)) return part;
+      return part.replace(
+        /<(\/?)([a-zA-Z][a-zA-Z0-9-]{0,20})((?:\s[^>]*)?)(\/?)>/g,
+        (m, slash, tag, attrs, sc) => {
+          if (attrs && /:\/\//.test(attrs)) return m; // autolink <https://...>
+          return `&lt;${slash}${tag}${attrs}${sc}&gt;`;
+        }
+      );
+    }).join('');
+
+    out.push(escaped);
+  }
+
+  return out.join('\n');
+}
+
 function safeMarkdown(text) {
-  try { return (marked.parse(cleanContent(text) || '') || '').replace(/<hr\s*\/?>/g, ''); }
-  catch (e) { return (String(text) || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+  try {
+    const cleaned = cleanContent(text) || '';
+    const escaped = escapeRawHtmlOutsideCode(cleaned);
+    let html = marked.parse(escaped) || '';
+    html = html.replace(/<hr\s*\/?>/g, '');
+    return html;
+  } catch (e) {
+    return (String(text) || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  }
+}
+
+// Wraps every <pre> in a positioned container and injects a modern
+// top-right copy button. Also strips any inline `style` on the <pre>
+// so the AI can't force a white background.
+function enhanceCodeBlocks(container) {
+  if (!container) return;
+  const pres = container.querySelectorAll('pre');
+  pres.forEach(pre => {
+    if (pre.parentElement && pre.parentElement.classList.contains('code-block-wrap')) return;
+
+    pre.removeAttribute('style'); // safety net
+
+    const wrap = document.createElement('div');
+    wrap.className = 'code-block-wrap';
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy-btn';
+    btn.setAttribute('aria-label', 'Copy code');
+    btn.title = 'Copy code';
+    btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const code = pre.textContent || '';
+      const done = () => {
+        btn.classList.add('copied');
+        setTimeout(() => btn.classList.remove('copied'), 1500);
+      };
+      const fallback = () => {
+        const ta = document.createElement('textarea');
+        ta.value = code;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (_) {}
+        ta.remove();
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(done).catch(() => { fallback(); done(); });
+      } else {
+        fallback(); done();
+      }
+    };
+    wrap.appendChild(btn);
+  });
 }
 
 async function downloadGeneratedImage(url, filename) {
@@ -552,6 +651,7 @@ function renderMessages() {
       } else if (msg.content) {
         const c = document.createElement('div'); c.className = 'message-content';
         c.innerHTML = safeMarkdown(msg.content);
+        enhanceCodeBlocks(c);
         msgDiv.appendChild(c);
       }
       const genFiles = (msg.files || []).filter(f => f.generated && f.public_url);
@@ -642,7 +742,7 @@ function renderMessages() {
         share.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`; share.title = 'Share this message';
         share.onclick = (e) => {
           e.stopPropagation();
-          // NEW: include files so generated images are visible in the shared view
+          // include files so generated images are visible in the shared view
           shareConversation([{ role: msg.role, content: msg.content, files: msg.files || [] }]);
         };
         ar.appendChild(share);
@@ -672,6 +772,7 @@ function updateStreamingLast(fullContent) {
     msgDiv.appendChild(contentDiv);
   }
   contentDiv.innerHTML = safeMarkdown(fullContent);
+  enhanceCodeBlocks(contentDiv);
   smartScroll();
 }
 
