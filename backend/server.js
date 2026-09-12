@@ -698,7 +698,7 @@ const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.tri
 const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 
 // ==================================================================
-// GREETING DETECTION (broadened, verified via /api/debug/detection)
+// GREETING DETECTION
 // ==================================================================
 function isGreetingOnly(text) {
   const t = (text || '')
@@ -1884,6 +1884,70 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
     }
     res.json({ message: 'Updated' });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ==================================================================
+// SYNC VERSIONS — persists full version history for logged-in users
+// ==================================================================
+app.post('/api/chat/messages/:id/sync-versions', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      userMessageContent, userMessageFiles,
+      versions, versionFiles, aiReplies, aiFiles, currentVersionIndex,
+      assistantContent, assistantFiles,
+    } = req.body || {};
+
+    const { data: msg, error: mErr } = await supabase
+      .from('messages')
+      .select('*, conversation_id, conversations(user_id)')
+      .eq('id', id)
+      .single();
+    if (mErr || !msg) return res.status(404).json({ error: 'Message not found' });
+    if (msg.conversations?.user_id !== req.user.id) return res.status(403).json({ error: 'Unauthorized' });
+    if (msg.role !== 'user') return res.status(400).json({ error: 'Only user messages can be synced' });
+
+    const update = {
+      content: (typeof userMessageContent === 'string') ? userMessageContent : (msg.content || ''),
+      versions: Array.isArray(versions) && versions.length > 0 ? versions : [userMessageContent || msg.content || ''],
+      version_files: Array.isArray(versionFiles) ? versionFiles : [],
+      ai_replies: Array.isArray(aiReplies) ? aiReplies : [],
+      ai_files: Array.isArray(aiFiles) ? aiFiles : [],
+      current_version_index: Number.isInteger(currentVersionIndex) ? currentVersionIndex : 0,
+    };
+    if (Array.isArray(userMessageFiles)) update.files = userMessageFiles;
+
+    const { error: uErr } = await supabase.from('messages').update(update).eq('id', id);
+    if (uErr) throw uErr;
+
+    // Delete everything after this user message, then insert the fresh assistant reply.
+    await supabase.from('messages').delete()
+      .eq('conversation_id', msg.conversation_id)
+      .gt('created_at', msg.created_at);
+
+    let assistantMessageId = null;
+    if (typeof assistantContent === 'string' && assistantContent.trim()) {
+      const assistantRow = {
+        conversation_id: msg.conversation_id,
+        role: 'assistant',
+        content: assistantContent,
+        versions: [assistantContent],
+        current_version_index: 0,
+      };
+      if (Array.isArray(assistantFiles) && assistantFiles.length) assistantRow.files = assistantFiles;
+      const { data: aData, error: aErr } = await supabase.from('messages').insert(assistantRow).select().single();
+      if (aErr) throw aErr;
+      assistantMessageId = aData.id;
+    }
+
+    await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', msg.conversation_id);
+
+    log(`[SYNC-VERSIONS] message ${id} → ${update.versions.length} versions, currentIndex ${update.current_version_index}`, 'debug');
+    res.json({ ok: true, assistantMessageId });
+  } catch (err) {
+    log(`[SYNC-VERSIONS] ❌ ${err.message}`, 'error');
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==================================================================
