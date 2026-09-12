@@ -184,8 +184,6 @@ function cleanContent(content) {
   return out.join('\n').trim();
 }
 
-// Escapes HTML tags that appear in normal text (outside fenced/inline code),
-// so the AI can never inject raw <div>/<pre>/<button>/<script> into the chat.
 function escapeRawHtmlOutsideCode(text) {
   if (!text) return '';
   const lines = String(text).split('\n');
@@ -209,14 +207,13 @@ function escapeRawHtmlOutsideCode(text) {
 
     if (inFence) { out.push(line); continue; }
 
-    // Split on inline code spans (`...`) — leave those untouched.
     const parts = line.split(/(`+[^`]*`+)/g);
     const escaped = parts.map(part => {
       if (/^`+[^`]*`+$/.test(part)) return part;
       return part.replace(
         /<(\/?)([a-zA-Z][a-zA-Z0-9-]{0,20})((?:\s[^>]*)?)(\/?)>/g,
         (m, slash, tag, attrs, sc) => {
-          if (attrs && /:\/\//.test(attrs)) return m; // autolink <https://...>
+          if (attrs && /:\/\//.test(attrs)) return m;
           return `&lt;${slash}${tag}${attrs}${sc}&gt;`;
         }
       );
@@ -240,16 +237,13 @@ function safeMarkdown(text) {
   }
 }
 
-// Wraps every <pre> in a positioned container and injects a modern
-// top-right copy button. Also strips any inline `style` on the <pre>
-// so the AI can't force a white background.
 function enhanceCodeBlocks(container) {
   if (!container) return;
   const pres = container.querySelectorAll('pre');
   pres.forEach(pre => {
     if (pre.parentElement && pre.parentElement.classList.contains('code-block-wrap')) return;
 
-    pre.removeAttribute('style'); // safety net
+    pre.removeAttribute('style');
 
     const wrap = document.createElement('div');
     wrap.className = 'code-block-wrap';
@@ -491,10 +485,6 @@ function rebuildVersions() {
   state.messages.forEach((msg, idx) => {
     if (msg.versions && msg.versions.length > 0) {
       const curIdx = msg.current_version_index ?? msg.currentVersionIndex ?? 0;
-      // Reconstruct as much as we can. For freshly-edited messages inside this
-      // session, aiReplies/aiFiles are the authoritative source (see edit handler).
-      // For messages loaded from the DB, only the current branch's reply & files
-      // can be filled — older branches are empty (backend stores only the active one).
       const aiReplies = new Array(msg.versions.length).fill('');
       const aiFiles = new Array(msg.versions.length).fill(null).map(() => []);
       if (curIdx >= 0 && curIdx < msg.versions.length) {
@@ -504,7 +494,6 @@ function rebuildVersions() {
           if (Array.isArray(aiMsg.files)) aiFiles[curIdx] = aiMsg.files.slice();
         }
       }
-      // User attachments are attached to the user message itself.
       const files = new Array(msg.versions.length).fill(null).map(() => []);
       if (curIdx >= 0 && curIdx < msg.versions.length && Array.isArray(msg.files)) {
         files[curIdx] = msg.files.slice();
@@ -641,9 +630,6 @@ function renderMessages() {
       send.onclick = async () => {
         const newContent = ta.value.trim(); if (!newContent) return;
 
-        // Identify the assistant message currently paired with this user message
-        // so we can store the original AI reply AND its generated files alongside
-        // the original version.
         const curIdx = state.messages.indexOf(msg);
         const oldAiMsg = (state.messages[curIdx + 1] && state.messages[curIdx + 1].role === 'assistant')
           ? state.messages[curIdx + 1]
@@ -666,7 +652,6 @@ function renderMessages() {
         while (v.aiFiles.length < v.versions.length) v.aiFiles.push([]);
         while (v.files.length < v.versions.length) v.files.push([]);
 
-        // Capture the AI reply & files for the version we're leaving.
         if ((v.aiReplies[v.currentIndex] === undefined || v.aiReplies[v.currentIndex] === '') && oldAiMsg) {
           v.aiReplies[v.currentIndex] = oldAiMsg.content || '';
         }
@@ -677,12 +662,10 @@ function renderMessages() {
           v.files[v.currentIndex] = msg.files.slice();
         }
 
-        // Push the new user text as a fresh version with empty AI slot.
-        // Attachments are carried forward into the new version.
         if (v.versions[v.versions.length - 1] !== newContent) {
           v.versions.push(newContent);
           v.aiReplies.push('');
-          v.aiFiles.push([]);  // filled in after the stream completes
+          v.aiFiles.push([]);
           v.files.push(Array.isArray(msg.files) ? msg.files.slice() : []);
           v.currentIndex = v.versions.length - 1;
         } else {
@@ -772,13 +755,11 @@ function renderMessages() {
           const applyVersion = (newIdx) => {
             v.currentIndex = newIdx;
             msg.content = v.versions[newIdx] || '';
-            // Restore user attachments for this version.
             if (Array.isArray(v.files) && Array.isArray(v.files[newIdx])) {
               msg.files = v.files[newIdx].slice();
             } else {
               msg.files = [];
             }
-            // Restore the following assistant message: content AND files (generated image).
             const aiMsg = state.messages[index + 1];
             if (aiMsg && aiMsg.role === 'assistant') {
               if (Array.isArray(v.aiReplies) && v.aiReplies[newIdx] !== undefined) {
@@ -945,8 +926,6 @@ async function sendEditedUserMessage() {
           if (!Array.isArray(v.aiReplies)) v.aiReplies = [];
           if (!Array.isArray(v.aiFiles)) v.aiFiles = [];
           v.aiReplies[v.currentIndex] = finalContent || '';
-          // Find the assistant message we just generated (right after lastUserMsg)
-          // and snapshot its files (the generated image, if any) into this version.
           const uIdx = state.messages.indexOf(lastUserMsg);
           const aMsg = uIdx >= 0 ? state.messages[uIdx + 1] : null;
           if (aMsg && aMsg.role === 'assistant' && Array.isArray(aMsg.files)) {
@@ -1051,45 +1030,57 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
 }
 
 // ============================================================
-// SHARE — includes `files` so generated images render in shared view
+// SHARE — snapshot with version history included
 // ============================================================
 async function shareConversation(messagesToShare = null, chatId = null) {
   const targetChatId = chatId || state.activeChatId;
   const chat = state.chats.find(c => c.id === targetChatId);
 
-  if (!messagesToShare && chat && state.currentUser && !chat.id.startsWith('local_')) {
-    try {
-      const response = await apiFetch(`/api/chat/share/${chat.id}`, { method: 'POST' });
-      if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.error || 'Failed'); }
-      const data = await response.json();
-      shareLinkDisplay.textContent = data.url;
-      shareModal.classList.remove('hidden');
-      copyShareLink.onclick = () => navigator.clipboard.writeText(data.url).then(() => showToast('Link copied!'));
-      return;
-    } catch (err) { showToast('Failed to share: ' + err.message, true); return; }
-  }
-
-  let messages;
+  // --- Resolve the raw list of messages to share ---
+  let rawMessages;
   if (messagesToShare) {
-    messages = messagesToShare;
+    rawMessages = messagesToShare.slice();
+  } else if (chat && targetChatId === state.activeChatId && Array.isArray(state.messages) && state.messages.length > 0) {
+    rawMessages = state.messages.slice();
   } else if (chat && Array.isArray(chat.messages) && chat.messages.length > 0) {
-    messages = chat.messages.map(m => ({ role: m.role, content: m.content, files: m.files || [] }));
-  } else if (chat && state.currentUser && !chat.id.startsWith('local_')) {
+    rawMessages = chat.messages.slice();
+  } else if (chat && state.currentUser && !targetChatId.startsWith('local_')) {
     try {
-      const res = await apiFetch(`/api/chat/conversations/${chat.id}/messages`);
+      const res = await apiFetch(`/api/chat/conversations/${targetChatId}/messages`);
       const data = await res.json();
-      messages = (data || []).map(m => ({ role: m.role, content: m.content, files: m.files || [] }));
+      rawMessages = (data || []).slice();
     } catch (e) { showToast('Failed to load chat: ' + e.message, true); return; }
-  } else if (state.activeChatId === targetChatId) {
-    messages = state.messages.map(m => ({ role: m.role, content: m.content, files: m.files || [] }));
   } else {
-    messages = [];
+    rawMessages = [];
   }
 
-  messages = (messages || []).filter(m =>
+  // --- Enrich user messages with version data from local state ---
+  const messages = rawMessages.map(m => {
+    const base = { role: m.role, content: m.content || '', files: Array.isArray(m.files) ? m.files : [] };
+    if (m.role === 'user' && m.id && state.messageVersions[m.id]) {
+      const v = state.messageVersions[m.id];
+      if (Array.isArray(v.versions) && v.versions.length > 1) {
+        const curIdx = (typeof v.currentIndex === 'number' && v.currentIndex >= 0 && v.currentIndex < v.versions.length)
+          ? v.currentIndex : 0;
+        return {
+          role: 'user',
+          content: v.versions[curIdx] || '',
+          files: (Array.isArray(v.files) && Array.isArray(v.files[curIdx])) ? v.files[curIdx].slice() : base.files,
+          versions: v.versions.slice(),
+          versionFiles: (Array.isArray(v.files) ? v.files : []).map(f => Array.isArray(f) ? f.slice() : []),
+          aiReplies: (Array.isArray(v.aiReplies) ? v.aiReplies : []).slice(),
+          aiFiles: (Array.isArray(v.aiFiles) ? v.aiFiles : []).map(f => Array.isArray(f) ? f.slice() : []),
+          currentVersionIndex: curIdx,
+        };
+      }
+    }
+    return base;
+  }).filter(m =>
     (m.content && String(m.content).trim()) ||
-    (Array.isArray(m.files) && m.files.some(f => f.generated && f.public_url))
+    (Array.isArray(m.files) && m.files.some(f => f.generated && f.public_url)) ||
+    (Array.isArray(m.files) && m.files.length > 0)
   );
+
   if (!messages.length) { showToast('Nothing to share', true); return; }
 
   try {
