@@ -74,7 +74,7 @@ let state = {
   activeChatId: null, chats: [], messages: [],
   isGenerating: false, abortController: null,
   supabase: null, currentUser: null,
-  attachments: [], editingMessageId: null, editingValue: '',
+  attachments: [], editingMessageId: null, editingValue: '', editingSelection: null,
   messageVersions: {}, likedMessages: new Set(), dislikedMessages: new Set(),
   contextMenuTarget: null, isShareView: IS_SHARE_VIEW, shareMessages: [], copyTimeout: null,
   pendingAuth: null, shouldScrollToBottom: false,
@@ -480,10 +480,6 @@ async function reloadAfterSend(chatId, expectedMinCount, maxAttempts = 6) {
   return false;
 }
 
-// Rebuilds state.messageVersions from either:
-//   (a) server-stored arrays (version_files / ai_replies / ai_files) — authoritative
-//   (b) local reconstruction for messages that only have `versions` but no
-//       server-side version arrays (guest mode, or pre-migration rows).
 function rebuildVersions() {
   state.messageVersions = {};
   state.messages.forEach((msg, idx) => {
@@ -492,7 +488,6 @@ function rebuildVersions() {
     const curIdx = msg.current_version_index ?? msg.currentVersionIndex ?? 0;
     const versions = msg.versions.slice();
 
-    // Server-side arrays (snake_case from DB)
     let serverVersionFiles = Array.isArray(msg.version_files) ? msg.version_files : null;
     let serverAiReplies = Array.isArray(msg.ai_replies) ? msg.ai_replies : null;
     let serverAiFiles = Array.isArray(msg.ai_files) ? msg.ai_files : null;
@@ -509,7 +504,6 @@ function rebuildVersions() {
       aiFiles = serverAiFiles.map(a => Array.isArray(a) ? a.slice() : []);
       files = serverVersionFiles.map(a => Array.isArray(a) ? a.slice() : []);
     } else {
-      // Fallback reconstruction for legacy/guest data — only the active version.
       aiReplies = new Array(versions.length).fill('');
       aiFiles = new Array(versions.length).fill(null).map(() => []);
       files = new Array(versions.length).fill(null).map(() => []);
@@ -646,15 +640,41 @@ function renderMessages() {
         ta.style.height = Math.max(want, 44) + 'px';
         ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
       };
-      // Keep state.editingValue in sync with every keystroke so a re-render
-      // (session check, tab focus, etc.) can restore exactly what was typed.
-      ta.addEventListener('input', () => {
+
+      // Persist BOTH the text and the cursor position so any re-render or
+      // tab switch can restore the exact editing state.
+      const rememberState = () => {
         state.editingValue = ta.value;
-        autoGrow();
+        state.editingSelection = { start: ta.selectionStart, end: ta.selectionEnd };
+      };
+      ta.addEventListener('input', () => { rememberState(); autoGrow(); });
+      ta.addEventListener('keyup', rememberState);
+      ta.addEventListener('click', rememberState);
+      ta.addEventListener('mouseup', rememberState);
+      ta.addEventListener('select', rememberState);
+      ta.addEventListener('blur', rememberState);
+
+      // Restore cursor on regaining focus — but skip if focus came from an
+      // actual click (in that case the click's own position should win).
+      let skipNextFocusRestore = false;
+      ta.addEventListener('mousedown', () => {
+        skipNextFocusRestore = true;
+        setTimeout(() => { skipNextFocusRestore = false; }, 0);
       });
+      ta.addEventListener('focus', () => {
+        if (skipNextFocusRestore) return;
+        if (state.editingSelection && typeof state.editingSelection.start === 'number') {
+          try { ta.setSelectionRange(state.editingSelection.start, state.editingSelection.end); } catch (e) {}
+        }
+      });
+
       const g = document.createElement('div'); g.className = 'edit-actions';
       const cancel = document.createElement('button'); cancel.textContent = 'Cancel'; cancel.className = 'edit-btn-cancel';
-      cancel.onclick = () => { state.editingMessageId = null; renderMessages(); };
+      cancel.onclick = () => {
+        state.editingMessageId = null;
+        state.editingSelection = null;
+        renderMessages();
+      };
       const send = document.createElement('button'); send.textContent = 'Send'; send.className = 'edit-btn-send';
       send.onclick = async () => {
         const newContent = ta.value.trim(); if (!newContent) return;
@@ -706,6 +726,7 @@ function renderMessages() {
         const i = state.messages.indexOf(msg);
         state.messages = state.messages.slice(0, i + 1);
         state.editingMessageId = null;
+        state.editingSelection = null;
         const chat = state.chats.find(c => c.id === state.activeChatId);
         if (chat) chat.messages = state.messages;
         renderMessages(); await sendEditedUserMessage();
@@ -714,7 +735,22 @@ function renderMessages() {
       area.appendChild(ta); area.appendChild(g); msgDiv.appendChild(area);
       msgDiv.classList.add('message-editing');
       row.appendChild(msgDiv); messageList.appendChild(row);
-      setTimeout(() => { ta.focus(); autoGrow(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 50); return;
+      setTimeout(() => {
+        ta.focus();
+        autoGrow();
+        // Restore saved cursor if we're re-rendering an in-progress edit;
+        // otherwise (fresh edit) put the cursor at the end.
+        if (state.editingSelection && typeof state.editingSelection.start === 'number') {
+          try {
+            ta.setSelectionRange(state.editingSelection.start, state.editingSelection.end);
+          } catch (e) {
+            ta.setSelectionRange(ta.value.length, ta.value.length);
+          }
+        } else {
+          ta.setSelectionRange(ta.value.length, ta.value.length);
+        }
+      }, 50);
+      return;
     }
 
     if (msg.role === 'assistant') {
@@ -911,7 +947,10 @@ function toggleDislike(msg) {
 
 function startEditing(msg) {
   if (msg.role !== 'user') return;
-  state.editingMessageId = msg.id; state.editingValue = msg.content; renderMessages();
+  state.editingMessageId = msg.id;
+  state.editingValue = msg.content;
+  state.editingSelection = null;
+  renderMessages();
 }
 
 function buildGuestPayload(messages) {
@@ -932,8 +971,6 @@ function buildGuestPayload(messages) {
     });
 }
 
-// After an edit + AI stream completes, syncs the whole version record to the
-// backend so it survives page reloads for logged-in users.
 async function syncVersionsToBackend(userMsg, assistantMsg) {
   if (!state.currentUser) return;
   if (!userMsg || !userMsg.id || userMsg.id.startsWith('user_') || userMsg.id.startsWith('assist_') || userMsg.id.startsWith('local_')) return;
@@ -956,7 +993,6 @@ async function syncVersionsToBackend(userMsg, assistantMsg) {
       body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
-    // Update the local assistant message id to match the server's, if it changed.
     if (data && data.assistantMessageId && assistantMsg && assistantMsg.id !== data.assistantMessageId) {
       assistantMsg.id = data.assistantMessageId;
     }
@@ -1004,7 +1040,6 @@ async function sendEditedUserMessage() {
     state.abortController = null; updateSendButton();
   }
 
-  // Persist the version record to the backend for logged-in users.
   try {
     if (state.currentUser && lastUserMsg) {
       const uIdx = state.messages.indexOf(lastUserMsg);
@@ -1127,7 +1162,6 @@ async function shareConversation(messagesToShare = null, chatId = null) {
   const messages = rawMessages.map(m => {
     const base = { role: m.role, content: m.content || '', files: Array.isArray(m.files) ? m.files : [] };
     if (m.role === 'user') {
-      // Prefer fresh local state if present
       const localV = m.id && state.messageVersions[m.id];
       if (localV && Array.isArray(localV.versions) && localV.versions.length > 1) {
         const curIdx = (typeof localV.currentIndex === 'number' && localV.currentIndex >= 0 && localV.currentIndex < localV.versions.length)
@@ -1143,7 +1177,6 @@ async function shareConversation(messagesToShare = null, chatId = null) {
           currentVersionIndex: curIdx,
         };
       }
-      // Fallback: server-stored version arrays (snake_case from DB)
       if (Array.isArray(m.versions) && m.versions.length > 1) {
         const curIdx = (typeof m.current_version_index === 'number' && m.current_version_index >= 0 && m.current_version_index < m.versions.length)
           ? m.current_version_index : 0;
