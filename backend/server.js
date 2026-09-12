@@ -118,7 +118,7 @@ const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
 
 // ==================================================================
-// IMAGE GENERATION
+// IMAGE GENERATION PROVIDERS
 // ==================================================================
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -126,65 +126,54 @@ const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 
 const IMAGE_GEN_PROVIDERS = [
   { id: 'cloudflare', name: 'Cloudflare Workers AI (no watermark)', enabled: !!(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) },
-  { id: 'pollinations', name: 'Pollinations.ai' + (POLLINATIONS_API_KEY ? ' (clean, no watermark)' : ' (watermarked — add POLLINATIONS_API_KEY)'), enabled: true },
+  { id: 'pollinations', name: 'Pollinations.ai' + (POLLINATIONS_API_KEY ? ' (clean, no watermark)' : ' (watermarked)'), enabled: true },
 ];
 
 // ==================================================================
 // IMAGE REQUEST DETECTION + TOPIC GUARD
 // ==================================================================
-
-// Returns true if the message is asking for an image/photo/picture
 function isImageRequest(message) {
   const t = (message || '').toLowerCase().trim();
   if (!t) return false;
+  if (/\b(video|movie|clip|animation|audio|voice|sound)\b/.test(t) && !/\b(image|photo|picture|illustration)\b/.test(t)) return false;
   const patterns = [
-    // English
     /\b(create|generate|make|produce|provide|show|give|draw|paint)\s+(me\s+)?(a\s+|an\s+|the\s+)?(photo|picture|image|illustration|drawing|artwork|painting)\b/i,
     /\b(photo|picture|image|illustration|drawing|artwork|painting)\s+of\b/i,
     /\bi\s+want\s+(to\s+see|a\s+photo|a\s+picture|an\s+image)\b/i,
     /\bshow\s+me\s+(a\s+|an\s+)?(photo|picture|image)\b/i,
-    // French
     /\b(cr[ée]e|g[ée]n[èe]re|fais|donne|montre|dessine|peins)\s+(moi\s+)?(une?\s+)?(photo|image|illustration|peinture|dessin)\b/i,
     /\b(photo|image|illustration|peinture|dessin)\s+(de\s+|d['e]\s*)/i,
-    // Kinyarwanda
     /\b(foto|ifoto|ishusho|shusho)\s+ya\b/i,
     /\b(nyereka|mbwira|nkore|kora)\b.*\b(foto|ifoto|ishusho|shusho)\b/i,
-    // Swahili
     /\b(picha|taswira|mchoro)\s+ya\b/i,
     /\b(nionyeshe|nipa|tengeneza)\b.*\b(picha|taswira|mchoro)\b/i,
   ];
   return patterns.some(re => re.test(t));
 }
 
-// Returns true if the message is agriculture/livestock related
 function isAgricultureTopic(message) {
   const t = (message || '').toLowerCase();
   if (!t) return false;
   const keywords = [
-    // English — crops & farming
     'maize','corn','bean','beans','cassava','coffee','tea','banana','rice','wheat','sorghum','millet',
     'potato','potatoes','tomato','tomatoes','onion','cabbage','carrot','vegetable','vegetables',
     'fruit','fruits','mango','avocado','pineapple','papaya','orange','lemon','spice','spices',
     'herb','herbs','crop','crops','plant','plants','seedling','seedlings','harvest','farm','farming',
     'field','fields','plantation','garden','orchard','greenhouse','nursery','irrigation','fertilizer',
     'fertiliser','manure','compost','soil','pesticide','herbicide','weed','weeds','pest','pests',
-    'agri','agriculture','agricultural','agribusiness','agritech',
-    // English — livestock
+    'agri','agriculture','agricultural','agribusiness','agritech','kigali','rwanda','rwandan','africa',
     'livestock','cattle','cow','cows','goat','goats','sheep','pig','pigs','chicken','chickens','hen',
     'hens','rooster','poultry','duck','ducks','rabbit','rabbits','fish','tilapia','bee','bees','honey',
     'herd','flock','veterinary','vet','dairy','milk',
-    // French
     'agriculture','agricole','ferme','champ','champs','culture','cultures','élevage','elevage',
     'bétail','betail','vache','vaches','chèvre','chevre','chèvres','chevres','poule','poules','poulet',
     'poulets','mouton','moutons','cochon','cochons','lapin','lapins','canard','canards','abeille',
-    'abeilles','miel','récolte','recolte','irrigation','engrais','sol','laitier',
-    // Kinyarwanda
+    'abeilles','miel','récolte','recolte','engrais','sol','laitier',
     'ubuhinzi','ubworozi','ibihingwa','amatungo','inka','ihene','intama','ingurube','inkoko','amagi',
     'ifarashi','umurima','imirima','ishyamba','ibiti','ikigori','ibigori','ibishyimbo','imyumbati',
     'ikawa','icyayi','umuceri','ingano','ibirayi','inyanya','itunguru','amashu','karoti','imboga',
-    'imbuto','umusaruro','ifumbire','ubutaka','amazi','indwara','ibyonnyi','uduhumyo','umuhinzi',
+    'imbuto','umusaruro','ifumbire','ubutaka','indwara','ibyonnyi','uduhumyo','umuhinzi',
     'umworozi','veterineri','amata',
-    // Swahili
     'kilimo','shamba','mashamba','mifugo','ng\'ombe','ngombe','mbuzi','kondoo','nguruwe','kuku',
     'bata','sungura','samaki','nyuki','asali','wadudu','magugu','mbolea','udongo','umwagiliaji',
     'mavuno','mkulima','maziwa',
@@ -192,34 +181,26 @@ function isAgricultureTopic(message) {
   return keywords.some(k => t.includes(k));
 }
 
-// Turn "create a photo of a green maize field" into "a green maize field"
 function extractImagePrompt(message) {
   let p = (message || '').trim();
-  // Trim common "create a photo of X" patterns
   p = p.replace(/^(please\s+)?(can\s+you\s+|could\s+you\s+|would\s+you\s+)?(create|generate|make|produce|provide|show|give|draw|paint)\s+(me\s+)?(a\s+|an\s+|the\s+)?(photo|picture|image|illustration|drawing|artwork|painting)\s+(of\s+|showing\s+)?/i, '');
   p = p.replace(/^(please\s+)?(photo|picture|image|illustration|drawing|artwork|painting)\s+of\s+/i, '');
   p = p.replace(/^i\s+want\s+(to\s+see|a\s+photo\s+of|a\s+picture\s+of|an\s+image\s+of)\s*/i, '');
   p = p.replace(/^show\s+me\s+(a\s+|an\s+)?(photo|picture|image)\s+(of\s+)?/i, '');
-  // French
   p = p.replace(/^(cr[ée]e|g[ée]n[èe]re|fais|donne|montre|dessine|peins)\s+(moi\s+)?(une?\s+)?(photo|image|illustration|peinture|dessin)\s+(de\s+|d['e]\s*)?/i, '');
   p = p.replace(/^(photo|image|illustration|peinture|dessin)\s+(de\s+|d['e]\s*)/i, '');
-  // Kinyarwanda
   p = p.replace(/^(foto|ifoto|ishusho|shusho)\s+ya\s+/i, '');
   p = p.replace(/^(nyereka|mbwira|nkore|kora)\s+(foto|ifoto|ishusho|shusho)\s+ya\s+/i, '');
-  // Swahili
   p = p.replace(/^(picha|taswira|mchoro)\s+ya\s+/i, '');
   p = p.replace(/^(nionyeshe|nipa|tengeneza)\s+(picha|taswira|mchoro)\s+ya\s+/i, '');
-  // Trailing "and tell me..." clause
   p = p.replace(/\s+and\s+(also\s+)?(tell\s+me|explain|describe|answer|say|show)\b.*/i, '');
   p = p.replace(/[.!?]+$/, '').trim();
   return p || (message || '').trim();
 }
 
-// Handle image requests inside a chat. Returns true if handled.
 async function handleImageRequestInChat(userMessage, res, options = {}) {
   if (!isImageRequest(userMessage)) return { handled: false };
 
-  // Guard: reject non-agricultural image requests
   if (!isAgricultureTopic(userMessage)) {
     await streamSimpleText(res,
       "I'm **AgriDeepAI**, specialised in agriculture and livestock. I can create images of **crops, livestock, farms, fields, soil, and other agricultural topics**, but not unrelated subjects. If you'd like an agriculture-related image, just describe what you need — for example, *\"a photo of a maize field\"* or *\"an image of a dairy cow farm\"*."
@@ -243,7 +224,7 @@ async function handleImageRequestInChat(userMessage, res, options = {}) {
       res.write(`data: ${JSON.stringify({ text: (i === 0 ? '' : ' ') + words[i] })}\n\n`);
       await new Promise(r => setTimeout(r, 20));
     }
-    res.write(`data: ${JSON.stringify({ image: result.url, prompt: imagePrompt, provider: result.provider })}\n\n`);
+    res.write(`data: ${JSON.stringify({ image: result.url })}\n\n`);
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
@@ -275,7 +256,7 @@ async function ocrImage(buffer, filename, mimeType) {
 }
 
 // ==================================================================
-// DIAGNOSTICS
+// DIAGNOSTIC ENDPOINTS
 // ==================================================================
 app.get('/api/debug/groq-models', async (req, res) => {
   if (!groq) return res.json({ error: 'GROQ_API_KEY not set' });
@@ -316,7 +297,7 @@ app.get('/api/debug/image-providers', async (req, res) => {
   res.json({
     providers: IMAGE_GEN_PROVIDERS,
     active_providers: IMAGE_GEN_PROVIDERS.filter(p => p.enabled).map(p => p.id),
-    pollinations_watermark: POLLINATIONS_API_KEY ? 'disabled (key set)' : 'visible (set POLLINATIONS_API_KEY to remove)',
+    pollinations_watermark: POLLINATIONS_API_KEY ? 'disabled (key set)' : 'visible',
     mode: 'in-conversation (no separate button)',
     topic_guard: 'Only agriculture/livestock-related images are generated',
   });
@@ -367,28 +348,35 @@ app.get('/api/debug/image-test', async (req, res) => {
   res.json({ prompt, results });
 });
 
-// Diagnostic endpoint to test image-request detection
-app.get('/api/debug/image-detection', (req, res) => {
+app.get('/api/debug/detection', (req, res) => {
   const samples = [
+    'hi','hello','hey','yo','sup','howdy','heya',
+    'hi there','hello there','hey there',
+    'good morning','good afternoon','good evening',
+    'whats up','what is up','wassup','whats new','whats good','whats happening',
+    'how are you','how are you doing','how r u','how ya doin','how are things',
+    'how do you do','how do you feel','how do you feel today','how are you feeling','how are you today',
+    'are you good','are you ok','are you okay','are you alright','you good','you ok','you okay',
+    'nice to meet you','good to see you','long time no see',
+    'thanks','thank you','thank you so much','bye','goodbye','see you','take care',
+    'muraho','mwaramutse','mwiriwe','wiriwe','amakuru','amakuru yawe','bite','murakomeye',
+    'bonjour','salut','bonsoir','coucou','comment ca va','ca va',
+    'jambo','habari','hujambo','mambo','vipi','shikamoo',
+    'hola','como estas',
     'create a photo of maize',
     'generate an image of cows in a field',
     'provide a photo of a coffee farm',
     'create a photo of waterfall',
-    'show me a picture of a tomato plant',
-    'ifoto ya ibigori',
-    'picha ya ng\'ombe',
-    'photo de vache',
-    'hi',
+    'create a photo of people in a party',
     'how do I grow maize?',
-    'create a photo of a person',
+    'create a video of people dancing',
   ];
   res.json(samples.map(m => ({
     message: m,
+    isGreeting: isGreetingOnly(m),
     isImageRequest: isImageRequest(m),
     isAgriculture: isAgricultureTopic(m),
-    extractedPrompt: isImageRequest(m) ? extractImagePrompt(m) : null,
-    willHandle: isImageRequest(m) && isAgricultureTopic(m),
-    willRefuse: isImageRequest(m) && !isAgricultureTopic(m),
+    greetingReplyPreview: isGreetingOnly(m) ? buildGreetingReply(m).slice(0, 90) : null,
   })));
 });
 
@@ -651,11 +639,26 @@ Help with:
 - **Nutrition of farm produce**, food security
 - **Agricultural education, research, schooling questions**
 - **Where to find**: seeds, fertilisers, veterinary services, extension services
-- **Natural conversation** in English, Kinyarwanda, French, Swahili — reply in the user's language when possible.
+- **Friendly conversation** — when a user greets you or makes small talk ("hi", "how are you", "what's up", "are you good", "how do you feel today", "nice to meet you", "muraho", "bonjour", "habari", etc.), respond warmly and briefly, then invite an agriculture-related question. Do NOT refuse greetings.
 
 ## REFUSE
-Politely decline questions with no meaningful connection to agriculture, livestock, rural life, or their sciences. Short reply:
+Politely decline ONLY genuinely off-topic questions with no connection to agriculture (music, sports, politics, unrelated tech, unrelated history, fashion, personal advice). Short reply:
 "I'm AgriDeepAI, specialised in agriculture and livestock, so I can't help with that. If you have a question about crops, livestock, soil, farming, or agribusiness, I'd be glad to help."
+Greetings, small talk, "how are you", "what's up", "who are you", "who made you" are NOT off-topic. Respond warmly.
+
+## OUTPUT FORMAT (never violate)
+- **NEVER output raw HTML, CSS, or JavaScript tags in your reply.** Forbidden examples: \`<div style="...">\`, \`<pre>\`, \`<button>\`, \`<span style="...">\`, \`<script>\`. The chat interface renders Markdown, not HTML. Raw HTML will display as ugly literal text.
+- For any code, config, prompt, or text snippet the user wants to copy, use a **fenced Markdown code block** with a language tag:
+  \`\`\`text
+  your content here
+  \`\`\`
+  or \`\`\`html, \`\`\`python, \`\`\`javascript etc.
+- The interface automatically adds a **copy button at the top-right of every code block**. You do NOT need to invent one, describe one, or produce HTML for one.
+- If a user asks for a "copy-block", "copyable text", or "prompt in a copyable block", just return the content as a plain fenced code block with nothing else around it.
+
+## CAPABILITIES (be honest)
+- You CAN: analyse uploaded images, generate agriculture-related IMAGES when the user asks (e.g. "create a photo of maize"), answer questions, and write code examples inside Markdown code blocks.
+- You CANNOT: generate videos, audio, or downloadable files. If asked for a video, briefly say you can only create images, then offer a short practical workflow if the user wants to produce one themselves. **Keep it concise — never output HTML.** Use plain Markdown lists and tables.
 
 ## IMAGES & DOCUMENTS
 - Users may attach images, PDFs, or documents. The system gives you a note describing the attachment.
@@ -694,17 +697,80 @@ const getClientId = (req) => {
 const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'Unknown';
 const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 
+// ==================================================================
+// GREETING DETECTION (broadened, verified via /api/debug/detection)
+// ==================================================================
 function isGreetingOnly(text) {
-  const t = (text || '').toLowerCase().trim().replace(/[!?.,;:]/g, '').replace(/\s+/g, ' ');
-  const greetings = ['hi','hello','hey','hi there','hello there','good morning','good afternoon','good evening','yo','sup','howdy',
-    'muraho','mwaramutse','mwiriwe','amakuru','bite','salam','bonjour','salut','jambo','habari','hi bot','hello bot'];
-  return greetings.includes(t);
+  const t = (text || '').toLowerCase().trim().replace(/[!?.,;:]+/g, '').replace(/\s+/g, ' ').replace(/['’]/g, '');
+  if (!t || t.length > 90) return false;
+
+  const exact = new Set([
+    'hi','hello','hey','yo','sup','howdy','heya','hiya','hi bot','hello bot','hey bot',
+    'hi there','hello there','hey there','hi agrideepai','hello agrideepai',
+    'good morning','good afternoon','good evening','good night',
+    'morning','afternoon','evening','night',
+    'whats up','what is up','whats new','whats happening','whats good','whats cracking','wassup','wazup',
+    'nice to meet you','good to see you','great to see you','long time no see',
+    'how are you','how are you doing','how do you do','how are things','how is everything','how have you been','how is it going','hows it going','how you doing','how r u','how are u','how ya doin','how you been',
+    'are you good','are you ok','are you okay','are you alright','are you fine','are you well','are you there',
+    'how do you feel','how do you feel today','how are you feeling','how are you feeling today','how are you today','how is your day','how was your day',
+    'you good','you ok','you okay','you alright','you fine','you well','u good','u ok',
+    'thanks','thank you','thank you so much','thx','ty','much appreciated','appreciate it',
+    'bye','goodbye','see you','see ya','see you later','take care','good night','have a good day',
+    'muraho','mwaramutse','mwiriwe','wiriwe','amakuru','amakuru yawe','amakuru yanyu','amakuru meza','bite','bite se','bite mwana','nshuti','murakomeye','urakomeye','witwa nde',
+    'bonjour','salut','bonsoir','coucou','comment ca va','comment vas tu','comment allez vous','ca va','ca va bien','ca va bien et toi','enchanté',
+    'habari','jambo','hujambo','sijambo','mambo','vipi','shikamoo','marahaba','habari yako','habari zenu','habari gani','habari za asubuhi',
+    'hola','como estas','que tal','buenos dias','buenas tardes','buenas noches',
+  ]);
+  if (exact.has(t)) return true;
+
+  const patterns = [
+    /^(hi|hello|hey|yo|sup|howdy|heya|hiya)( there| bot| friend| dear| bro| mate| dude| agrideepai| nshuti| mwana)?$/,
+    /^(muraho|mwaramutse|mwiriwe|wiriwe|amakuru|bite|nshuti|murakomeye)( se| there| bot| agrideepai| nshuti| yako| zenu| gani| mwana)?$/,
+    /^(bonjour|salut|bonsoir|coucou|enchanté|comment ca va|ca va|comment vas tu|comment allez vous)( there| bot| agrideepai)?$/,
+    /^(jambo|habari|hujambo|sijambo|mambo|vipi|shikamoo|marahaba)( there| bot| agrideepai| yako| zenu| gani)?$/,
+    /^how (are|r) (you|u|ya)( doing| feeling| today| this morning| this evening| lately| these days)?$/,
+    /^how (is|s|was) (it|things|everything|your day|your morning|your evening)( going| today| been)?$/,
+    /^how do (you|u|ya) (do|feel)( today| this morning| this evening| now| lately)?$/,
+    /^(are|r) (you|u|ya) (good|ok|okay|alright|fine|well|there|here|around)( today| this morning| this evening)?$/,
+    /^what(s| is) (up|new|good|happening|going on|the word)$/,
+    /^(thanks|thank you|thx|ty|much appreciated|appreciate it)\b/,
+    /^(bye|goodbye|see you|see ya|see you later|take care|have a good day)\b/,
+  ];
+  return patterns.some(re => re.test(t));
 }
+
+function buildGreetingReply(userText) {
+  const t = (userText || '').toLowerCase();
+
+  const isKinyarwanda = /muraho|mwaramutse|mwiriwe|wiriwe|amakuru|bite|nshuti|murakomeye|urakomeye/.test(t);
+  const isFrench = /bonjour|salut|bonsoir|coucou|comment ca va|comment vas tu|comment allez vous|ca va|enchanté/.test(t);
+  const isSwahili = /jambo|habari|hujambo|sijambo|mambo|vipi|shikamoo|marahaba/.test(t);
+  const isSpanish = /\bhola\b|como estas|que tal|buenos dias|buenas tardes|buenas noches/.test(t);
+  const isThankYou = /^(thanks|thank you|thx|ty|much appreciated|appreciate it)/.test(t);
+  const isGoodbye = /^(bye|goodbye|see you|see ya|take care|have a good day)/.test(t);
+  const isHowAreYou = /how (are|r) (you|u|ya)|how do (you|u|ya) (do|feel)|are (you|u|ya) (good|ok|okay|alright|fine|well)|how (is|s|was) (it|things|everything|your day)/.test(t);
+  const isWhatsUp = /what(s| is) (up|new|good|happening|going on|the word)/.test(t);
+  const isMeet = /nice to meet|good to see|great to see|long time no see/.test(t);
+
+  if (isKinyarwanda) return `Muraho! Ni meza, urakoze kubaza. Ni **AgriDeepAI** — ni gute nashobora kugufasha ku bijyanye n'ubuhinzi cyangwa ubworozi uyu munsi?`;
+  if (isFrench) return `Bonjour ! Je vais très bien, merci de demander. Je suis **AgriDeepAI** — comment puis-je vous aider aujourd'hui avec l'agriculture ou l'élevage ?`;
+  if (isSwahili) return `Habari! Nzuri, asante kwa kuuliza. Mimi ni **AgriDeepAI** — ninaweza kukusaidia vipi leo kuhusu kilimo au ufugaji?`;
+  if (isSpanish) return `¡Hola! Estoy bien, gracias por preguntar. Soy **AgriDeepAI** — ¿en qué puedo ayudarte hoy con agricultura o ganadería?`;
+  if (isThankYou) return `You're very welcome! I'm **AgriDeepAI**. If you have any questions about your farm, crops, or livestock, I'm here to help.`;
+  if (isGoodbye) return `Goodbye! Come back anytime you need help with agriculture or livestock. Take care! 🌱`;
+  if (isHowAreYou) return `Hello! I'm doing well, thanks for asking. I'm **AgriDeepAI** — how can I help you with your crops, livestock, soil, or any other farming question today?`;
+  if (isWhatsUp) return `Not much on my end — just ready to help! I'm **AgriDeepAI**. What's on your mind regarding agriculture or livestock today?`;
+  if (isMeet) return `Nice to meet you too! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
+  return `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
+}
+
 function isCreatorQuestion(text) {
   const t = (text || '').toLowerCase();
   const keys = ['who made you','who built you','who created you','who is your creator','who is your developer','who is behind','who founded','who develops','who is the creator of','who is the developer of','who made this','who built this','who created this','who are you','what are you','who is your maker','who is your owner','who owns you','witwa nde','uri nde','ni nde'];
   return keys.some(k => t.includes(k));
 }
+
 async function streamSimpleText(res, text) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -729,15 +795,8 @@ async function tryIdentityShortcut(messages, res, hasAttachment = false) {
     return true;
   }
   if (isGreetingOnly(last.content)) {
-    const t = (last.content || '').toLowerCase();
-    if (t.includes('muraho') || t.includes('mwaramutse') || t.includes('mwiriwe') || t.includes('amakuru') || t.includes('bite'))
-      await streamSimpleText(res, `Muraho! Ni **AgriDeepAI**. Ni gute nashobora kugufasha ku bijyanye n'ubuhinzi cyangwa ubworozi uyu munsi?`);
-    else if (t.includes('bonjour') || t.includes('salut'))
-      await streamSimpleText(res, `Bonjour ! Je suis **AgriDeepAI**. Comment puis-je vous aider aujourd'hui avec l'agriculture ou l'élevage ?`);
-    else if (t.includes('jambo') || t.includes('habari'))
-      await streamSimpleText(res, `Habari! Mimi ni **AgriDeepAI**. Ninaweza kukusaidia vipi leo kuhusu kilimo au ufugaji?`);
-    else
-      await streamSimpleText(res, `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`);
+    const reply = buildGreetingReply(last.content);
+    await streamSimpleText(res, reply);
     return true;
   }
   return false;
@@ -746,10 +805,17 @@ async function tryIdentityShortcut(messages, res, hasAttachment = false) {
 async function generateChatTitle(userMessage) {
   const msg = (userMessage || '').trim();
   if (!msg) return 'New Chat';
-  if (isGreetingOnly(msg)) return 'Greeting';
+  if (isGreetingOnly(msg)) {
+    const t = (msg || '').toLowerCase();
+    if (/muraho|mwaramutse|mwiriwe|wiriwe|amakuru|bite/.test(t)) return 'Greeting';
+    if (/bonjour|salut|bonsoir|coucou/.test(t)) return 'Salutation';
+    if (/jambo|habari|hujambo/.test(t)) return 'Salamu';
+    if (/thanks|thank you|thx/.test(t)) return 'Thanks';
+    if (/bye|goodbye/.test(t)) return 'Goodbye';
+    return 'Greeting';
+  }
   if (isCreatorQuestion(msg)) return 'About AgriDeepAI';
 
-  // If it's an image request, prefix the pattern to bias toward "X Photo"
   const isImg = isImageRequest(msg);
 
   const prompt = `You write short titles for chat conversations, in the style of ChatGPT sidebar names.
@@ -1492,7 +1558,6 @@ async function generateImage(prompt) {
   throw new Error(`All image providers failed: ${errors.join(' | ')}`);
 }
 
-// Standalone endpoint (kept for admin/testing — no longer used by UI)
 app.post('/api/chat/generate-image', async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -1565,16 +1630,16 @@ app.post('/api/chat/guest', async (req, res) => {
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     if (!lastUser) return res.status(400).json({ error: 'No user message' });
 
-    // --- 1. Image-request detection (before any shortcut or AI call) ---
+    // 1. Image-request detection
     if (!hasImage && lastUser.content) {
       const imgResult = await handleImageRequestInChat(lastUser.content, res);
       if (imgResult.handled) return;
     }
 
-    // --- 2. Identity/greeting shortcut ---
+    // 2. Identity/greeting shortcut
     if (await tryIdentityShortcut(messages, res, hasImage)) return;
 
-    // --- 3. Normal AI text flow ---
+    // 3. Normal AI text flow
     let imageData = null;
     let extractedText = '';
     if (hasImage) {
@@ -1658,13 +1723,11 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     const { data: conv } = await supabase.from('conversations').select('id, title').eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // --- 1. Image-request detection (before any shortcut or AI call) ---
+    // 1. Image-request detection (only when no files attached)
     if (!files.length && message) {
-      // Persist the user message first so it appears in history
       const userMessageData = { conversation_id: conversationId, role: 'user', content: message };
       await supabase.from('messages').insert(userMessageData);
 
-      // Update title if needed
       if (conv.title === 'New Chat' || !conv.title) {
         const newTitle = await generateChatTitle(message);
         await supabase.from('conversations').update({ title: newTitle }).eq('id', conversationId);
@@ -1677,8 +1740,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
             mime_type: 'image/jpeg',
             public_url: result.url,
             generated: true,
-            prompt: prompt,
-            provider: result.provider,
           };
           await supabase.from('messages').insert({
             conversation_id: conversationId,
@@ -1692,15 +1753,10 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
         },
       });
       if (imgResult.handled) return;
-      // Otherwise, continue with normal flow but avoid double-inserting the user message
-      // (we already inserted it above) — so re-fetch and skip re-inserting.
-      // We'll short-circuit to the AI call directly.
     }
 
-    // --- 2. Greeting/identity shortcut (no files) ---
+    // 2. Greeting/identity shortcut (only when no files)
     if (message && files.length === 0 && (isCreatorQuestion(message) || isGreetingOnly(message))) {
-      // User message already inserted in the image-request block? Only if that ran.
-      // To be safe, check if it exists.
       const { data: recent } = await supabase.from('messages')
         .select('id, content').eq('conversation_id', conversationId).eq('role', 'user')
         .order('created_at', { ascending: false }).limit(1).single();
@@ -1709,7 +1765,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       }
       let reply;
       if (isCreatorQuestion(message)) reply = `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
-      else reply = `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
+      else reply = buildGreetingReply(message);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply, versions: [reply], current_version_index: 0 });
       if (conv.title === 'New Chat' || !conv.title) {
         const newTitle = await generateChatTitle(message);
@@ -1720,7 +1776,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       return streamSimpleText(res, reply);
     }
 
-    // --- 3. Files + user message insert ---
+    // 3. Files + user message
     let filesMeta = [], imageData = null, extractedText = '';
     for (const file of files) {
       const fileExt = file.originalname.split('.').pop();
@@ -1736,8 +1792,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       if (txt) extractedText += (extractedText ? '\n\n' : '') + txt;
     }
 
-    // Only insert the user message if we didn't already insert it in the image-request block
-    // (i.e., only for files present OR message content differs from what's already saved)
+    // Only insert user message if not already inserted above
     let alreadyInserted = false;
     if (!files.length && message) {
       const { data: recent } = await supabase.from('messages')
