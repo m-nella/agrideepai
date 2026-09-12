@@ -491,24 +491,25 @@ function rebuildVersions() {
   state.messages.forEach((msg, idx) => {
     if (msg.versions && msg.versions.length > 0) {
       const curIdx = msg.current_version_index ?? msg.currentVersionIndex ?? 0;
-      // Best-effort reconstruction: put the current assistant reply (if any) into
-      // the aiReplies slot for the current version index. Older versions will have
-      // an empty slot; that's expected because the backend only stores the currently
-      // active branch.
+      // Reconstruct as much as we can. For freshly-edited messages inside this
+      // session, aiReplies/aiFiles are the authoritative source (see edit handler).
+      // For messages loaded from the DB, only the current branch's reply & files
+      // can be filled — older branches are empty (backend stores only the active one).
       const aiReplies = new Array(msg.versions.length).fill('');
+      const aiFiles = new Array(msg.versions.length).fill(null).map(() => []);
       if (curIdx >= 0 && curIdx < msg.versions.length) {
         const aiMsg = state.messages[idx + 1];
         if (aiMsg && aiMsg.role === 'assistant') {
           aiReplies[curIdx] = aiMsg.content || '';
+          if (Array.isArray(aiMsg.files)) aiFiles[curIdx] = aiMsg.files.slice();
         }
       }
-      // Same for files: only the currently active version can be reconstructed
-      // from the DB (older versions' attachments aren't stored server-side).
+      // User attachments are attached to the user message itself.
       const files = new Array(msg.versions.length).fill(null).map(() => []);
       if (curIdx >= 0 && curIdx < msg.versions.length && Array.isArray(msg.files)) {
         files[curIdx] = msg.files.slice();
       }
-      state.messageVersions[msg.id] = { versions: msg.versions, aiReplies, files, currentIndex: curIdx };
+      state.messageVersions[msg.id] = { versions: msg.versions, aiReplies, aiFiles, files, currentIndex: curIdx };
       msg.content = msg.versions[curIdx] || '';
     }
   });
@@ -641,43 +642,47 @@ function renderMessages() {
         const newContent = ta.value.trim(); if (!newContent) return;
 
         // Identify the assistant message currently paired with this user message
-        // so we can store the original AI reply alongside the original version.
+        // so we can store the original AI reply AND its generated files alongside
+        // the original version.
         const curIdx = state.messages.indexOf(msg);
         const oldAiMsg = (state.messages[curIdx + 1] && state.messages[curIdx + 1].role === 'assistant')
           ? state.messages[curIdx + 1]
           : null;
 
-        // Initialise the version record, capturing the ORIGINAL user text,
-        // its ORIGINAL files, and its ORIGINAL AI reply as version 0.
         if (!state.messageVersions[msg.id]) {
           state.messageVersions[msg.id] = {
             versions: [msg.content],
             aiReplies: [oldAiMsg ? (oldAiMsg.content || '') : ''],
+            aiFiles: [oldAiMsg && Array.isArray(oldAiMsg.files) ? oldAiMsg.files.slice() : []],
             files: [Array.isArray(msg.files) ? msg.files.slice() : []],
             currentIndex: 0,
           };
         }
         const v = state.messageVersions[msg.id];
         if (!Array.isArray(v.aiReplies)) v.aiReplies = new Array(v.versions.length).fill('');
+        if (!Array.isArray(v.aiFiles)) v.aiFiles = new Array(v.versions.length).fill(null).map(() => []);
         if (!Array.isArray(v.files)) v.files = new Array(v.versions.length).fill(null).map(() => []);
         while (v.aiReplies.length < v.versions.length) v.aiReplies.push('');
+        while (v.aiFiles.length < v.versions.length) v.aiFiles.push([]);
         while (v.files.length < v.versions.length) v.files.push([]);
 
-        // Make sure the AI reply for the version we're leaving is captured before truncation.
+        // Capture the AI reply & files for the version we're leaving.
         if ((v.aiReplies[v.currentIndex] === undefined || v.aiReplies[v.currentIndex] === '') && oldAiMsg) {
           v.aiReplies[v.currentIndex] = oldAiMsg.content || '';
         }
-        // Make sure the current version's files are also captured.
+        if ((!v.aiFiles[v.currentIndex] || v.aiFiles[v.currentIndex].length === 0) && oldAiMsg && Array.isArray(oldAiMsg.files) && oldAiMsg.files.length > 0) {
+          v.aiFiles[v.currentIndex] = oldAiMsg.files.slice();
+        }
         if ((!v.files[v.currentIndex] || v.files[v.currentIndex].length === 0) && Array.isArray(msg.files) && msg.files.length > 0) {
           v.files[v.currentIndex] = msg.files.slice();
         }
 
-        // Push the new user text as a fresh version with an empty AI slot
-        // (filled in by sendEditedUserMessage after the stream completes).
+        // Push the new user text as a fresh version with empty AI slot.
         // Attachments are carried forward into the new version.
         if (v.versions[v.versions.length - 1] !== newContent) {
           v.versions.push(newContent);
           v.aiReplies.push('');
+          v.aiFiles.push([]);  // filled in after the stream completes
           v.files.push(Array.isArray(msg.files) ? msg.files.slice() : []);
           v.currentIndex = v.versions.length - 1;
         } else {
@@ -685,7 +690,6 @@ function renderMessages() {
         }
 
         msg.content = newContent;
-        // Ensure the active version's files are the ones on the message.
         if (Array.isArray(v.files[v.currentIndex])) msg.files = v.files[v.currentIndex].slice();
         const i = state.messages.indexOf(msg);
         state.messages = state.messages.slice(0, i + 1);
@@ -768,16 +772,23 @@ function renderMessages() {
           const applyVersion = (newIdx) => {
             v.currentIndex = newIdx;
             msg.content = v.versions[newIdx] || '';
-            // Restore the correct attachments for this version.
+            // Restore user attachments for this version.
             if (Array.isArray(v.files) && Array.isArray(v.files[newIdx])) {
               msg.files = v.files[newIdx].slice();
             } else {
               msg.files = [];
             }
-            // Restore the following assistant message's content to match this version.
+            // Restore the following assistant message: content AND files (generated image).
             const aiMsg = state.messages[index + 1];
-            if (aiMsg && aiMsg.role === 'assistant' && Array.isArray(v.aiReplies) && v.aiReplies[newIdx] !== undefined) {
-              aiMsg.content = v.aiReplies[newIdx];
+            if (aiMsg && aiMsg.role === 'assistant') {
+              if (Array.isArray(v.aiReplies) && v.aiReplies[newIdx] !== undefined) {
+                aiMsg.content = v.aiReplies[newIdx];
+              }
+              if (Array.isArray(v.aiFiles) && Array.isArray(v.aiFiles[newIdx])) {
+                aiMsg.files = v.aiFiles[newIdx].slice();
+              } else {
+                aiMsg.files = [];
+              }
             }
             renderMessages();
           };
@@ -824,7 +835,6 @@ function renderMessages() {
         share.innerHTML = `<i data-lucide="share-2" style="width:16px;height:16px;"></i>`; share.title = 'Share this message';
         share.onclick = (e) => {
           e.stopPropagation();
-          // include files so generated images are visible in the shared view
           shareConversation([{ role: msg.role, content: msg.content, files: msg.files || [] }]);
         };
         ar.appendChild(share);
@@ -915,8 +925,6 @@ function buildGuestPayload(messages) {
 async function sendEditedUserMessage() {
   const chat = state.chats.find(c => c.id === state.activeChatId); if (!chat) return;
 
-  // Remember which user message we're generating the reply for, so we can
-  // store the final AI content into its aiReplies array at the correct index.
   const lastUserMsg = [...state.messages].reverse().find(m => m.role === 'user');
 
   const assist = { id: 'assist_' + Date.now().toString(36), role: 'assistant', content: '', files: [], created_at: new Date().toISOString() };
@@ -935,7 +943,17 @@ async function sendEditedUserMessage() {
         if (lastUserMsg && state.messageVersions[lastUserMsg.id]) {
           const v = state.messageVersions[lastUserMsg.id];
           if (!Array.isArray(v.aiReplies)) v.aiReplies = [];
+          if (!Array.isArray(v.aiFiles)) v.aiFiles = [];
           v.aiReplies[v.currentIndex] = finalContent || '';
+          // Find the assistant message we just generated (right after lastUserMsg)
+          // and snapshot its files (the generated image, if any) into this version.
+          const uIdx = state.messages.indexOf(lastUserMsg);
+          const aMsg = uIdx >= 0 ? state.messages[uIdx + 1] : null;
+          if (aMsg && aMsg.role === 'assistant' && Array.isArray(aMsg.files)) {
+            v.aiFiles[v.currentIndex] = aMsg.files.slice();
+          } else {
+            v.aiFiles[v.currentIndex] = [];
+          }
         }
       },
     });
