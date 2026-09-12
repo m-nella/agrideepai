@@ -192,6 +192,53 @@
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+    /* ===== Version switcher on shared user messages ===== */
+    .share-version-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      margin-top: .35rem;
+      font-size: .8rem;
+      color: var(--text-muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: .2rem .3rem;
+    }
+    .share-version-controls button {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: .25rem .35rem;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 30px;
+      min-height: 30px;
+      transition: background .15s, color .15s;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .share-version-controls button:hover:not(:disabled) {
+      background: var(--surface-hover);
+      color: var(--text);
+    }
+    .share-version-controls button:disabled {
+      opacity: .3;
+      cursor: not-allowed;
+    }
+    .share-version-controls span {
+      padding: 0 .35rem;
+      color: var(--text-muted);
+      font-size: .8rem;
+      user-select: none;
+    }
+    .msg-row.user .share-version-controls {
+      align-self: flex-end;
+    }
+
     @media (max-width: 480px) {
       .msg-bubble { max-width: 92%; padding: .55rem .85rem; font-size: .92rem; }
       main { padding: 1rem .75rem 2.5rem; }
@@ -309,6 +356,41 @@
         return wrap;
       }
 
+      // Render the inner content of a message bubble from the message object.
+      // Called both initially and when the user switches versions.
+      function renderBubbleContent(bubbleEl, msg) {
+        bubbleEl.innerHTML = '';
+        var content = (msg.content == null) ? '' : String(msg.content);
+
+        if (content) {
+          if (msg.role === 'assistant') {
+            var textWrap = document.createElement('div');
+            textWrap.innerHTML = safeMd(content);
+            bubbleEl.appendChild(textWrap);
+          } else {
+            bubbleEl.textContent = content;
+          }
+        }
+
+        var files = Array.isArray(msg.files) ? msg.files : [];
+        files.forEach(function (f) {
+          if (!f || !f.public_url) return;
+          var isImage = (f.mime_type && f.mime_type.indexOf('image/') === 0) || f.generated;
+          if (!isImage) return;
+
+          if (msg.role === 'assistant' && f.generated) {
+            bubbleEl.appendChild(renderGeneratedImageBlock(f));
+          } else {
+            var thumb = document.createElement('img');
+            thumb.src = f.public_url;
+            thumb.alt = f.filename || 'image';
+            thumb.style.cssText = 'display:block;max-width:200px;max-height:200px;object-fit:cover;border-radius:8px;margin-top:.4rem;cursor:zoom-in;';
+            thumb.onclick = function () { openLightbox(f.public_url); };
+            bubbleEl.appendChild(thumb);
+          }
+        });
+      }
+
       if (!statusEl || !listEl) {
         console.error('[SHARE] Missing #shareStatus or #shareMessages');
         return;
@@ -350,55 +432,103 @@
             return;
           }
           statusEl.style.display = 'none';
-          messages.forEach(function (msg) {
+
+          // Rows keep a reference to their associated message object so version
+          // switching can update the DOM after mutating the object.
+          var rows = [];
+
+          messages.forEach(function (msg, msgIdx) {
             if (!msg || !msg.role) return;
             var row = document.createElement('div');
             row.className = 'msg-row ' + msg.role;
+            row.dataset.msgIdx = String(msgIdx);
+            row._msg = msg;
+
             if (msg.role === 'assistant') {
               var h = document.createElement('div');
               h.className = 'msg-header';
               h.innerHTML = '<img src="/logo.png" alt="" /><span>agrideepai</span>';
               row.appendChild(h);
             }
+
             var bubble = document.createElement('div');
             bubble.className = 'msg-bubble ' + msg.role;
-            var content = (msg.content == null) ? '' : String(msg.content);
+            renderBubbleContent(bubble, msg);
+            row.appendChild(bubble);
 
-            // Render text content (if any)
-            if (content) {
-              if (msg.role === 'assistant') {
-                var textWrap = document.createElement('div');
-                textWrap.innerHTML = safeMd(content);
-                bubble.appendChild(textWrap);
-              } else {
-                bubble.textContent = content;
-              }
+            // Version switcher for user messages with multiple versions
+            if (msg.role === 'user' && Array.isArray(msg.versions) && msg.versions.length > 1) {
+              var curIdx = (typeof msg.currentVersionIndex === 'number'
+                && msg.currentVersionIndex >= 0
+                && msg.currentVersionIndex < msg.versions.length)
+                ? msg.currentVersionIndex : 0;
+
+              var vc = document.createElement('div');
+              vc.className = 'share-version-controls';
+
+              var prevBtn = document.createElement('button');
+              prevBtn.type = 'button';
+              prevBtn.setAttribute('aria-label', 'Previous version');
+              prevBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>';
+
+              var nextBtn = document.createElement('button');
+              nextBtn.type = 'button';
+              nextBtn.setAttribute('aria-label', 'Next version');
+              nextBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+
+              var lbl = document.createElement('span');
+
+              var updateButtons = function () {
+                lbl.textContent = (curIdx + 1) + ' / ' + msg.versions.length;
+                prevBtn.disabled = curIdx === 0;
+                nextBtn.disabled = curIdx === msg.versions.length - 1;
+              };
+
+              var applyVersion = function (newIdx) {
+                curIdx = newIdx;
+                // Update user message content & files
+                msg.content = msg.versions[newIdx] || '';
+                if (Array.isArray(msg.versionFiles) && Array.isArray(msg.versionFiles[newIdx])) {
+                  msg.files = msg.versionFiles[newIdx];
+                } else {
+                  msg.files = [];
+                }
+                renderBubbleContent(bubble, msg);
+
+                // Update the following assistant message
+                var aiMsg = messages[msgIdx + 1];
+                var aiRow = rows[msgIdx + 1];
+                if (aiMsg && aiMsg.role === 'assistant') {
+                  if (Array.isArray(msg.aiReplies) && msg.aiReplies[newIdx] !== undefined) {
+                    aiMsg.content = msg.aiReplies[newIdx] || '';
+                  }
+                  if (Array.isArray(msg.aiFiles) && Array.isArray(msg.aiFiles[newIdx])) {
+                    aiMsg.files = msg.aiFiles[newIdx];
+                  } else {
+                    aiMsg.files = [];
+                  }
+                  if (aiRow) {
+                    var aiBubble = aiRow.querySelector('.msg-bubble');
+                    if (aiBubble) renderBubbleContent(aiBubble, aiMsg);
+                  }
+                }
+                updateButtons();
+              };
+
+              prevBtn.onclick = function () { if (curIdx > 0) applyVersion(curIdx - 1); };
+              nextBtn.onclick = function () { if (curIdx < msg.versions.length - 1) applyVersion(curIdx + 1); };
+
+              vc.appendChild(prevBtn);
+              vc.appendChild(lbl);
+              vc.appendChild(nextBtn);
+              row.appendChild(vc);
+              updateButtons();
             }
 
-            // Render generated images (if any)
-            var files = Array.isArray(msg.files) ? msg.files : [];
-            files.forEach(function (f) {
-              if (f && f.public_url && (f.generated || (f.mime_type && f.mime_type.indexOf('image/') === 0))) {
-                if (msg.role === 'assistant' && f.generated) {
-                  bubble.appendChild(renderGeneratedImageBlock(f));
-                } else if (f.public_url) {
-                  // Non-generated image attachment in a user message — small thumbnail
-                  var thumb = document.createElement('img');
-                  thumb.src = f.public_url;
-                  thumb.alt = f.filename || 'image';
-                  thumb.style.cssText = 'display:block;max-width:200px;max-height:200px;object-fit:cover;border-radius:8px;margin-top:.4rem;cursor:zoom-in;';
-                  thumb.onclick = function () { openLightbox(f.public_url); };
-                  bubble.appendChild(thumb);
-                }
-              }
-            });
-
-            // Skip the whole bubble if there's nothing to show
-            if (!content && !bubble.querySelector('img')) return;
-
-            row.appendChild(bubble);
             listEl.appendChild(row);
+            rows.push(row);
           });
+
           document.title = 'Shared Chat — AgriDeepAI';
           console.log('[SHARE] Rendered', messages.length, 'messages');
         })
