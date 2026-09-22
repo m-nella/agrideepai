@@ -824,24 +824,34 @@ function isCreatorQuestion(text) {
 function buildCreatorReply(userText) {
   const t = (userText || '').toLowerCase();
 
-  // Specific: education / school / studies
-  if (/\b(school|stud(y|ied|ies)|educat|learn(ed)?|graduat|lycée|lycee|combination|mce|a-?level|college|univers)\b/i.test(t)) {
+  // ── Tier 1: Education / school / studies explicitly asked ─────────
+  if (/\b(school|stud(y|ied|ies|ying)|educat|learn(ed|ing)?|graduat|lycée|lycee|combination|mce|a-?level|college|univers|qualification)\b/i.test(t)) {
     return `**Ornella Mutuyimana** — the creator of **AgriDeepAI** — completed her **Advanced Level (A-Level)** education over three years at **Lycée Saint Marcel de Rukara**, located in **Kayonza District, Eastern Province, Rwanda**.
 
-Her combination was **Mathematics, Computer Science and Economics (MCE)**. In short, MCE blends advanced quantitative analysis (calculus and statistics) with foundational programming and database logic, and applies those skills to economics — resource allocation, market dynamics, and business entrepreneurship.
+Her combination was **Mathematics, Computer Science and Economics (MCE)** — a mix of advanced quantitative analysis (calculus, statistics) with programming and database logic, applied to economics, market dynamics, and business entrepreneurship.
 
 How can I help you today?`;
   }
 
-  // Named question about the creator
-  if (/\b(ornella|mutuyimana)\b/i.test(t) || /about (your |the )?creator|creator info|more about (the |your )?creator/i.test(t)) {
-    return `**Ornella Mutuyimana** is the creator of **AgriDeepAI** — a Rwandan technology enthusiast. She studied **Mathematics, Computer Science and Economics (MCE)** at **Lycée Saint Marcel de Rukara** (Kayonza District, Eastern Province, Rwanda), where she completed her Advanced Level over three years.
+  // ── Tier 2: Explicit "tell me more about / info about your creator" ─
+  if (/\b(tell me (more )?about|more about|info(rmation)? about|details about|about)\b.*\b(your |the )?creator\b/i.test(t)) {
+    return `**Ornella Mutuyimana** is the creator of **AgriDeepAI** — a Rwandan technology enthusiast. She studied **Mathematics, Computer Science and Economics (MCE)** at **Lycée Saint Marcel de Rukara** in Kayonza District, Eastern Province, Rwanda.
 
-She created AgriDeepAI to help farmers, students, and anyone interested in agriculture get reliable, friendly guidance. Ask me anything about crops, livestock, soil, or farming!`;
+She created AgriDeepAI to help farmers, students, and anyone interested in agriculture get reliable, friendly guidance. How can I help you today?`;
   }
 
-  // Default identity reply
-  return `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. She studied **Mathematics, Computer Science and Economics (MCE)** at **Lycée Saint Marcel de Rukara** in Kayonza District, Eastern Province, Rwanda. How can I help you today?`;
+  // ── Tier 3: Self-intro request ("tell me about yourself", "about AgriDeepAI") ─
+  if (/\b(tell me about yourself|about (this )?(ai|app|assistant)|about agrideepai|who are you|what are you)\b/i.test(t)) {
+    return `I'm **AgriDeepAI**, an AI assistant specialised in agriculture and livestock, created by **Ornella Mutuyimana**. How can I help you today?`;
+  }
+
+  // ── Tier 4: Named creator ("who is Ornella?", "tell me about Ornella") ─
+  if (/\b(ornella|mutuyimana)\b/i.test(t)) {
+    return `**Ornella Mutuyimana** is the creator of **AgriDeepAI** — a Rwandan technology enthusiast. How can I help you today?`;
+  }
+
+  // ── Default: simple identity reply (no extra info) ────────────────
+  return `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
 }
 
 async function streamSimpleText(res, text) {
