@@ -363,6 +363,8 @@ app.get('/api/debug/detection', (req, res) => {
     'bonjour','salut','bonsoir','coucou','comment ca va','ca va',
     'jambo','habari','hujambo','mambo','vipi','shikamoo',
     'hola','como estas',
+    'who created you','who made you','who is your creator','who is ornella','about ornella mutuyimana',
+    'tell me about your creator','about agrideepai','tell me about yourself',
     'create a photo of maize',
     'generate an image of cows in a field',
     'provide a photo of a coffee farm',
@@ -376,7 +378,9 @@ app.get('/api/debug/detection', (req, res) => {
     isGreeting: isGreetingOnly(m),
     isImageRequest: isImageRequest(m),
     isAgriculture: isAgricultureTopic(m),
+    isCreator: isCreatorQuestion(m),
     greetingReplyPreview: isGreetingOnly(m) ? buildGreetingReply(m).slice(0, 90) : null,
+    creatorReplyPreview: isCreatorQuestion(m) ? buildCreatorReply(m).slice(0, 140) : null,
   })));
 });
 
@@ -620,11 +624,21 @@ async function tavilySearch(query) {
 
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
+// ==================================================================
+// SYSTEM PROMPT
+// ==================================================================
 const SYSTEM_PROMPT = `You are **AgriDeepAI**, an expert AI assistant specialised in agriculture, livestock, and directly related sciences.
 
 ## IDENTITY (never violate)
-- Your name is **AgriDeepAI**. Created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
+- Your name is **AgriDeepAI**.
+- You were created by **Ornella Mutuyimana**, a Rwandan technology enthusiast.
 - You are NEVER "Nex", "Nex-AGI", "Llama", "GPT", "Claude", "Gemini", or any other AI.
+
+## CREATOR (about Ornella Mutuyimana)
+- **Ornella Mutuyimana** is your creator — a Rwandan technology enthusiast.
+- She completed her **Advanced Level (A-Level)** education over **three years** at **Lycée Saint Marcel de Rukara**, located in **Kayonza District, Eastern Province, Rwanda**.
+- Her A-Level combination was **Mathematics, Computer Science and Economics (MCE)**. This combination blends advanced quantitative analysis (calculus and statistics) with foundational programming and database logic, applied to economics — resource allocation, market dynamics, and business entrepreneurship.
+- When users ask about her, answer **warmly, briefly, and factually**. Never invent additional details beyond what is written here. If asked something you don't know, say so politely.
 
 ## ROLE
 Help with:
@@ -641,10 +655,22 @@ Help with:
 - **Where to find**: seeds, fertilisers, veterinary services, extension services
 - **Friendly conversation** — when a user greets you or makes small talk ("hi", "how are you", "what's up", "are you good", "how do you feel today", "nice to meet you", "muraho", "bonjour", "habari", etc.), respond warmly and briefly, then invite an agriculture-related question. Do NOT refuse greetings.
 
+## CONVERSATIONAL INTELLIGENCE
+You are a helpful, warm assistant with real understanding. You CAN and SHOULD:
+- Greet users and hold brief, natural small talk.
+- Answer questions about yourself (your name, your creator, your purpose).
+- Answer questions about your creator (Ornella Mutuyimana) using the facts above.
+- Explain what you can and cannot help with.
+- Respond to "how are you?", "what can you do?", "tell me about yourself", and similar meta questions warmly and helpfully.
+- Clarify a user's question if it's ambiguous, rather than refusing.
+
+Refusing simple conversational questions makes you less helpful. Only refuse genuinely off-topic **subject matter** (music, sports, politics, unrelated tech, unrelated history, etc.) — NOT conversation itself.
+
 ## REFUSE
-Politely decline ONLY genuinely off-topic questions with no connection to agriculture (music, sports, politics, unrelated tech, unrelated history, fashion, personal advice). Short reply:
+Politely decline ONLY genuinely off-topic subject matter with no connection to agriculture (music, sports, politics, unrelated tech, unrelated history, fashion, personal advice). Short reply:
 "I'm AgriDeepAI, specialised in agriculture and livestock, so I can't help with that. If you have a question about crops, livestock, soil, farming, or agribusiness, I'd be glad to help."
-Greetings, small talk, "how are you", "what's up", "who are you", "who made you" are NOT off-topic. Respond warmly.
+
+Greetings, small talk, "how are you", "what's up", "who are you", "who made you", "who is your creator", "tell me about your creator", "who is Ornella Mutuyimana", "about AgriDeepAI", "tell me about yourself" are NOT off-topic. Respond warmly and factually.
 
 ## OUTPUT FORMAT (never violate)
 - **NEVER output raw HTML, CSS, or JavaScript tags in your reply.** Forbidden examples: \`<div style="...">\`, \`<pre>\`, \`<button>\`, \`<span style="...">\`, \`<script>\`. The chat interface renders Markdown, not HTML. Raw HTML will display as ugly literal text.
@@ -722,7 +748,7 @@ function isGreetingOnly(text) {
     'you good','you ok','you okay','you alright','you fine','you well','u good','u ok',
     'thanks','thank you','thank you so much','thx','ty','much appreciated','appreciate it',
     'bye','goodbye','see you','see ya','see you later','take care','good night','have a good day',
-    'muraho','mwaramutse','mwiriwe','wiriwe','amakuru','amakuru yawe','amakuru yanyu','amakuru meza','bite','bite se','bite mwana','nshuti','murakomeye','urakomeye','witwa nde',
+    'muraho','mwaramutse','mwiriwe','wiriwe','amakuru','amakuru yawe','amakuru yanyu','amakuru meza','bite','bite se','bite mwana','nshuti','murakomeye','urakomeye',
     'bonjour','salut','bonsoir','coucou','comment ca va','comment vas tu','comment allez vous','ca va','ca va bien','ca va bien et toi','enchanté',
     'habari','jambo','hujambo','sijambo','mambo','vipi','shikamoo','marahaba','habari yako','habari zenu','habari gani','habari za asubuhi',
     'hola','como estas','que tal','buenos dias','buenas tardes','buenas noches',
@@ -770,10 +796,52 @@ function buildGreetingReply(userText) {
   return `Hello! I'm **AgriDeepAI**. How can I help you with agriculture or livestock today?`;
 }
 
+// ==================================================================
+// CREATOR DETECTION + REPLY
+// ==================================================================
 function isCreatorQuestion(text) {
-  const t = (text || '').toLowerCase();
-  const keys = ['who made you','who built you','who created you','who is your creator','who is your developer','who is behind','who founded','who develops','who is the creator of','who is the developer of','who made this','who built this','who created this','who are you','what are you','who is your maker','who is your owner','who owns you','witwa nde','uri nde','ni nde'];
+  const t = (text || '').toLowerCase().trim();
+  const keys = [
+    // Direct identity questions
+    'who made you','who built you','who created you','who is your creator','who is your developer',
+    'who is behind','who founded','who develops','who is the creator of','who is the developer of',
+    'who made this','who built this','who created this','who are you','what are you',
+    'who is your maker','who is your owner','who owns you',
+    // Kinyarwanda
+    'witwa nde','uri nde','ni nde','wakozwe na nde','wagizwe na nde',
+    // Follow-up questions about the creator / the app
+    'about your creator','about the creator','about agrideepai','about this ai','about this app',
+    'tell me about yourself','tell me about you','tell me about the creator','tell me about your creator',
+    'creator info','your creator info','creator of you','more about the creator',
+    // Named creator (Ornella Mutuyimana)
+    'ornella','mutuyimana','ornella mutuyimana',
+    'who is ornella','about ornella','more about ornella','tell me about ornella',
+    'creator ornella',
+  ];
   return keys.some(k => t.includes(k));
+}
+
+function buildCreatorReply(userText) {
+  const t = (userText || '').toLowerCase();
+
+  // Specific: education / school / studies
+  if (/\b(school|stud(y|ied|ies)|educat|learn(ed)?|graduat|lycée|lycee|combination|mce|a-?level|college|univers)\b/i.test(t)) {
+    return `**Ornella Mutuyimana** — the creator of **AgriDeepAI** — completed her **Advanced Level (A-Level)** education over three years at **Lycée Saint Marcel de Rukara**, located in **Kayonza District, Eastern Province, Rwanda**.
+
+Her combination was **Mathematics, Computer Science and Economics (MCE)**. In short, MCE blends advanced quantitative analysis (calculus and statistics) with foundational programming and database logic, and applies those skills to economics — resource allocation, market dynamics, and business entrepreneurship.
+
+How can I help you today?`;
+  }
+
+  // Named question about the creator
+  if (/\b(ornella|mutuyimana)\b/i.test(t) || /about (your |the )?creator|creator info|more about (the |your )?creator/i.test(t)) {
+    return `**Ornella Mutuyimana** is the creator of **AgriDeepAI** — a Rwandan technology enthusiast. She studied **Mathematics, Computer Science and Economics (MCE)** at **Lycée Saint Marcel de Rukara** (Kayonza District, Eastern Province, Rwanda), where she completed her Advanced Level over three years.
+
+She created AgriDeepAI to help farmers, students, and anyone interested in agriculture get reliable, friendly guidance. Ask me anything about crops, livestock, soil, or farming!`;
+  }
+
+  // Default identity reply
+  return `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. She studied **Mathematics, Computer Science and Economics (MCE)** at **Lycée Saint Marcel de Rukara** in Kayonza District, Eastern Province, Rwanda. How can I help you today?`;
 }
 
 async function streamSimpleText(res, text) {
@@ -796,7 +864,8 @@ async function tryIdentityShortcut(messages, res, hasAttachment = false) {
   const last = [...messages].reverse().find(m => m.role === 'user');
   if (!last) return false;
   if (isCreatorQuestion(last.content)) {
-    await streamSimpleText(res, `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`);
+    const reply = buildCreatorReply(last.content);
+    await streamSimpleText(res, reply);
     return true;
   }
   if (isGreetingOnly(last.content)) {
@@ -832,7 +901,7 @@ Strict rules:
 - Focus on the TOPIC or INTENT, not a quote of their sentence.
 - No quotation marks, no trailing period, no prefix like "Title:".
 - If the message is a greeting or small talk, reply exactly: Greeting
-- If the message asks who you are / who made you, reply exactly: About AgriDeepAI
+- If the message asks who you are / who made you / who is your creator, reply exactly: About AgriDeepAI
 - If the message asks for an image/photo/picture of something, use the pattern: X Photo (e.g. "Maize Photo", "Dairy Cow Photo", "Coffee Farm Photo")
 - If the message asks for the meaning/definition of something, use: Meaning of X
 - If the message asks how to do something, use: How to X
@@ -1641,7 +1710,7 @@ app.post('/api/chat/guest', async (req, res) => {
       if (imgResult.handled) return;
     }
 
-    // 2. Identity/greeting shortcut
+    // 2. Identity/creator/greeting shortcut
     if (await tryIdentityShortcut(messages, res, hasImage)) return;
 
     // 3. Normal AI text flow
@@ -1760,7 +1829,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       if (imgResult.handled) return;
     }
 
-    // 2. Greeting/identity shortcut (only when no files)
+    // 2. Greeting/creator/identity shortcut (only when no files)
     if (message && files.length === 0 && (isCreatorQuestion(message) || isGreetingOnly(message))) {
       const { data: recent } = await supabase.from('messages')
         .select('id, content').eq('conversation_id', conversationId).eq('role', 'user')
@@ -1769,7 +1838,7 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
         await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: message });
       }
       let reply;
-      if (isCreatorQuestion(message)) reply = `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
+      if (isCreatorQuestion(message)) reply = buildCreatorReply(message);
       else reply = buildGreetingReply(message);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: reply, versions: [reply], current_version_index: 0 });
       if (conv.title === 'New Chat' || !conv.title) {
@@ -1920,7 +1989,6 @@ app.post('/api/chat/messages/:id/sync-versions', authenticate, async (req, res) 
     const { error: uErr } = await supabase.from('messages').update(update).eq('id', id);
     if (uErr) throw uErr;
 
-    // Delete everything after this user message, then insert the fresh assistant reply.
     await supabase.from('messages').delete()
       .eq('conversation_id', msg.conversation_id)
       .gt('created_at', msg.created_at);
