@@ -2071,7 +2071,7 @@ app.get('/api/share/:token', async (req, res) => {
 // ==================================================================
 // SERVE FRONTEND
 // ==================================================================
-const frontendPath = path.join(__dirname, 'frontend');
+const frontendPath = path.join(__dirname, '../frontend');
 
 app.get('/share/*', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
