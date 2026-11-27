@@ -32,6 +32,7 @@ app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
 app.use('/api/', limiter);
 
+// MUST USE SERVICE ROLE KEY TO BYPASS SUPABASE EMAILS
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 });
@@ -40,6 +41,10 @@ const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
 const JWT_SECRET = process.env.JWT_SECRET || 'agrideepai-set-JWT_SECRET-in-env';
 const signPending = (payload, ttl = 900) => jwt.sign(payload, JWT_SECRET, { expiresIn: ttl });
 const verifyPending = (token) => { try { return jwt.verify(token, JWT_SECRET); } catch { return null; } };
+
+// Session Timeout Configuration (defaults to 7 days if not set in .env)
+const SESSION_MAX_AGE_DAYS = parseInt(process.env.SESSION_MAX_AGE_DAYS || '7', 10);
+const SESSION_MAX_AGE_MS = SESSION_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
 
 function stripJwtClaims(p) {
   if (!p || typeof p !== 'object') return {};
@@ -90,7 +95,7 @@ async function isEmailTakenByOther(email, currentUserId) {
 }
 
 // ==================================================================
-// AI PROVIDERS
+// AI PROVIDERS (Unchanged)
 // ==================================================================
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
@@ -118,7 +123,7 @@ const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
 
 // ==================================================================
-// IMAGE GENERATION PROVIDERS
+// IMAGE GENERATION PROVIDERS (Unchanged)
 // ==================================================================
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -130,7 +135,7 @@ const IMAGE_GEN_PROVIDERS = [
 ];
 
 // ==================================================================
-// IMAGE REQUEST DETECTION + TOPIC GUARD
+// IMAGE REQUEST DETECTION + TOPIC GUARD (Unchanged)
 // ==================================================================
 function isImageRequest(message) {
   const t = (message || '').toLowerCase().trim();
@@ -256,7 +261,7 @@ async function ocrImage(buffer, filename, mimeType) {
 }
 
 // ==================================================================
-// DIAGNOSTIC ENDPOINTS
+// DIAGNOSTIC ENDPOINTS (Unchanged)
 // ==================================================================
 app.get('/api/debug/groq-models', async (req, res) => {
   if (!groq) return res.json({ error: 'GROQ_API_KEY not set' });
@@ -385,7 +390,7 @@ app.get('/api/debug/detection', (req, res) => {
 });
 
 // ==================================================================
-// AI STREAMING
+// AI STREAMING (Unchanged)
 // ==================================================================
 async function getAIStream(chatMessages, imageData = null, isVisionRetry = false) {
   const errors = [];
@@ -625,7 +630,7 @@ async function tavilySearch(query) {
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
 // ==================================================================
-// SYSTEM PROMPT
+// SYSTEM PROMPT (Unchanged)
 // ==================================================================
 const SYSTEM_PROMPT = `You are **AgriDeepAI**, an expert AI assistant specialised in agriculture, livestock, and directly related sciences.
 
@@ -705,12 +710,48 @@ const upload = multer({
   }
 });
 
+// ==================================================================
+// AUTHENTICATION MIDDLEWARE (UPDATED WITH SESSION TIMEOUT)
+// ==================================================================
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
   const token = authHeader.split(' ')[1];
+  
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user) return res.status(401).json({ error: 'Invalid or expired token' });
+  
+  // Check Custom Session Timeout
+  try {
+    const clientId = getClientId(req);
+    const ip = getRequestIp(req);
+    const ua = getRequestUa(req);
+    
+    // Find session record
+    let query = supabase.from('sessions').select('*').eq('user_id', user.id);
+    if (clientId) {
+       query = query.eq('client_id', clientId);
+    } else {
+       query = query.eq('ip', ip).eq('user_agent', ua);
+    }
+    
+    const { data: sessions } = await query.limit(1);
+    if (sessions && sessions.length > 0) {
+      const lastActive = new Date(sessions[0].last_active).getTime();
+      if (Date.now() - lastActive > SESSION_MAX_AGE_MS) {
+        // Session expired due to inactivity
+        await supabase.from('sessions').delete().eq('id', sessions[0].id);
+        return res.status(401).json({ error: 'Session expired due to inactivity. Please log in again.' });
+      }
+      // Touch session to update last_active
+      await supabase.from('sessions').update({ last_active: new Date().toISOString() }).eq('id', sessions[0].id);
+    } else {
+       return res.status(401).json({ error: 'Session record missing. Please log in again.' });
+    }
+  } catch (e) {
+    log(`Auth timeout check error: ${e.message}`, 'warn');
+  }
+
   req.user = user;
   req.token = token;
   next();
@@ -724,7 +765,7 @@ const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.tri
 const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 
 // ==================================================================
-// GREETING DETECTION
+// GREETING DETECTION (Unchanged)
 // ==================================================================
 function isGreetingOnly(text) {
   const t = (text || '')
@@ -797,23 +838,19 @@ function buildGreetingReply(userText) {
 }
 
 // ==================================================================
-// CREATOR DETECTION + REPLY
+// CREATOR DETECTION + REPLY (Unchanged)
 // ==================================================================
 function isCreatorQuestion(text) {
   const t = (text || '').toLowerCase().trim();
   const keys = [
-    // Direct identity questions
     'who made you','who built you','who created you','who is your creator','who is your developer',
     'who is behind','who founded','who develops','who is the creator of','who is the developer of',
     'who made this','who built this','who created this','who are you','what are you',
     'who is your maker','who is your owner','who owns you',
-    // Kinyarwanda
     'witwa nde','uri nde','ni nde','wakozwe na nde','wagizwe na nde',
-    // Follow-up questions about the creator / the app
     'about your creator','about the creator','about agrideepai','about this ai','about this app',
     'tell me about yourself','tell me about you','tell me about the creator','tell me about your creator',
     'creator info','your creator info','creator of you','more about the creator',
-    // Named creator (Ornella Mutuyimana)
     'ornella','mutuyimana','ornella mutuyimana',
     'who is ornella','about ornella','more about ornella','tell me about ornella',
     'creator ornella',
@@ -824,7 +861,6 @@ function isCreatorQuestion(text) {
 function buildCreatorReply(userText) {
   const t = (userText || '').toLowerCase();
 
-  // ── Tier 1: Education / school / studies explicitly asked ─────────
   if (/\b(school|stud(y|ied|ies|ying)|educat|learn(ed|ing)?|graduat|lycée|lycee|combination|mce|a-?level|college|univers|qualification)\b/i.test(t)) {
     return `**Ornella Mutuyimana** — the creator of **AgriDeepAI** — completed her **Advanced Level (A-Level)** education over three years at **Lycée Saint Marcel de Rukara**, located in **Kayonza District, Eastern Province, Rwanda**.
 
@@ -833,24 +869,20 @@ Her combination was **Mathematics, Computer Science and Economics (MCE)** — a 
 How can I help you today?`;
   }
 
-  // ── Tier 2: Explicit "tell me more about / info about your creator" ─
   if (/\b(tell me (more )?about|more about|info(rmation)? about|details about|about)\b.*\b(your |the )?creator\b/i.test(t)) {
     return `**Ornella Mutuyimana** is the creator of **AgriDeepAI** — a Rwandan technology enthusiast. She studied **Mathematics, Computer Science and Economics (MCE)** at **Lycée Saint Marcel de Rukara** in Kayonza District, Eastern Province, Rwanda.
 
 She created AgriDeepAI to help farmers, students, and anyone interested in agriculture get reliable, friendly guidance. How can I help you today?`;
   }
 
-  // ── Tier 3: Self-intro request ("tell me about yourself", "about AgriDeepAI") ─
   if (/\b(tell me about yourself|about (this )?(ai|app|assistant)|about agrideepai|who are you|what are you)\b/i.test(t)) {
     return `I'm **AgriDeepAI**, an AI assistant specialised in agriculture and livestock, created by **Ornella Mutuyimana**. How can I help you today?`;
   }
 
-  // ── Tier 4: Named creator ("who is Ornella?", "tell me about Ornella") ─
   if (/\b(ornella|mutuyimana)\b/i.test(t)) {
     return `**Ornella Mutuyimana** is the creator of **AgriDeepAI** — a Rwandan technology enthusiast. How can I help you today?`;
   }
 
-  // ── Default: simple identity reply (no extra info) ────────────────
   return `I'm **AgriDeepAI**, created by **Ornella Mutuyimana**, a Rwandan technology enthusiast. How can I help you today?`;
 }
 
@@ -1006,7 +1038,7 @@ Title:`;
 }
 
 // ==================================================================
-// EMAIL
+// EMAIL (Unchanged)
 // ==================================================================
 async function sendEmail(to, subject, htmlContent) {
   const sendSmtpEmail = new brevo.SendSmtpEmail();
@@ -1125,7 +1157,7 @@ async function trackSession(userId, email, req) {
 }
 
 // ==================================================================
-// AUTH ROUTES
+// AUTH ROUTES (FIXED TO BYPASS SUPABASE EMAILS)
 // ==================================================================
 app.post('/api/auth/signup', async (req, res) => {
   try {
@@ -1153,16 +1185,31 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
     if (!p || p.type !== 'signup') return res.status(400).json({ error: 'Pending session expired. Please sign up again.' });
     if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
     const { email, password, fullName } = p;
-    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName }, email_confirm: true } });
+    
+    // USING ADMIN API TO BYPASS SUPABASE EMAILS COMPLETELY
+    const { data, error } = await supabase.auth.admin.createUser({
+      email: email,
+      password: password,
+      email_confirm: true, // Pre-confirmed!
+      user_metadata: { full_name: fullName }
+    });
+    
     if (error) throw error;
     if (!data.user) throw new Error('User creation failed');
-    await supabase.auth.admin.updateUserById(data.user.id, { email_confirm: true });
+    
+    // Create profile record
     await supabase.from('profiles').insert({ id: data.user.id, full_name: fullName });
+    
+    // Sign in the user programmatically to get session tokens
     const { data: sd, error: se } = await supabase.auth.signInWithPassword({ email, password });
     if (se) throw se;
+    
     await trackSession(sd.user.id, sd.user.email, req);
     res.status(201).json({ user: sd.user, session: sd.session });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { 
+    log(`[CONFIRM-SIGNUP] Error: ${err.message}`, 'error');
+    res.status(400).json({ error: err.message }); 
+  }
 });
 
 app.post('/api/auth/resend-verification', async (req, res) => {
@@ -1187,10 +1234,15 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    
+    // We still use signInWithPassword to verify the password, but we do NOT send a session to frontend yet.
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
+    
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', data.user.id).single();
     const code = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store session tokens in JWT so we don't have to query DB again during verify
     const pendingToken = signPending({
       type: 'login', email, code,
       access_token: data.session.access_token,
@@ -1201,6 +1253,7 @@ app.post('/api/auth/login', async (req, res) => {
       userLastSignInAt: data.user.last_sign_in_at || null,
       two_factor_enabled: !!profile?.two_factor_enabled,
     });
+    
     await sendVerificationEmailWithRetry(email, code, 'login', 'Use the code below to complete your sign-in.');
     res.json({ requiresCode: true, email, pendingToken, message: 'Verification code sent to your email.' });
   } catch (err) {
@@ -1232,7 +1285,9 @@ app.post('/api/auth/verify-login', async (req, res) => {
     const p = verifyPending(pendingToken);
     if (!p || p.type !== 'login') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
     if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
+    
     const user = { id: p.userId, email: p.userEmail || p.email, created_at: p.userCreatedAt, last_sign_in_at: p.userLastSignInAt };
+    
     if (p.two_factor_enabled) {
       const twoFactorToken = signPending({
         type: '2fa', email: p.email,
@@ -1240,6 +1295,7 @@ app.post('/api/auth/verify-login', async (req, res) => {
       });
       return res.json({ requires2fa: true, twoFactorToken, message: 'Email verified. Now enter your 2FA code.' });
     }
+    
     await trackSession(user.id, user.email, req);
     res.json({ user, session: { access_token: p.access_token, refresh_token: p.refresh_token }, message: 'Login successful' });
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
@@ -1552,7 +1608,7 @@ app.get('/api/config', (req, res) => res.json({
 }));
 
 // ==================================================================
-// IMAGE GENERATION ENGINE
+// IMAGE GENERATION ENGINE (Unchanged)
 // ==================================================================
 async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
   const ext = mimeType.includes('png') ? 'png' : 'jpg';
@@ -1663,7 +1719,7 @@ app.post('/api/chat/generate-image', async (req, res) => {
 });
 
 // ==================================================================
-// CHAT
+// CHAT (Unchanged)
 // ==================================================================
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT, excludeId = null) {
   const history = messages
@@ -1714,16 +1770,13 @@ app.post('/api/chat/guest', async (req, res) => {
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     if (!lastUser) return res.status(400).json({ error: 'No user message' });
 
-    // 1. Image-request detection
     if (!hasImage && lastUser.content) {
       const imgResult = await handleImageRequestInChat(lastUser.content, res);
       if (imgResult.handled) return;
     }
 
-    // 2. Identity/creator/greeting shortcut
     if (await tryIdentityShortcut(messages, res, hasImage)) return;
 
-    // 3. Normal AI text flow
     let imageData = null;
     let extractedText = '';
     if (hasImage) {
@@ -1807,7 +1860,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
     const { data: conv } = await supabase.from('conversations').select('id, title').eq('id', conversationId).eq('user_id', req.user.id).single();
     if (!conv) return res.status(404).json({ error: 'Conversation not found' });
 
-    // 1. Image-request detection (only when no files attached)
     if (!files.length && message) {
       const userMessageData = { conversation_id: conversationId, role: 'user', content: message };
       await supabase.from('messages').insert(userMessageData);
@@ -1839,7 +1891,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       if (imgResult.handled) return;
     }
 
-    // 2. Greeting/creator/identity shortcut (only when no files)
     if (message && files.length === 0 && (isCreatorQuestion(message) || isGreetingOnly(message))) {
       const { data: recent } = await supabase.from('messages')
         .select('id, content').eq('conversation_id', conversationId).eq('role', 'user')
@@ -1860,7 +1911,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       return streamSimpleText(res, reply);
     }
 
-    // 3. Files + user message
     let filesMeta = [], imageData = null, extractedText = '';
     for (const file of files) {
       const fileExt = file.originalname.split('.').pop();
@@ -1876,7 +1926,6 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
       if (txt) extractedText += (extractedText ? '\n\n' : '') + txt;
     }
 
-    // Only insert user message if not already inserted above
     let alreadyInserted = false;
     if (!files.length && message) {
       const { data: recent } = await supabase.from('messages')
@@ -1965,9 +2014,6 @@ app.put('/api/chat/messages/:id', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ==================================================================
-// SYNC VERSIONS — persists full version history for logged-in users
-// ==================================================================
 app.post('/api/chat/messages/:id/sync-versions', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -2028,9 +2074,6 @@ app.post('/api/chat/messages/:id/sync-versions', authenticate, async (req, res) 
   }
 });
 
-// ==================================================================
-// SHARE
-// ==================================================================
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -2097,4 +2140,5 @@ app.listen(PORT, () => {
   log(`Pollinations: ${POLLINATIONS_API_KEY ? 'clean (no watermark)' : 'watermarked'}`, 'info');
   log(`OCR: ${OCR_SPACE_API_KEY ? 'enabled' : 'disabled'} | Tavily: ${TAVILY_API_KEY ? 'enabled' : 'disabled'}`, 'info');
   log(`JWT_SECRET: ${process.env.JWT_SECRET ? 'set' : 'DEFAULT — set JWT_SECRET in env!'}`, process.env.JWT_SECRET ? 'info' : 'warn');
+  log(`Session Timeout: ${SESSION_MAX_AGE_DAYS} days`, 'info');
 });
