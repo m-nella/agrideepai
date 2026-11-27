@@ -66,7 +66,8 @@ const copyShareLink = document.getElementById('copyShareLink');
 const chatMenu = document.getElementById('chatMenu');
 const chatContainer = document.getElementById('chatContainer');
 
-const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENTS = 4;
+const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 const CODE_RESEND_SECONDS = 60;
 const SESSION_CHECK_THROTTLE_MS = 20000;
 
@@ -79,6 +80,7 @@ let state = {
   contextMenuTarget: null, isShareView: IS_SHARE_VIEW, shareMessages: [], copyTimeout: null,
   pendingAuth: null, shouldScrollToBottom: false,
   lastSessionCheck: 0, isSigningOut: false,
+  googleEnabled: false, googleDone: false,
   forgotPw: { email: null, pendingToken: null, grantedToken: null },
 };
 
@@ -170,6 +172,37 @@ function showCustomPrompt(title, defaultValue = '') {
       if (e.key === 'Escape') close();
     };
   });
+}
+
+// Password confirmation prompt, used to disable 2FA.
+function showPasswordPrompt(title) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `<div class="modal-content"><button class="modal-close" id="pwPromptClose">&times;</button><h2>${title}</h2><p style="color:var(--text-muted);font-size:.9rem;margin:.25rem 0 .5rem;">Confirm with your account password.</p><div id="pwPromptWrap"></div><div style="display:flex;gap:.5rem;margin-top:1rem;"><button class="btn-primary" id="pwPromptOk" style="flex:1;">Confirm</button><button class="btn-primary" id="pwPromptCancel" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div></div>`;
+    document.body.appendChild(modal);
+    const wrap = modal.querySelector('#pwPromptWrap');
+    wrap.appendChild(createPasswordField('pwPromptInput', 'Account password'));
+    window.refreshIcons();
+    const input = modal.querySelector('#pwPromptInput');
+    setTimeout(() => { try { input.focus(); } catch (e) {} }, 50);
+    const done = (v) => { modal.remove(); resolve(v); };
+    modal.querySelector('#pwPromptClose').onclick = () => done(null);
+    modal.querySelector('#pwPromptCancel').onclick = () => done(null);
+    modal.querySelector('#pwPromptOk').onclick = () => done(input.value || null);
+    modal.onclick = (e) => { if (e.target === modal) done(null); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') done(input.value || null);
+      if (e.key === 'Escape') done(null);
+    });
+  });
+}
+
+// Escape user-controlled strings before they are interpolated into HTML.
+function esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
 }
 
 function cleanContent(content) {
@@ -307,6 +340,7 @@ async function initSupabase() {
   try {
     const res = await fetch('/api/config');
     const config = await res.json();
+    state.googleEnabled = !!config.googleEnabled;
     const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
     state.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
       auth: {
@@ -328,6 +362,10 @@ async function initSupabase() {
         updateAuthUI(); renderChatList(); renderMessages();
       }
     });
+    // Google sends the browser back with ?code=... — finish that first.
+    const handledGoogle = await handleGoogleRedirect();
+    if (handledGoogle) return;
+
     const { data: { session } } = await state.supabase.auth.getSession();
     if (session?.user) {
       state.currentUser = session.user;
@@ -365,23 +403,28 @@ async function verifySessionValidity(force = false) {
       cache: 'no-store',
     });
     let res = await doFetch(session.access_token);
-    
+
     if (res.status === 401) {
       const { data } = await state.supabase.auth.refreshSession();
       if (data.session?.access_token) {
         res = await doFetch(data.session.access_token);
-      } else { 
-        await forceSignOut('Session expired'); 
-        return false; 
+      } else {
+        await forceSignOut('Session expired');
+        return false;
       }
     }
-    
-    // NEW: If the retry also failed with 401, it means the DB session was revoked or timed out due to inactivity.
+
+    // Only a genuinely dead session signs the user out. The server marks
+    // those with a code; a bare 401 is treated as "still valid" so a
+    // transient backend error cannot eject a working user.
     if (res.status === 401) {
-      await forceSignOut('Session expired due to inactivity or remote logout');
-      return false;
+      const body = await res.clone().json().catch(() => ({}));
+      if (body.code === 'SESSION_EXPIRED' || body.code === 'INVALID_TOKEN') {
+        await forceSignOut(body.error || 'Session expired due to inactivity or remote logout');
+        return false;
+      }
     }
-    
+
     if (!res.ok) return true;
     const data = await res.json().catch(() => ({ valid: true }));
     if (data && data.valid === false) {
@@ -418,7 +461,7 @@ async function forceSignOut(reason = 'Signed out') {
 function updateAuthUI() {
   if (state.currentUser) {
     const name = state.currentUser.email?.split('@')[0] || 'User';
-    authSidebarBtn.innerHTML = `<i data-lucide="user"></i><span>${name}</span>`;
+    authSidebarBtn.innerHTML = `<i data-lucide="user"></i><span>${esc(name)}</span>`;
     authSidebarBtn.onclick = () => openAccountModal();
   } else {
     authSidebarBtn.innerHTML = `<i data-lucide="log-in"></i><span>Sign In</span>`;
@@ -430,37 +473,43 @@ function updateAuthUI() {
 async function apiFetch(endpoint, options = {}) {
   if (!state.supabase) throw new Error('Not initialized');
   let session = (await state.supabase.auth.getSession()).data.session;
-  if (!session) { 
-    try { const { data } = await state.supabase.auth.refreshSession(); session = data.session; } catch (e) {} 
+  if (!session) {
+    try { const { data } = await state.supabase.auth.refreshSession(); session = data.session; } catch (e) {}
   }
   if (!session?.access_token) throw new Error('Not authenticated');
-  
+
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${session.access_token}`,
     'X-Client-Id': CLIENT_ID,
     ...options.headers,
   };
-  
+
   let res = await fetch(endpoint, { ...options, headers });
-  
+
   if (res.status === 401) {
     const { data } = await state.supabase.auth.refreshSession();
     if (data.session?.access_token) {
-      const retryHeaders = { ...headers, Authorization: `Bearer ${data.session.access_token}` };
-      res = await fetch(endpoint, { ...options, headers: retryHeaders });
+      res = await fetch(endpoint, {
+        ...options,
+        headers: { ...headers, Authorization: `Bearer ${data.session.access_token}` },
+      });
     }
   }
-  
-  // NEW: If the retry also fails with 401, it means the session is dead. Force logout.
+
   if (res.status === 401) {
-    await forceSignOut('Session expired. Please log in again.');
-    throw new Error('Session expired');
+    const body = await res.clone().json().catch(() => ({}));
+    // A wrong password used to arrive as 401 and force a logout mid-action.
+    // Only the explicit session codes end the session now.
+    if (body.code === 'SESSION_EXPIRED' || body.code === 'INVALID_TOKEN') {
+      await forceSignOut(body.error || 'Session expired. Please log in again.');
+    }
+    throw new Error(body.error || 'Unauthorized');
   }
 
-  if (!res.ok) { 
-    const err = await res.json().catch(() => ({})); 
-    throw new Error(err.error || `Request failed (${res.status})`); 
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Request failed (${res.status})`);
   }
   return res;
 }
@@ -1459,6 +1508,13 @@ async function sendMessage() {
         body: fd,
         signal: state.abortController.signal,
       });
+      if (response.status === 401) {
+        const body = await response.clone().json().catch(() => ({}));
+        if (body.code === 'SESSION_EXPIRED' || body.code === 'INVALID_TOKEN') {
+          await forceSignOut(body.error || 'Session expired. Please log in again.');
+          throw new Error('Session expired');
+        }
+      }
     } else {
       const cleanMessages = state.messages.filter(m => m.id !== assist.id);
       const payload = { messages: buildGuestPayload(cleanMessages) };
@@ -1498,6 +1554,140 @@ function stopGeneration() {
   }
 }
 
+// ============================================================
+// GOOGLE SIGN-IN
+// The OAuth code is exchanged on the server, not by the SDK, so a user who has
+// 2FA enabled is still asked for their code before getting a session.
+// ============================================================
+async function startGoogleSignIn() {
+  if (!state.supabase) return;
+  try {
+    showToast('Redirecting to Google…');
+    const { error } = await state.supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin + window.location.pathname,
+        skipBrowserRedirect: false,
+        queryParams: { prompt: 'select_account' },
+      },
+    });
+    if (error) throw error;
+  } catch (e) {
+    showToast('Google sign-in unavailable: ' + e.message, true);
+  }
+}
+
+// Runs once at startup when Google sends the browser back with ?code=...
+async function handleGoogleRedirect() {
+  if (!state.supabase || state.googleDone) return false;
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if (!code) return false;
+  state.googleDone = true;
+
+  // The SDK stored the PKCE verifier under its storage key when we redirected.
+  let codeVerifier = '';
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && key.includes('code-verifier')) {
+        codeVerifier = window.localStorage.getItem(key) || '';
+        break;
+      }
+    }
+  } catch (e) {}
+
+  // Clear the OAuth params so a refresh cannot replay the code.
+  try { window.history.replaceState({}, document.title, window.location.origin + window.location.pathname); } catch (e) {}
+
+  if (!codeVerifier) {
+    showToast('Google sign-in expired. Please try again.', true);
+    openAuthModal('login');
+    return true;
+  }
+
+  authModal.classList.remove('hidden');
+  authModalBody.innerHTML = `
+    <h2>Signing you in…</h2>
+    <p style="color:var(--text-muted);font-size:.9rem;">Finishing Google sign-in.</p>`;
+
+  try {
+    const res = await fetch('/api/auth/google/exchange', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+      body: JSON.stringify({ code, codeVerifier }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Google sign-in failed');
+
+    if (data.requires2fa) {
+      renderGoogleTwoFactor(data.twoFactorToken);
+      return true;
+    }
+    await completeGoogleSignIn(data);
+  } catch (e) {
+    closeAuthModal();
+    showToast(e.message || 'Google sign-in failed', true);
+    openAuthModal('login');
+  }
+  return true;
+}
+
+function renderGoogleTwoFactor(twoFactorToken) {
+  authModalBody.innerHTML = `
+    <h2>Two-factor authentication</h2>
+    <div id="gErr" class="error-msg" style="display:none;"></div>
+    <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:.5rem;">
+      Enter the 6-digit code from your authenticator app to finish signing in.
+    </p>
+    <input type="text" id="gCode" placeholder="123456" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
+    <button class="btn-primary" id="gVerify">Verify &amp; Sign In</button>
+    <div class="toggle-link" id="gCancel" style="margin-top:.75rem;">Cancel</div>`;
+
+  const errDiv = document.getElementById('gErr');
+  const codeInput = document.getElementById('gCode');
+  const verifyBtn = document.getElementById('gVerify');
+  setTimeout(() => { try { codeInput.focus(); } catch (e) {} }, 50);
+
+  document.getElementById('gCancel').onclick = () => { closeAuthModal(); openAuthModal('login'); };
+
+  const submit = async () => {
+    const code = codeInput.value.trim();
+    if (!code) { errDiv.textContent = 'Enter your 2FA code.'; errDiv.style.display = 'block'; return; }
+    verifyBtn.disabled = true;
+    try {
+      const res = await fetch('/api/auth/google/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+        body: JSON.stringify({ twoFactorToken, twoFactorCode: code }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Invalid code');
+      await completeGoogleSignIn(data);
+    } catch (e) {
+      errDiv.textContent = e.message; errDiv.style.display = 'block';
+      verifyBtn.disabled = false;
+    }
+  };
+  verifyBtn.onclick = submit;
+  codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+}
+
+async function completeGoogleSignIn(data) {
+  if (!data?.session?.access_token) throw new Error('No session returned');
+  const { error } = await state.supabase.auth.setSession({
+    access_token: data.session.access_token,
+    refresh_token: data.session.refresh_token,
+  });
+  if (error) throw error;
+  state.currentUser = data.user;
+  state.lastSessionCheck = Date.now();
+  updateAuthUI();
+  closeAuthModal();
+  showToast('Signed in with Google');
+  await loadCloudConversations();
+}
+
 function createPasswordField(id, placeholder) {
   const w = document.createElement('div'); w.style.cssText = 'position:relative;width:100%;';
   const input = document.createElement('input');
@@ -1531,6 +1721,7 @@ function renderAuthForm(mode) {
     <div id="authError" class="error-msg" style="display:none;"></div>
     <div id="authStatus" class="status-msg" style="display:none;"></div>
     <div id="authInitialSection">
+      <div id="googleSignInSlot"></div>
       <label>Email</label>
       <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
       <label>Password</label>
@@ -1556,6 +1747,32 @@ function renderAuthForm(mode) {
   document.getElementById('authPasswordWrapper').appendChild(createPasswordField('authPassword', '••••••••'));
   if (!isLogin) document.getElementById('authConfirmPasswordWrapper').appendChild(createPasswordField('authConfirmPassword', 'Confirm password'));
   window.refreshIcons();
+
+  // "Continue with Google" — only shown when the server has credentials set.
+  const googleSlot = document.getElementById('googleSignInSlot');
+  if (googleSlot && state.googleEnabled) {
+    const gWrap = document.createElement('div');
+    gWrap.style.cssText = 'margin-bottom:.9rem;';
+    const gBtn = document.createElement('button');
+    gBtn.type = 'button';
+    gBtn.id = 'googleSignInBtn';
+    gBtn.style.cssText = 'width:100%;display:flex;align-items:center;justify-content:center;gap:.6rem;background:#fff;color:#1f1f1f;border:1px solid #d0d0d0;border-radius:8px;padding:.65rem 1rem;font-size:.92rem;font-weight:600;cursor:pointer;';
+    gBtn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+      <span>Continue with Google</span>`;
+    gBtn.onclick = () => startGoogleSignIn();
+    const divider = document.createElement('div');
+    divider.style.cssText = 'display:flex;align-items:center;gap:.6rem;margin-top:.85rem;color:var(--text-muted);font-size:.78rem;';
+    divider.innerHTML = '<span style="flex:1;height:1px;background:var(--border);"></span><span>or</span><span style="flex:1;height:1px;background:var(--border);"></span>';
+    gWrap.appendChild(gBtn);
+    gWrap.appendChild(divider);
+    googleSlot.appendChild(gWrap);
+  }
 
   const submitBtn = document.getElementById('authSubmitBtn');
   const toggleLink = document.getElementById('authToggle');
@@ -1643,7 +1860,7 @@ function renderAuthForm(mode) {
         statDiv.textContent = 'Verification code sent.';
         const resendBtn = document.getElementById('resendVerifyBtn');
         wireResend(resendBtn, '/api/auth/resend-verification', () => state.pendingAuth, t => state.pendingAuth = t);
-        
+
         document.getElementById('verifyBtn').onclick = async () => {
           const code = document.getElementById('verifyCode').value.trim();
           if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
@@ -1655,21 +1872,18 @@ function renderAuthForm(mode) {
               body: JSON.stringify({ pendingToken: state.pendingAuth, code }),
             });
             const cd = await cr.json(); if (!cr.ok) throw new Error(cd.error);
-            
-            // --- NEW LOGIC: Account created successfully, but not logged in ---
+
+            // Account created but NOT logged in: return to the sign-in form.
             state.pendingAuth = null;
             showToast('Account created successfully! Please sign in.');
-            
-            // Switch back to the login form
+
             renderAuthForm('login');
-            
-            // Auto-fill the email for convenience
+
             const emailField = document.getElementById('authEmail');
             if (emailField) emailField.value = email;
-            
+
             const pwField = document.getElementById('authPassword');
             if (pwField) pwField.focus();
-            // -------------------------------------------------------------------
 
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
@@ -1739,47 +1953,69 @@ function renderAuthForm(mode) {
   };
 }
 
-function renderForgotPasswordForm(step) {
-  const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-  const pwIsStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
+// ============================================================
+// FORGOT PASSWORD (3 steps: email → code → new password)
+// ============================================================
+function renderForgotPasswordForm(step = 'email') {
+  const f = state.forgotPw;
+
+  const head = `
+    <h2>Reset Password</h2>
+    <div id="fpError" class="error-msg" style="display:none;"></div>
+    <div id="fpStatus" class="status-msg" style="display:none;"></div>`;
+
+  const backLink = `<div class="toggle-link" id="fpBack" style="margin-top:.75rem;">Back to sign in</div>`;
 
   if (step === 'email') {
     authModalBody.innerHTML = `
-      <h2>Reset Password</h2>
-      <div id="fpError" class="error-msg" style="display:none;"></div>
-      <div id="fpStatus" class="status-msg" style="display:none;"></div>
-      <p style="color:var(--text-muted);font-size:.9rem;margin:.25rem 0 .75rem;">Enter the email you used to register. We'll send a verification code to it.</p>
-      <label>Registered Email</label>
-      <input type="email" id="fpEmail" placeholder="you@example.com" autocomplete="email" />
-      <button class="btn-primary" id="fpSendCodeBtn">Send Code</button>
-      <div class="toggle-link" id="fpBackToSignIn" style="margin-top:.5rem;">Back to Sign In</div>`;
-    window.refreshIcons();
+      ${head}
+      <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:.5rem;">Enter the email address on your account and we'll send you a 6-digit code.</p>
+      <label>Email</label>
+      <input type="email" id="fpEmail" placeholder="you@example.com" autocomplete="email" value="${esc(f.email || '')}" />
+      <button class="btn-primary" id="fpSubmit">Send Code</button>
+      ${backLink}`;
+  } else if (step === 'code') {
+    authModalBody.innerHTML = `
+      ${head}
+      <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:.5rem;">We sent a code to <strong>${esc(f.email || '')}</strong>.</p>
+      <label>Verification Code</label>
+      <input type="text" id="fpCode" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
+      <button class="btn-primary" id="fpSubmit">Verify Code</button>
+      <button class="link-btn" id="fpResend" type="button">Resend code</button>
+      ${backLink}`;
+  } else {
+    authModalBody.innerHTML = `
+      ${head}
+      <p style="color:var(--text-muted);font-size:.9rem;margin-bottom:.5rem;">Choose a new password for <strong>${esc(f.email || '')}</strong>.</p>
+      <label>New Password</label>
+      <div id="fpPwWrap"></div>
+      <label>Confirm New Password</label>
+      <div id="fpPwConfirmWrap"></div>
+      <div id="fpLive" style="font-size:.8rem;margin-top:.3rem;min-height:1.2em;"></div>
+      <button class="btn-primary" id="fpSubmit" disabled>Reset Password</button>
+      ${backLink}`;
+  }
 
-    const errDiv = document.getElementById('fpError');
-    const statDiv = document.getElementById('fpStatus');
+  window.refreshIcons();
+
+  const errDiv = document.getElementById('fpError');
+  const statDiv = document.getElementById('fpStatus');
+  const submitBtn = document.getElementById('fpSubmit');
+  const back = document.getElementById('fpBack');
+  const err = (m) => { errDiv.textContent = m; errDiv.style.display = 'block'; statDiv.style.display = 'none'; };
+  const stat = (m) => { statDiv.textContent = m; statDiv.style.display = 'block'; errDiv.style.display = 'none'; };
+  const clear = () => { errDiv.style.display = 'none'; };
+
+  back.onclick = () => renderAuthForm('login');
+
+  if (step === 'email') {
     const emailInput = document.getElementById('fpEmail');
-    const sendBtn = document.getElementById('fpSendCodeBtn');
+    setTimeout(() => { try { emailInput.focus(); } catch (e) {} }, 50);
 
-    const validate = () => {
-      const e = emailInput.value.trim();
-      sendBtn.disabled = !(e.includes('@') && e.length >= 5);
-    };
-    emailInput.addEventListener('input', validate);
-    validate();
-    setTimeout(() => emailInput.focus(), 50);
-
-    emailInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendBtn.click(); });
-
-    document.getElementById('fpBackToSignIn').onclick = () => renderAuthForm('login');
-
-    sendBtn.onclick = async () => {
-      const email = emailInput.value.trim().toLowerCase();
-      errDiv.style.display = 'none'; statDiv.style.display = 'none';
-      if (!email) { errDiv.textContent = 'Please enter your email address'; errDiv.style.display = 'block'; return; }
-      if (!EMAIL_RE.test(email) || email.includes('..')) { errDiv.textContent = 'Please enter a valid email address'; errDiv.style.display = 'block'; return; }
-
-      statDiv.textContent = 'Checking email...'; statDiv.style.display = 'block';
-      sendBtn.disabled = true;
+    submitBtn.onclick = async () => {
+      const email = emailInput.value.trim();
+      if (!email) return err('Please enter your email address.');
+      submitBtn.disabled = true; clear(); stat('Sending code...');
       try {
         const res = await fetch('/api/auth/forgot-password-request', {
           method: 'POST',
@@ -1787,554 +2023,918 @@ function renderForgotPasswordForm(step) {
           body: JSON.stringify({ email }),
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          if (res.status === 404) throw new Error(data.error || 'This email is not registered. Please sign up first.');
-          throw new Error(data.error || `Request failed (${res.status})`);
-        }
+        if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
         state.forgotPw.email = data.email || email;
         state.forgotPw.pendingToken = data.pendingToken;
-        statDiv.textContent = `Verification code sent to ${state.forgotPw.email}.`;
-        setTimeout(() => renderForgotPasswordForm('code'), 300);
+        showToast('Code sent. Check your email.');
+        renderForgotPasswordForm('code');
       } catch (e) {
-        errDiv.textContent = e.message; errDiv.style.display = 'block';
-        statDiv.style.display = 'none';
-        sendBtn.disabled = false;
+        err(e.message || 'Failed to send code.');
+        submitBtn.disabled = false;
       }
     };
+    emailInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitBtn.click(); });
+    return;
   }
 
-  else if (step === 'code') {
-    authModalBody.innerHTML = `
-      <h2>Enter Verification Code</h2>
-      <div id="fpError" class="error-msg" style="display:none;"></div>
-      <div id="fpStatus" class="status-msg" style="display:block;">We sent a code to <strong>${state.forgotPw.email}</strong>.</div>
-      <label>6-digit code</label>
-      <input type="text" id="fpCode" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
-      <button class="btn-primary" id="fpVerifyBtn">Verify Code</button>
-      <button id="fpResendBtn" class="link-btn" type="button">Resend code</button>
-      <div class="toggle-link" id="fpBackToEmail" style="margin-top:.5rem;">Use a different email</div>`;
-    window.refreshIcons();
-
-    const errDiv = document.getElementById('fpError');
+  if (step === 'code') {
     const codeInput = document.getElementById('fpCode');
-    const verifyBtn = document.getElementById('fpVerifyBtn');
-    const resendBtn = document.getElementById('fpResendBtn');
-
+    const resendBtn = document.getElementById('fpResend');
+    setTimeout(() => { try { codeInput.focus(); } catch (e) {} }, 50);
     attachCountdown(resendBtn);
-    setTimeout(() => codeInput.focus(), 50);
-    codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyBtn.click(); });
-
-    document.getElementById('fpBackToEmail').onclick = () => {
-      state.forgotPw = { email: null, pendingToken: null, grantedToken: null };
-      renderForgotPasswordForm('email');
-    };
 
     resendBtn.onclick = async () => {
-      if (resendBtn.disabled) return;
-      if (!state.forgotPw.pendingToken) { errDiv.textContent = 'Your session expired. Please start again.'; errDiv.style.display = 'block'; return; }
+      if (!state.forgotPw.pendingToken) return err('Your session expired. Please start again.');
       try {
-        const r = await fetch('/api/auth/resend-forgot-password-code', {
+        const res = await fetch('/api/auth/resend-forgot-password-code', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
           body: JSON.stringify({ pendingToken: state.forgotPw.pendingToken }),
         });
-        const rd = await r.json();
-        if (!r.ok) throw new Error(rd.error || 'Failed to resend');
-        state.forgotPw.pendingToken = rd.pendingToken;
-        showToast(rd.email ? `New code sent to ${rd.email}` : 'New code sent.');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Resend failed (${res.status})`);
+        state.forgotPw.pendingToken = data.pendingToken;
+        showToast('New code sent.');
         attachCountdown(resendBtn);
       } catch (e) {
-        showToast(e.message, true);
+        err(e.message || 'Failed to resend code.');
         resendBtn.disabled = false;
         if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; }
-        resendBtn.textContent = 'Resend code';
+        resendBtn.textContent = resendBtn.dataset.originalText || 'Resend code';
       }
     };
 
-    verifyBtn.onclick = async () => {
+    submitBtn.onclick = async () => {
       const code = codeInput.value.trim();
-      errDiv.style.display = 'none';
-      if (!code || code.length < 6) { errDiv.textContent = 'Enter the 6-digit code'; errDiv.style.display = 'block'; return; }
-      verifyBtn.disabled = true;
+      if (!code) return err('Please enter the code.');
+      submitBtn.disabled = true; clear(); stat('Verifying...');
       try {
-        const vr = await fetch('/api/auth/forgot-password-verify-code', {
+        const res = await fetch('/api/auth/forgot-password-verify-code', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
           body: JSON.stringify({ pendingToken: state.forgotPw.pendingToken, code }),
         });
-        const vd = await vr.json().catch(() => ({}));
-        if (!vr.ok) throw new Error(vd.error || 'Invalid or expired code');
-        state.forgotPw.grantedToken = vd.grantedToken;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Verification failed (${res.status})`);
+        state.forgotPw.grantedToken = data.grantedToken;
+        state.forgotPw.pendingToken = null;
         renderForgotPasswordForm('password');
       } catch (e) {
-        errDiv.textContent = e.message; errDiv.style.display = 'block';
-        verifyBtn.disabled = false;
+        err(e.message || 'Verification failed.');
+        submitBtn.disabled = false;
       }
     };
+    codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitBtn.click(); });
+    return;
   }
 
-  else if (step === 'password') {
-    authModalBody.innerHTML = `
-      <h2>Set New Password</h2>
-      <div id="fpError" class="error-msg" style="display:none;"></div>
-      <p style="color:var(--text-muted);font-size:.9rem;margin:.25rem 0 .75rem;">Choose a new password for <strong>${state.forgotPw.email}</strong>.</p>
-      <label>New Password</label>
-      <div id="fpNewPwWrap"></div>
-      <label>Confirm New Password</label>
-      <div id="fpConfirmPwWrap"></div>
-      <div id="fpPwLiveStatus" style="font-size:.8rem;margin-top:.3rem;min-height:1.2em;"></div>
-      <button class="btn-primary" id="fpResetBtn" disabled>Reset Password</button>
-      <div class="toggle-link" id="fpCancelBtn" style="margin-top:.5rem;">Cancel</div>`;
-    document.getElementById('fpNewPwWrap').appendChild(createPasswordField('fpNewPw', 'New password'));
-    document.getElementById('fpConfirmPwWrap').appendChild(createPasswordField('fpConfirmPw', 'Confirm new password'));
-    window.refreshIcons();
+  // step === 'password'
+  const pwWrap = document.getElementById('fpPwWrap');
+  const pwConfirmWrap = document.getElementById('fpPwConfirmWrap');
+  pwWrap.appendChild(createPasswordField('fpPw', 'New password'));
+  pwConfirmWrap.appendChild(createPasswordField('fpPwConfirm', 'Confirm new password'));
+  window.refreshIcons();
 
-    const errDiv = document.getElementById('fpError');
-    const newPwInput = document.getElementById('fpNewPw');
-    const confirmPwInput = document.getElementById('fpConfirmPw');
-    const statusEl = document.getElementById('fpPwLiveStatus');
-    const resetBtn = document.getElementById('fpResetBtn');
+  const pwInput = document.getElementById('fpPw');
+  const confirmInput = document.getElementById('fpPwConfirm');
+  const live = document.getElementById('fpLive');
+  setTimeout(() => { try { pwInput.focus(); } catch (e) {} }, 50);
 
-    const validate = () => {
-      const np = newPwInput.value; const cp = confirmPwInput.value;
-      if (!np && !cp) { statusEl.textContent = ''; resetBtn.disabled = true; return; }
-      if (!pwIsStrong(np)) { statusEl.textContent = 'Password must be 8+ chars with letters and numbers'; statusEl.style.color = 'var(--danger)'; resetBtn.disabled = true; return; }
-      if (!cp || np !== cp) { statusEl.textContent = 'Passwords do not match'; statusEl.style.color = 'var(--danger)'; resetBtn.disabled = true; return; }
-      statusEl.textContent = '✓ Passwords match'; statusEl.style.color = 'var(--accent)';
-      resetBtn.disabled = false;
-    };
-    newPwInput.addEventListener('input', validate);
-    confirmPwInput.addEventListener('input', validate);
-    setTimeout(() => newPwInput.focus(), 50);
+  const isStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
+  const check = () => {
+    const p = pwInput.value, c = confirmInput.value;
+    if (!p && !c) { live.textContent = ''; }
+    else if (!isStrong(p)) { live.textContent = 'Password must be 8+ characters with letters and numbers'; live.style.color = 'var(--danger)'; }
+    else if (p !== c) { live.textContent = 'Passwords do not match'; live.style.color = 'var(--danger)'; }
+    else { live.textContent = '✓ Passwords match'; live.style.color = 'var(--accent)'; }
+    submitBtn.disabled = !(isStrong(p) && p === c);
+  };
+  pwInput.addEventListener('input', check);
+  confirmInput.addEventListener('input', check);
+  check();
 
-    document.getElementById('fpCancelBtn').onclick = () => {
+  submitBtn.onclick = async () => {
+    const newPassword = pwInput.value;
+    const confirm = confirmInput.value;
+    if (!isStrong(newPassword)) return err('Password must be 8+ characters with letters and numbers.');
+    if (newPassword !== confirm) return err('Passwords do not match.');
+    submitBtn.disabled = true; clear(); stat('Resetting password...');
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
+        body: JSON.stringify({ newPassword, grantedToken: state.forgotPw.grantedToken }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Reset failed (${res.status})`);
       state.forgotPw = { email: null, pendingToken: null, grantedToken: null };
+      showToast('Password reset. Please sign in.');
       renderAuthForm('login');
-    };
+      const emailField = document.getElementById('authEmail');
+      if (emailField && f.email) emailField.value = f.email;
+    } catch (e) {
+      err(e.message || 'Failed to reset password.');
+      submitBtn.disabled = false;
+    }
+  };
+  confirmInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitBtn.click(); });
+}
 
-    resetBtn.onclick = async () => {
-      const newPassword = newPwInput.value;
-      const confirm = confirmPwInput.value;
-      errDiv.style.display = 'none';
-      if (!pwIsStrong(newPassword)) { errDiv.textContent = 'Password must be 8+ chars with letters and numbers'; errDiv.style.display = 'block'; return; }
-      if (newPassword !== confirm) { errDiv.textContent = 'Passwords do not match'; errDiv.style.display = 'block'; return; }
-      resetBtn.disabled = true; resetBtn.textContent = 'Resetting...';
+// ============================================================
+// ACCOUNT MODAL
+// ============================================================
+const ACCOUNT_TABS = [
+  { id: 'profile', label: 'Profile' },
+  { id: 'account', label: 'Account' },
+  { id: 'security', label: 'Security' },
+  { id: 'sessions', label: 'Sessions' },
+];
+
+function openAccountModal(tab = 'profile') {
+  if (!state.currentUser) { openAuthModal('login'); return; }
+  authModal.classList.remove('hidden');
+  renderAccountModal(tab);
+}
+
+function renderAccountModal(tab = 'profile') {
+  if (!state.currentUser) { closeAuthModal(); return; }
+  const email = state.currentUser.email || '';
+  const meta = state.currentUser.user_metadata || {};
+  const fullName = meta.full_name || meta.name || '';
+
+  authModalBody.innerHTML = `
+    <h2 style="margin-bottom:.75rem;">My Account</h2>
+    <div id="acctTabs" style="display:flex;gap:.25rem;border-bottom:1px solid var(--border);margin-bottom:1rem;flex-wrap:wrap;"></div>
+    <div id="acctBody" style="min-height:180px;max-height:62vh;overflow-y:auto;padding-right:.25rem;"></div>`;
+
+  const tabsEl = document.getElementById('acctTabs');
+  ACCOUNT_TABS.forEach(t => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t.label;
+    const active = t.id === tab;
+    b.style.cssText = `background:${active ? 'var(--accent)' : 'transparent'};color:${active ? '#fff' : 'var(--text-muted)'};border:none;border-bottom:2px solid ${active ? 'var(--accent)' : 'transparent'};padding:.5rem .75rem;font-size:.9rem;font-weight:600;cursor:pointer;border-radius:6px 6px 0 0;`;
+    b.onclick = () => renderAccountModal(t.id);
+    tabsEl.appendChild(b);
+  });
+
+  const body = document.getElementById('acctBody');
+  if (tab === 'profile') renderProfileTab(body, email, fullName);
+  else if (tab === 'account') {
+    renderAccountActionsTab(body, email, state.hasPassword !== false);
+    // Refresh the exact state from the server, then re-render once if needed.
+    (async () => {
       try {
-        const rr = await fetch('/api/auth/reset-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Client-Id': CLIENT_ID },
-          body: JSON.stringify({ newPassword, grantedToken: state.forgotPw.grantedToken }),
-        });
-        const rd = await rr.json().catch(() => ({}));
-        if (!rr.ok) throw new Error(rd.error || 'Failed to reset password');
-        state.forgotPw = { email: null, pendingToken: null, grantedToken: null };
-        showToast('Password reset successfully. You can now sign in.');
-        renderAuthForm('login');
-      } catch (e) {
-        errDiv.textContent = e.message; errDiv.style.display = 'block';
-        resetBtn.disabled = false; resetBtn.textContent = 'Reset Password';
-      }
-    };
+        const res = await apiFetch('/api/auth/me');
+        const data = await res.json();
+        const hp = data.hasPassword !== false;
+        if (hp !== (state.hasPassword !== false) && document.getElementById('acctBody')) {
+          state.hasPassword = hp;
+          renderAccountActionsTab(document.getElementById('acctBody'), email, hp);
+        } else if (state.hasPassword === undefined) {
+          state.hasPassword = hp;
+        }
+      } catch (e) { log(`hasPassword check failed: ${e.message}`, 'warn'); }
+    })();
+  }
+  else if (tab === 'security') renderSecurityTab(body);
+  else renderSessionsTab(body);
+
+  window.refreshIcons();
+}
+
+function acctError(id) {
+  return `<div id="${id}" class="error-msg" style="display:none;margin-bottom:.5rem;"></div>`;
+}
+function acctStatus(id) {
+  return `<div id="${id}" class="status-msg" style="display:none;margin-bottom:.5rem;"></div>`;
+}
+function acctShow(id, message, isError = false) {
+  const errEl = document.getElementById('acctErr');
+  const statEl = document.getElementById('acctStat');
+  if (isError) {
+    if (errEl) { errEl.textContent = message; errEl.style.display = 'block'; }
+    if (statEl) statEl.style.display = 'none';
+  } else {
+    if (statEl) { statEl.textContent = message; statEl.style.display = 'block'; }
+    if (errEl) errEl.style.display = 'none';
   }
 }
-
-async function openAccountModal() {
-  if (!state.currentUser) return;
-  let profile = {};
-  try { const res = await apiFetch('/api/auth/me'); const d = await res.json(); profile = d.profile || {}; } catch (e) {}
-
-  const modal = document.createElement('div');
-  modal.className = 'modal account-modal';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <button class="modal-close" id="accClose">&times;</button>
-      <div class="account-modal-layout">
-        <div class="account-tabs">
-          <div class="account-tab active" data-tab="profile"><i data-lucide="user"></i> Profile</div>
-          <div class="account-tab" data-tab="account"><i data-lucide="settings"></i> Account</div>
-          <div class="account-tab" data-tab="security"><i data-lucide="shield"></i> Security</div>
-          <div class="account-tab" data-tab="sessions"><i data-lucide="monitor"></i> Sessions</div>
-          <div class="account-tab logout-tab" data-tab="logout"><i data-lucide="log-out"></i> Log out</div>
-        </div>
-        <div class="account-content" id="accContent"></div>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  const close = () => modal.remove();
-  modal.querySelector('#accClose').onclick = close;
-  modal.onclick = (e) => { if (e.target === modal) close(); };
-  const tabs = modal.querySelectorAll('.account-tab');
-  const content = modal.querySelector('#accContent');
-
-  const render = async (id) => {
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === id));
-
-    if (id === 'logout') {
-      content.innerHTML = `<div style="display:flex;flex-direction:column;gap:1rem;"><h2>Log out</h2><p>Are you sure?</p><button class="btn-primary" id="loConfirm" style="background:var(--danger);">Log out</button><button class="btn-primary" id="loCancel" style="background:transparent;border:1px solid var(--border);color:var(--text);">Cancel</button></div>`;
-      content.querySelector('#loConfirm').onclick = async () => {
-        try { await apiFetch('/api/auth/sessions/current', { method: 'DELETE' }).catch(() => {}); } catch (e) {}
-        await state.supabase.auth.signOut();
-        state.lastSessionCheck = 0;
-        close(); showToast('Logged out');
-      };
-      content.querySelector('#loCancel').onclick = () => render('profile');
-      return;
-    }
-
-    let html = '';
-    if (id === 'profile') {
-      html = `<h2>Profile</h2><div class="profile-info"><p><strong>Name:</strong> ${profile.full_name || state.currentUser.email}</p><p><strong>Email:</strong> ${state.currentUser.email}</p><p><strong>Member since:</strong> ${new Date(state.currentUser.created_at).toLocaleDateString()}</p></div>`;
-    } else if (id === 'account') {
-      html = `<h2>Account Settings</h2>
-        <div class="account-section">
-          <label>Email</label>
-          <input type="email" id="newEmail" value="${state.currentUser.email}" />
-          <button class="btn-primary" id="changeEmailBtn">Change Email</button>
-          <div id="emailVerify" style="display:none;margin-top:.5rem;">
-            <label>Verification code</label>
-            <input type="text" id="emailCode" inputmode="numeric" maxlength="6" />
-            <button class="btn-primary" id="emailVerifyBtn">Verify & Change</button>
-            <button id="emailResendBtn" class="link-btn" type="button">Resend code</button>
-          </div>
-          <hr />
-          <label>Current Password</label>
-          <div id="curPwWrap"></div>
-          <label>New Password</label>
-          <div id="newPwWrap"></div>
-          <div id="pwLiveStatus" style="font-size:.8rem;margin-top:.3rem;min-height:1.2em;"></div>
-          <button class="btn-primary" id="changePwBtn">Change Password</button>
-          <div id="pwVerify" style="display:none;margin-top:.5rem;">
-            <label>Verification code</label>
-            <input type="text" id="pwCode" inputmode="numeric" maxlength="6" />
-            <button class="btn-primary" id="pwVerifyBtn">Verify & Change</button>
-            <button id="pwResendBtn" class="link-btn" type="button">Resend code</button>
-          </div>
-          <hr />
-          <h3 style="color:var(--danger);margin-top:.5rem;">Danger Zone</h3>
-          <p style="font-size:.85rem;color:var(--text-muted);">Permanently delete your account and all associated data. This cannot be undone.</p>
-          <button class="btn-primary" id="deleteAccountBtn" style="background:var(--danger);">Delete Account</button>
-          <div id="deleteVerify" style="display:none;margin-top:.5rem;">
-            <label>Verification code</label>
-            <input type="text" id="deleteCode" inputmode="numeric" maxlength="6" />
-            <button class="btn-primary" id="deleteVerifyBtn" style="background:var(--danger);">Verify & Delete</button>
-            <button id="deleteResendBtn" class="link-btn" type="button">Resend code</button>
-          </div>
-        </div>`;
-    } else if (id === 'security') {
-      const en = profile.two_factor_enabled;
-      html = `<h2>Security</h2><div class="security-section"><h3>Two-Factor Authentication</h3><p>${en ? 'Enabled.' : 'Disabled.'}</p>${en ? `<button class="btn-primary btn-danger" id="dis2fa">Disable 2FA</button>` : `<button class="btn-primary" id="en2fa">Enable 2FA</button><div id="twofaSetup" style="display:none;margin-top:1rem;"><div class="twofa-setup"><p>Scan with your authenticator app:</p><div id="qrCode"></div><div class="manual-secret"><p style="font-size:.85rem;color:var(--text-muted);margin-top:.75rem;">Or enter this code manually in your app:</p><div class="secret-box"><code id="manualSecret"></code><button type="button" id="copySecretBtn" class="copy-secret-btn">Copy</button></div></div><label style="margin-top:1rem;">Enter 6-digit code:</label><input type="text" id="twofaCodeIn" inputmode="numeric" maxlength="6" /><button class="btn-primary" id="verify2faBtn">Verify & Enable</button></div></div>`}</div>`;
-    } else if (id === 'sessions') {
-      try {
-        const res = await apiFetch('/api/auth/sessions');
-        const data = await res.json();
-        const cur = data.current || {};
-        const acc = data.account || {};
-        const all = data.all || [];
-        const isCurrentRow = (s) => {
-          if (s.client_id && s.client_id === CLIENT_ID) return true;
-          if (!s.client_id && s.ip === cur.ip && s.user_agent === cur.user_agent) return true;
-          return false;
-        };
-        const otherSessions = all.filter(s => !isCurrentRow(s));
-        html = `<h2>Active Sessions</h2>
-          <div class="sessions-list">
-            <div class="sessions-actions">
-              <button class="btn-primary btn-danger sessions-logout-all" id="logoutAllBtn" ${otherSessions.length === 0 ? 'disabled' : ''}>
-                <i data-lucide="log-out"></i> Log out all other sessions
-              </button>
-            </div>
-            <h3>This device</h3>
-            <p><strong>Email:</strong> ${cur.email || state.currentUser.email}</p>
-            <p><strong>Browser:</strong> ${(cur.user_agent || '').substring(0, 80)}</p>
-            <p><strong>IP:</strong> ${cur.ip || 'Unknown'}</p>
-            <p style="font-size:.8rem;color:var(--text-muted);margin-top:.35rem;">
-              To sign out this device, use the <strong>Log out</strong> tab on the left.
-            </p>
-            <hr />
-            <h3>Other active sessions (${otherSessions.length})</h3>
-            <div id="sessionsListBody">
-            ${otherSessions.length === 0 ? '<p style="color:var(--text-muted);font-size:.85rem;">No other sessions recorded.</p>' : otherSessions.map(s => `
-              <div class="session-item" data-session-id="${s.id}">
-                <div class="session-info">
-                  <p><strong>Device:</strong> ${(s.device || 'Unknown').substring(0, 60)}</p>
-                  <p><strong>IP:</strong> ${s.ip || 'Unknown'}</p>
-                  <p style="font-size:.8rem;color:var(--text-muted);">Last active: ${new Date(s.last_active || s.created_at).toLocaleString()}</p>
-                </div>
-                <button class="session-logout-btn" data-session-id="${s.id}" title="Log out this session">
-                  <i data-lucide="log-out" style="width:16px;height:16px;"></i>
-                  <span>Log out</span>
-                </button>
-              </div>
-            `).join('')}
-            </div>
-            <hr />
-            <h3>Account</h3>
-            <p><strong>Created:</strong> ${acc.created_at ? new Date(acc.created_at).toLocaleString() : '—'}</p>
-            <p><strong>Last sign in:</strong> ${acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleString() : '—'}</p>
-          </div>`;
-      } catch (e) { html = `<h2>Active Sessions</h2><p>Unable to load: ${e.message}</p>`; }
-    }
-    content.innerHTML = html;
-    window.refreshIcons();
-
-    if (id === 'account') {
-      document.getElementById('curPwWrap').appendChild(createPasswordField('curPw', 'Current password'));
-      document.getElementById('newPwWrap').appendChild(createPasswordField('newPw', 'New password'));
-      window.refreshIcons();
-      const pwLiveStatus = document.getElementById('pwLiveStatus');
-      const pwIsStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
-      const updatePwLive = () => {
-        const cur = document.getElementById('curPw')?.value || '';
-        const np = document.getElementById('newPw')?.value || '';
-        if (!np) { pwLiveStatus.textContent = ''; return; }
-        if (!pwIsStrong(np)) { pwLiveStatus.textContent = 'New password must be 8+ chars with letters and numbers'; pwLiveStatus.style.color = 'var(--danger)'; return; }
-        if (np === cur) { pwLiveStatus.textContent = 'New password must be different from current password'; pwLiveStatus.style.color = 'var(--danger)'; return; }
-        pwLiveStatus.textContent = '✓ Password looks good'; pwLiveStatus.style.color = 'var(--accent)';
-      };
-      document.getElementById('curPw').addEventListener('input', updatePwLive);
-      document.getElementById('newPw').addEventListener('input', updatePwLive);
-
-      let emailPendingToken = null;
-      document.getElementById('changeEmailBtn').onclick = async () => {
-        const newEmail = document.getElementById('newEmail').value.trim().toLowerCase();
-        const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-        const currentEmail = (state.currentUser.email || '').toLowerCase();
-        if (!newEmail) { showToast('Please enter the new email address', true); return; }
-        if (!EMAIL_RE.test(newEmail) || newEmail.includes('..')) { showToast('Please enter a valid email address', true); return; }
-        if (newEmail === currentEmail) { showToast('New email must be different from your current email', true); return; }
-        try {
-          const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-email', newEmail }) });
-          const data = await res.json();
-          emailPendingToken = data.pendingToken;
-          showToast(`Verification code sent to ${newEmail}`);
-          document.getElementById('emailVerify').style.display = 'block';
-          const resendBtn = document.getElementById('emailResendBtn');
-          attachCountdown(resendBtn);
-          resendBtn.onclick = async () => {
-            if (resendBtn.disabled) return;
-            if (!emailPendingToken) { showToast('Session expired. Try again.', true); return; }
-            try {
-              const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken }) });
-              const rd = await r.json();
-              emailPendingToken = rd.pendingToken;
-              showToast(rd.targetEmail ? `New code sent to ${rd.targetEmail}` : 'New code sent.');
-              attachCountdown(resendBtn);
-            } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
-          };
-          document.getElementById('emailVerifyBtn').onclick = async () => {
-            const code = document.getElementById('emailCode').value.trim();
-            if (!code) { showToast('Enter the code', true); return; }
-            try {
-              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: emailPendingToken, code, action: 'change-email' }) });
-              const vd = await vr.json();
-              const cr = await apiFetch('/api/auth/change-email', { method: 'POST', body: JSON.stringify({ newEmail, grantedToken: vd.grantedToken }) });
-              const cd = await cr.json();
-              showToast(`Email changed to ${cd.newEmail || newEmail}.`);
-              state.currentUser.email = cd.newEmail || newEmail;
-              updateAuthUI();
-              close();
-            } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      };
-
-      let pwPendingToken = null;
-      document.getElementById('changePwBtn').onclick = async () => {
-        const cur = document.getElementById('curPw').value;
-        const np = document.getElementById('newPw').value;
-        if (!cur || !np) { showToast('Fill both fields', true); return; }
-        if (!pwIsStrong(np)) { showToast('New password must be 8+ chars with letters and numbers', true); return; }
-        if (np === cur) { showToast('New password must be different from current password', true); return; }
-        try {
-          const vres = await apiFetch('/api/auth/verify-current-password', { method: 'POST', body: JSON.stringify({ password: cur }) });
-          const vd = await vres.json();
-          if (!vd.valid) throw new Error('Current password is incorrect');
-        } catch (e) { showToast(e.message || 'Current password is incorrect', true); return; }
-        try {
-          const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'change-password' }) });
-          const data = await res.json();
-          pwPendingToken = data.pendingToken;
-          showToast('Code sent.');
-          document.getElementById('pwVerify').style.display = 'block';
-          const resendBtn = document.getElementById('pwResendBtn');
-          attachCountdown(resendBtn);
-          resendBtn.onclick = async () => {
-            if (resendBtn.disabled) return;
-            if (!pwPendingToken) { showToast('Session expired. Try again.', true); return; }
-            try {
-              const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: pwPendingToken }) });
-              const rd = await r.json();
-              pwPendingToken = rd.pendingToken;
-              showToast('New code sent.');
-              attachCountdown(resendBtn);
-            } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
-          };
-          document.getElementById('pwVerifyBtn').onclick = async () => {
-            const code = document.getElementById('pwCode').value.trim();
-            if (!code) { showToast('Enter code', true); return; }
-            try {
-              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: pwPendingToken, code, action: 'change-password' }) });
-              const vd = await vr.json();
-              await apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: cur, newPassword: np, grantedToken: vd.grantedToken }) });
-              showToast('Password changed.'); close();
-            } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      };
-
-      let delPendingToken = null;
-      document.getElementById('deleteAccountBtn').onclick = async () => {
-        const ok = await showCustomModal('Delete Account', 'This will permanently delete your account and all chats. Continue?', 'Continue', 'Cancel', true);
-        if (!ok) return;
-        try {
-          const res = await apiFetch('/api/auth/send-verification-code', { method: 'POST', body: JSON.stringify({ action: 'delete-account' }) });
-          const data = await res.json();
-          delPendingToken = data.pendingToken;
-          showToast('Verification code sent.');
-          document.getElementById('deleteVerify').style.display = 'block';
-          const resendBtn = document.getElementById('deleteResendBtn');
-          attachCountdown(resendBtn);
-          resendBtn.onclick = async () => {
-            if (resendBtn.disabled) return;
-            if (!delPendingToken) { showToast('Session expired. Try again.', true); return; }
-            try {
-              const r = await apiFetch('/api/auth/resend-action-code', { method: 'POST', body: JSON.stringify({ pendingToken: delPendingToken }) });
-              const rd = await r.json();
-              delPendingToken = rd.pendingToken;
-              showToast('New code sent.');
-              attachCountdown(resendBtn);
-            } catch (e) { showToast(e.message, true); resendBtn.disabled = false; resendBtn.textContent = 'Resend code'; if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; } }
-          };
-          document.getElementById('deleteVerifyBtn').onclick = async () => {
-            const code = document.getElementById('deleteCode').value.trim();
-            if (!code) { showToast('Enter code', true); return; }
-            try {
-              const vr = await apiFetch('/api/auth/verify-code', { method: 'POST', body: JSON.stringify({ pendingToken: delPendingToken, code, action: 'delete-account' }) });
-              const vd = await vr.json();
-              await apiFetch('/api/auth/delete-account', { method: 'DELETE', body: JSON.stringify({ grantedToken: vd.grantedToken }) });
-              showToast('Account deleted.');
-              await state.supabase.auth.signOut();
-              close();
-            } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      };
-    }
-
-    if (id === 'security') {
-      document.getElementById('en2fa')?.addEventListener('click', async () => {
-        try {
-          const res = await apiFetch('/api/auth/2fa/enable', { method: 'POST' });
-          const d = await res.json();
-          document.getElementById('qrCode').innerHTML = `<img src="${d.qrCodeDataUrl}" class="qr-code" />`;
-          document.getElementById('manualSecret').textContent = d.secret;
-          document.getElementById('copySecretBtn').onclick = () => { navigator.clipboard.writeText(d.secret).then(() => showToast('Secret copied!')); };
-          document.getElementById('twofaSetup').style.display = 'block';
-          document.getElementById('verify2faBtn').onclick = async () => {
-            const code = document.getElementById('twofaCodeIn').value.trim();
-            try { await apiFetch('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }); showToast('2FA enabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
-          };
-        } catch (e) { showToast(e.message, true); }
-      });
-      document.getElementById('dis2fa')?.addEventListener('click', async () => {
-        try { await apiFetch('/api/auth/2fa/disable', { method: 'POST' }); showToast('2FA disabled.'); close(); openAccountModal(); } catch (e) { showToast(e.message, true); }
-      });
-    }
-
-    if (id === 'sessions') {
-      document.getElementById('logoutAllBtn')?.addEventListener('click', async () => {
-        const btn = document.getElementById('logoutAllBtn');
-        if (btn && btn.disabled) return;
-        const ok = await showCustomModal(
-          'Log out all other sessions',
-          'This will sign out every device except this one. You may need to sign in again on those devices. Continue?',
-          'Log out all others', 'Cancel', true
-        );
-        if (!ok) return;
-        if (btn) { btn.disabled = true; btn.innerHTML = 'Logging out…'; }
-        try {
-          const r = await apiFetch('/api/auth/sessions/all', { method: 'DELETE' });
-          const d = await r.json();
-          showToast(d.removed > 0 ? `Logged out ${d.removed} session${d.removed === 1 ? '' : 's'}` : 'No other sessions to log out');
-          render('sessions');
-        } catch (e) {
-          showToast('Failed: ' + e.message, true);
-          if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="log-out"></i> Log out all other sessions'; window.refreshIcons(); }
-        }
-      });
-
-      content.querySelectorAll('.session-logout-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const sid = btn.dataset.sessionId;
-          if (!sid) return;
-          const ok = await showCustomModal(
-            'Log out this session',
-            'This device will be signed out. Continue?',
-            'Log out', 'Cancel', true
-          );
-          if (!ok) return;
-          btn.disabled = true; btn.innerHTML = 'Logging out…';
-          try {
-            await apiFetch(`/api/auth/sessions/${sid}`, { method: 'DELETE' });
-            showToast('Session logged out');
-            render('sessions');
-          } catch (e) {
-            showToast('Failed: ' + e.message, true);
-            btn.disabled = false; btn.innerHTML = '<i data-lucide="log-out" style="width:16px;height:16px;"></i><span>Log out</span>';
-            window.refreshIcons();
-          }
-        });
-      });
-    }
-  };
-  tabs.forEach(t => t.onclick = () => render(t.dataset.tab));
-  render('profile');
+function acctClear() {
+  const errEl = document.getElementById('acctErr');
+  const statEl = document.getElementById('acctStat');
+  if (errEl) errEl.style.display = 'none';
+  if (statEl) statEl.style.display = 'none';
 }
 
-attachBtn.onclick = () => {
-  const input = document.createElement('input');
-  input.type = 'file'; input.accept = 'image/*,.pdf,.txt,.doc,.docx'; input.multiple = true;
-  input.onchange = () => {
-    const files = Array.from(input.files);
-    if (files.some(f => f.size > 10 * 1024 * 1024)) { showToast('Max 10MB per file', true); return; }
-    if (state.attachments.length + files.length > MAX_ATTACHMENTS) { showToast(`Max ${MAX_ATTACHMENTS} files`, true); return; }
-    state.attachments.push(...files);
-    renderAttachments(); updateSendButton();
+// ------------------------------------------------------------
+// Profile tab
+// ------------------------------------------------------------
+function renderProfileTab(body, email, fullName) {
+  body.innerHTML = `
+    ${acctError('acctErr')}
+    ${acctStatus('acctStat')}
+    <div style="background:var(--background);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+      <div style="font-size:.8rem;color:var(--text-muted);margin-bottom:.15rem;">Signed in as</div>
+      <div style="font-weight:600;word-break:break-all;">${esc(email)}</div>
+      ${fullName ? `<div style="font-size:.85rem;color:var(--text-muted);margin-top:.35rem;">Name: ${esc(fullName)}</div>` : ''}
+      <div id="acctMeta" style="font-size:.82rem;color:var(--text-muted);margin-top:.5rem;"></div>
+    </div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem;">
+      <button class="btn-primary" id="acctGoAccount" style="flex:1;">Change Email / Password</button>
+      <button class="btn-primary" id="acctGoSecurity" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Security</button>
+    </div>
+    <div style="margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border);">
+      <button id="acctLogoutBtn" class="btn-primary" style="width:100%;background:transparent;border:1px solid var(--border);color:var(--text);">Log out</button>
+    </div>`;
+
+  document.getElementById('acctGoAccount').onclick = () => renderAccountModal('account');
+  document.getElementById('acctGoSecurity').onclick = () => renderAccountModal('security');
+  document.getElementById('acctLogoutBtn').onclick = async () => {
+    const ok = await showCustomModal('Log out', 'You will need to sign in again to access your chats.', 'Log out', 'Cancel', true);
+    if (!ok) return;
+    closeAuthModal();
+    await doSignOut();
   };
-  input.click();
-};
 
-sidebarToggle.onclick = () => {
-  sidebar.classList.toggle('collapsed');
-  const c = sidebar.classList.contains('collapsed');
-  sidebarToggle.querySelector('[data-lucide="panel-left-close"]').style.display = c ? 'none' : 'inline';
-  sidebarToggle.querySelector('[data-lucide="panel-left-open"]').style.display = c ? 'inline' : 'none';
-};
-openSidebarBtn.onclick = () => sidebar.classList.toggle('mobile-open');
+  (async () => {
+    try {
+      const res = await apiFetch('/api/auth/sessions');
+      const data = await res.json().catch(() => ({}));
+      const meta = document.getElementById('acctMeta');
+      if (!meta) return;
+      const bits = [];
+      if (data?.account?.created_at) bits.push(`Member since ${new Date(data.account.created_at).toLocaleDateString()}`);
+      if (data?.all?.length) bits.push(`${data.all.length} recorded device${data.all.length > 1 ? 's' : ''}`);
+      if (bits.length) meta.textContent = bits.join(' · ');
+    } catch (e) { log(`profile meta failed: ${e.message}`, 'warn'); }
+  })();
+}
 
-newChatBtn.onclick = handleNewChat;
-sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
-messageInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!state.isGenerating) sendMessage(); }
+// ------------------------------------------------------------
+// Sessions tab
+// ------------------------------------------------------------
+function renderSessionsTab(body) {
+  body.innerHTML = `
+    ${acctError('acctErr')}
+    ${acctStatus('acctStat')}
+    <p style="color:var(--text-muted);font-size:.88rem;margin-bottom:.75rem;">
+      These are the devices that have signed in to your account. Removing a device signs it out.
+    </p>
+    <div id="acctSessionList"><div style="color:var(--text-muted);font-size:.88rem;">Loading…</div></div>
+    <div style="display:flex;gap:.5rem;margin-top:1rem;">
+      <button class="btn-primary" id="acctLogoutOthers" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Log out all other devices</button>
+      <button class="btn-primary" id="acctRefreshSessions" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--text);">Refresh</button>
+    </div>`;
+
+  const listEl = document.getElementById('acctSessionList');
+
+  const loadSessions = async () => {
+    listEl.innerHTML = '<div style="color:var(--text-muted);font-size:.88rem;">Loading…</div>';
+    try {
+      const res = await apiFetch('/api/auth/sessions');
+      const data = await res.json().catch(() => ({}));
+      const all = Array.isArray(data?.all) ? data.all : [];
+      listEl.innerHTML = '';
+
+      const currentCard = document.createElement('div');
+      currentCard.style.cssText = 'background:var(--background);border:1px solid var(--accent);border-radius:10px;padding:.75rem;margin-bottom:.5rem;';
+      const ua = (data?.current?.user_agent || navigator.userAgent || '').slice(0, 90);
+      currentCard.innerHTML = `
+        <div style="font-weight:600;font-size:.9rem;">This device <span style="color:var(--accent);font-size:.78rem;font-weight:700;">• ACTIVE</span></div>
+        <div style="font-size:.8rem;color:var(--text-muted);word-break:break-word;margin-top:.2rem;">${esc(ua)}</div>
+        <div style="font-size:.8rem;color:var(--text-muted);">IP: ${esc(data?.current?.ip || 'unknown')}</div>`;
+      listEl.appendChild(currentCard);
+
+      if (!all.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'color:var(--text-muted);font-size:.85rem;padding:.5rem 0;';
+        empty.textContent = 'No other devices recorded.';
+        listEl.appendChild(empty);
+        return;
+      }
+
+      all.forEach(s => {
+        const card = document.createElement('div');
+        card.style.cssText = 'background:var(--background);border:1px solid var(--border);border-radius:10px;padding:.75rem;margin-bottom:.5rem;display:flex;gap:.5rem;align-items:flex-start;justify-content:space-between;';
+        const info = document.createElement('div');
+        info.style.cssText = 'min-width:0;flex:1;';
+        const dev = document.createElement('div');
+        dev.style.cssText = 'font-weight:600;font-size:.88rem;word-break:break-word;';
+        dev.textContent = (s.device || 'Unknown device').slice(0, 100);
+        const ip = document.createElement('div');
+        ip.style.cssText = 'font-size:.8rem;color:var(--text-muted);';
+        ip.textContent = `IP: ${s.ip || 'unknown'}`;
+        const when = document.createElement('div');
+        when.style.cssText = 'font-size:.8rem;color:var(--text-muted);';
+        when.textContent = s.last_active ? `Last active ${new Date(s.last_active).toLocaleString()}` : 'No activity recorded';
+        info.appendChild(dev); info.appendChild(ip); info.appendChild(when);
+
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.title = 'Sign out this device';
+        rm.innerHTML = `<i data-lucide="x" style="width:16px;height:16px;"></i>`;
+        rm.style.cssText = 'background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:8px;min-width:34px;min-height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;';
+        rm.onclick = async () => {
+          const ok = await showCustomModal('Sign out device', 'That device will need to sign in again.', 'Sign out', 'Cancel', true);
+          if (!ok) return;
+          try {
+            await apiFetch(`/api/auth/sessions/${s.id}`, { method: 'DELETE' });
+            showToast('Device signed out');
+            loadSessions();
+          } catch (e) { showToast('Failed: ' + e.message, true); }
+        };
+
+        card.appendChild(info); card.appendChild(rm);
+        listEl.appendChild(card);
+      });
+      window.refreshIcons();
+    } catch (e) {
+      listEl.innerHTML = '';
+      const d = document.createElement('div');
+      d.style.cssText = 'color:var(--danger);font-size:.88rem;';
+      d.textContent = 'Could not load devices: ' + e.message;
+      listEl.appendChild(d);
+    }
+  };
+
+  document.getElementById('acctRefreshSessions').onclick = loadSessions;
+  document.getElementById('acctLogoutOthers').onclick = async () => {
+    const ok = await showCustomModal('Log out other devices', 'Every other device will be signed out. This device stays signed in.', 'Log out others', 'Cancel', true);
+    if (!ok) return;
+    acctClear();
+    try {
+      const res = await apiFetch('/api/auth/sessions/all', { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      acctShow('acctStat', `Signed out ${data.removed ?? 'all'} other device(s).`);
+      showToast('Other devices signed out');
+      loadSessions();
+    } catch (e) { acctShow('acctErr', 'Failed: ' + e.message, true); }
+  };
+
+  loadSessions();
+}
+
+async function doSignOut() {
+  try {
+    if (state.supabase) await state.supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+    try { window.localStorage.removeItem('agrideepai-auth-v2'); } catch (e) {}
+    state.currentUser = null;
+    state.chats = []; state.messages = []; state.activeChatId = null;
+    state.messageVersions = {}; state.lastSessionCheck = 0;
+    updateAuthUI(); renderChatList(); renderMessages();
+    showToast('Signed out');
+  } catch (e) { showToast('Sign out failed: ' + e.message, true); }
+}
+
+// ------------------------------------------------------------
+// Shared code-verification step for every account action
+// ------------------------------------------------------------
+function renderAccountCodeStep(body, cfg) {
+  const { action, targetEmail, pendingToken, onGranted, renderBack, intro } = cfg;
+
+  body.innerHTML = `
+    ${acctError('acctErr')}
+    ${acctStatus('acctStat')}
+    <p style="font-size:.9rem;color:var(--text-muted);margin-bottom:.25rem;">${esc(intro || 'Enter the verification code we emailed you.')}</p>
+    <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:.75rem;word-break:break-all;">
+      Sent to <strong>${esc(targetEmail || '')}</strong>
+    </p>
+    <label>Verification Code</label>
+    <input type="text" id="acctCode" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
+    <button class="btn-primary" id="acctCodeSubmit">Verify &amp; Continue</button>
+    <button class="link-btn" id="acctCodeResend" type="button">Resend code</button>
+    <div class="toggle-link" id="acctCodeBack" style="margin-top:.75rem;">Cancel</div>`;
+
+  const codeInput = document.getElementById('acctCode');
+  const submitBtn = document.getElementById('acctCodeSubmit');
+  const resendBtn = document.getElementById('acctCodeResend');
+  setTimeout(() => { try { codeInput.focus(); } catch (e) {} }, 50);
+  attachCountdown(resendBtn);
+
+  let token = pendingToken;
+
+  document.getElementById('acctCodeBack').onclick = () => renderAccountModal('account');
+
+  resendBtn.onclick = async () => {
+    if (!token) return acctShow('acctErr', 'Your session expired. Please start again.', true);
+    try {
+      const res = await apiFetch('/api/auth/resend-action-code', {
+        method: 'POST',
+        body: JSON.stringify({ pendingToken: token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.pendingToken) token = data.pendingToken;
+      acctShow('acctStat', 'New code sent.');
+      attachCountdown(resendBtn);
+    } catch (e) {
+      acctShow('acctErr', e.message || 'Failed to resend code.', true);
+      resendBtn.disabled = false;
+      if (resendBtn._cdInterval) { clearInterval(resendBtn._cdInterval); resendBtn._cdInterval = null; }
+      resendBtn.textContent = resendBtn.dataset.originalText || 'Resend code';
+    }
+  };
+
+  const submit = async () => {
+    const code = codeInput.value.trim();
+    if (!code) return acctShow('acctErr', 'Please enter the code.', true);
+    submitBtn.disabled = true;
+    acctShow('acctStat', 'Verifying…');
+    try {
+      const res = await apiFetch('/api/auth/verify-code', {
+        method: 'POST',
+        body: JSON.stringify({ pendingToken: token, code, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      acctClear();
+      await onGranted(data.grantedToken);
+    } catch (e) {
+      acctShow('acctErr', e.message || 'Verification failed.', true);
+      submitBtn.disabled = false;
+    }
+  };
+  submitBtn.onclick = submit;
+  codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+}
+
+// ------------------------------------------------------------
+// Account tab: change password / change email / delete account
+// ------------------------------------------------------------
+function renderAccountActionsTab(body, email, hasPassword = true) {
+  body.innerHTML = `
+    ${acctError('acctErr')}
+    ${acctStatus('acctStat')}
+
+    <div style="background:var(--background);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:.75rem;">
+      <div style="font-weight:600;font-size:.92rem;margin-bottom:.5rem;">${hasPassword ? 'Change Password' : 'Set a Password'}</div>
+      ${hasPassword ? '' : `<p style="font-size:.83rem;color:var(--text-muted);margin-bottom:.5rem;">You signed up with Google. Set a password to also sign in with your email address.</p>`}
+      ${hasPassword ? '<label>Current Password</label><div id="cpCurrentWrap"></div>' : ''}
+      <label>New Password</label>
+      <div id="cpNewWrap"></div>
+      <label>Confirm New Password</label>
+      <div id="cpConfirmWrap"></div>
+      <div id="cpLive" style="font-size:.8rem;margin-top:.3rem;min-height:1.2em;"></div>
+      <button class="btn-primary" id="cpSubmit" style="margin-top:.5rem;" disabled>${hasPassword ? 'Change Password' : 'Set Password'}</button>
+    </div>
+
+    <div style="background:var(--background);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:.75rem;">
+      <div style="font-weight:600;font-size:.92rem;margin-bottom:.5rem;">Change Email</div>
+      <div style="font-size:.82rem;color:var(--text-muted);margin-bottom:.5rem;word-break:break-all;">Current: ${esc(email)}</div>
+      <label>New Email</label>
+      <input type="email" id="ceNewEmail" placeholder="new@example.com" autocomplete="email" />
+      <button class="btn-primary" id="ceSubmit" style="margin-top:.5rem;">Change Email</button>
+    </div>
+
+    <div style="background:rgba(232,93,93,.06);border:1px solid rgba(232,93,93,.35);border-radius:10px;padding:1rem;">
+      <div style="font-weight:600;font-size:.92rem;color:var(--danger);margin-bottom:.35rem;">Delete Account</div>
+      <p style="font-size:.83rem;color:var(--text-muted);margin-bottom:.5rem;">
+        This permanently deletes your account, chats, and uploaded files. It cannot be undone.
+      </p>
+      <button class="btn-primary btn-danger" id="daSubmit">Delete My Account</button>
+    </div>`;
+
+  if (hasPassword) document.getElementById('cpCurrentWrap').appendChild(createPasswordField('cpCurrent', 'Current password'));
+  document.getElementById('cpNewWrap').appendChild(createPasswordField('cpNew', 'New password'));
+  document.getElementById('cpConfirmWrap').appendChild(createPasswordField('cpConfirm', 'Confirm new password'));
+  window.refreshIcons();
+
+  const curInput = document.getElementById('cpCurrent');
+  const newInput = document.getElementById('cpNew');
+  const confInput = document.getElementById('cpConfirm');
+  const live = document.getElementById('cpLive');
+  const cpSubmit = document.getElementById('cpSubmit');
+
+  const isStrong = (p) => p.length >= 8 && /[a-zA-Z]/.test(p) && /\d/.test(p);
+  const cpCheck = () => {
+    const c = curInput ? curInput.value : 'none';
+    const n = newInput.value, cf = confInput.value;
+    if (!n && !cf) { live.textContent = ''; }
+    else if (!isStrong(n)) { live.textContent = 'New password must be 8+ characters with letters and numbers'; live.style.color = 'var(--danger)'; }
+    else if (hasPassword && n === c) { live.textContent = 'New password must be different from current'; live.style.color = 'var(--danger)'; }
+    else if (n !== cf) { live.textContent = 'Passwords do not match'; live.style.color = 'var(--danger)'; }
+    else { live.textContent = '✓ Ready'; live.style.color = 'var(--accent)'; }
+    cpSubmit.disabled = !(isStrong(n) && (!hasPassword || c) && (!hasPassword || n !== c) && n === cf);
+  };
+  curInput.addEventListener('input', cpCheck);
+  newInput.addEventListener('input', cpCheck);
+  confInput.addEventListener('input', cpCheck);
+  cpCheck();
+
+  cpSubmit.onclick = async () => {
+    const currentPassword = curInput ? curInput.value : '';
+    const newPassword = newInput.value;
+    const confirm = confInput.value;
+    if (hasPassword && !currentPassword) return acctShow('acctErr', 'Enter your current password.', true);
+    if (!isStrong(newPassword)) return acctShow('acctErr', 'New password must be 8+ characters with letters and numbers.', true);
+    if (newPassword !== confirm) return acctShow('acctErr', 'New passwords do not match.', true);
+    if (hasPassword && newPassword === currentPassword) return acctShow('acctErr', 'New password must be different from current.', true);
+
+    cpSubmit.disabled = true;
+    acctShow('acctStat', hasPassword ? 'Checking your current password…' : 'Preparing…');
+
+    // Fail fast on a wrong current password, before any email is sent.
+    if (hasPassword) {
+      try {
+        await apiFetch('/api/auth/verify-current-password', {
+          method: 'POST',
+          body: JSON.stringify({ password: currentPassword }),
+        });
+      } catch (e) {
+        acctShow('acctErr', e.message || 'Current password is incorrect.', true);
+        cpSubmit.disabled = false;
+        return;
+      }
+    }
+
+    acctShow('acctStat', 'Sending verification code…');
+    try {
+      const res = await apiFetch('/api/auth/send-verification-code', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'change-password' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      acctClear();
+      renderAccountCodeStep(body, {
+        action: 'change-password',
+        targetEmail: data.targetEmail || email,
+        intro: 'Confirm the password change with the code we emailed you.',
+        onGranted: async (grantedToken) => {
+          try {
+            await apiFetch('/api/auth/change-password', {
+              method: 'POST',
+              body: JSON.stringify({ currentPassword, newPassword, grantedToken }),
+            });
+            state.lastSessionCheck = Date.now();
+            renderAccountModal('account');
+            acctShow('acctStat', 'Password changed. All other devices have been signed out.');
+            showToast('Password changed — other devices signed out');
+          } catch (e) {
+            renderAccountModal('account');
+            acctShow('acctErr', e.message || 'Failed to change password.', true);
+          }
+        },
+      });
+    } catch (e) {
+      acctShow('acctErr', e.message || 'Failed to send code.', true);
+      cpSubmit.disabled = false;
+    }
+  };
+
+  const ceSubmit = document.getElementById('ceSubmit');
+  const ceEmail = document.getElementById('ceNewEmail');
+
+  ceSubmit.onclick = async () => {
+    const newEmail = ceEmail.value.trim();
+    if (!newEmail || !newEmail.includes('@')) return acctShow('acctErr', 'Enter a valid new email address.', true);
+    if (newEmail.toLowerCase() === (email || '').toLowerCase()) return acctShow('acctErr', 'New email must be different from your current email.', true);
+
+    ceSubmit.disabled = true;
+    acctShow('acctStat', 'Sending verification code…');
+    try {
+      const res = await apiFetch('/api/auth/send-verification-code', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'change-email', newEmail }),
+      });
+      const data = await res.json().catch(() => ({}));
+      acctClear();
+      renderAccountCodeStep(body, {
+        action: 'change-email',
+        targetEmail: data.targetEmail || newEmail,
+        pendingToken: data.pendingToken,
+        intro: 'Confirm your new address with the code we just sent to it.',
+        onGranted: async (grantedToken) => {
+          try {
+            const r = await apiFetch('/api/auth/change-email', {
+              method: 'POST',
+              body: JSON.stringify({ newEmail, grantedToken }),
+            });
+            const d = await r.json().catch(() => ({}));
+            state.currentUser = { ...state.currentUser, email: d.newEmail || newEmail };
+            updateAuthUI();
+            renderAccountModal('account');
+            acctShow('acctStat', 'Email changed successfully.');
+            showToast('Email changed');
+          } catch (e) {
+            renderAccountModal('account');
+            acctShow('acctErr', e.message || 'Failed to change email.', true);
+          }
+        },
+      });
+    } catch (e) {
+      acctShow('acctErr', e.message || 'Failed to send code.', true);
+      ceSubmit.disabled = false;
+    }
+  };
+
+  const daSubmit = document.getElementById('daSubmit');
+  daSubmit.onclick = async () => {
+    const ok = await showCustomModal(
+      'Delete your account?',
+      'All your conversations, messages, and uploaded files will be permanently deleted. This cannot be undone.',
+      'Delete everything',
+      'Cancel',
+      true
+    );
+    if (!ok) return;
+
+    daSubmit.disabled = true;
+    acctShow('acctStat', 'Sending verification code…');
+    try {
+      const res = await apiFetch('/api/auth/send-verification-code', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'delete-account' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      acctClear();
+      renderAccountCodeStep(body, {
+        action: 'delete-account',
+        targetEmail: data.targetEmail || email,
+        pendingToken: data.pendingToken,
+        intro: 'Last step: confirm the deletion with the code we emailed you.',
+        onGranted: async (grantedToken) => {
+          try {
+            // POST, not DELETE: proxies strip bodies from DELETE requests.
+            await apiFetch('/api/auth/delete-account', {
+              method: 'POST',
+              body: JSON.stringify({ grantedToken }),
+            });
+            closeAuthModal();
+            showToast('Your account has been deleted.');
+            await doSignOut();
+          } catch (e) {
+            renderAccountModal('account');
+            acctShow('acctErr', e.message || 'Failed to delete account.', true);
+          }
+        },
+      });
+    } catch (e) {
+      acctShow('acctErr', e.message || 'Failed to send code.', true);
+      daSubmit.disabled = false;
+    }
+  };
+}
+
+// ------------------------------------------------------------
+// Security tab (two-factor authentication)
+// ------------------------------------------------------------
+async function renderSecurityTab(body) {
+  body.innerHTML = `
+    ${acctError('acctErr')}
+    ${acctStatus('acctStat')}
+    <div id="twoFaCard"><div style="color:var(--text-muted);font-size:.88rem;">Loading…</div></div>`;
+
+  const card = document.getElementById('twoFaCard');
+
+  let enabled = false;
+  try {
+    const res = await apiFetch('/api/auth/me');
+    const data = await res.json().catch(() => ({}));
+    enabled = !!data?.profile?.two_factor_enabled;
+  } catch (e) {
+    card.innerHTML = `<div style="color:var(--danger);font-size:.88rem;">Could not load security settings: ${esc(e.message)}</div>`;
+    return;
+  }
+
+  if (enabled) {
+    card.innerHTML = `
+      <div style="background:rgba(47,143,70,.08);border:1px solid rgba(47,143,70,.4);border-radius:10px;padding:1rem;">
+        <div style="font-weight:600;font-size:.92rem;color:var(--accent);">Two-factor authentication is ON</div>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-top:.35rem;">
+          Every sign-in asks for a 6-digit code from your authenticator app.
+        </p>
+        <button class="btn-primary" id="twoFaDisable" style="margin-top:.5rem;background:transparent;border:1px solid var(--danger);color:var(--danger);">
+          Turn off 2FA
+        </button>
+      </div>`;
+
+    document.getElementById('twoFaDisable').onclick = async () => {
+      // Turning 2FA off weakens the account, so it now requires the password.
+      const password = await showPasswordPrompt('Turn off two-factor authentication');
+      if (!password) return;
+      acctShow('acctStat', 'Verifying…');
+      try {
+        await apiFetch('/api/auth/2fa/disable', {
+          method: 'POST',
+          body: JSON.stringify({ password }),
+        });
+        showToast('2FA turned off');
+        renderSecurityTab(body);
+      } catch (e) {
+        acctShow('acctErr', e.message || 'Failed to disable 2FA.', true);
+      }
+    };
+    return;
+  }
+
+  card.innerHTML = `
+    <div style="background:var(--background);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+      <div style="font-weight:600;font-size:.92rem;">Two-factor authentication is OFF</div>
+      <p style="font-size:.85rem;color:var(--text-muted);margin-top:.35rem;">
+        Add a second step at sign-in using Google Authenticator, Authy, or any TOTP app.
+      </p>
+      <button class="btn-primary" id="twoFaStart" style="margin-top:.5rem;">Set up 2FA</button>
+    </div>
+    <div id="twoFaSetup" style="display:none;margin-top:.75rem;"></div>`;
+
+  document.getElementById('twoFaStart').onclick = async () => {
+    const setup = document.getElementById('twoFaSetup');
+    acctClear();
+    setup.style.display = 'block';
+    setup.innerHTML = '<div style="color:var(--text-muted);font-size:.88rem;">Preparing your QR code…</div>';
+    try {
+      const res = await apiFetch('/api/auth/2fa/enable', { method: 'POST', body: JSON.stringify({}) });
+      const data = await res.json().catch(() => ({}));
+      if (!data.qrCodeDataUrl) throw new Error(data.error || 'Could not start 2FA setup');
+
+      setup.innerHTML = `
+        <div style="background:var(--background);border:1px solid var(--border);border-radius:10px;padding:1rem;text-align:center;">
+          <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:.5rem;">Scan this with your authenticator app:</p>
+          <img alt="2FA QR code" style="width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;margin:0 auto;display:block;" />
+          <p style="font-size:.78rem;color:var(--text-muted);margin-top:.6rem;">Or enter this key manually:</p>
+          <code id="twoFaSecret" style="display:block;word-break:break-all;font-size:.8rem;background:var(--border);padding:.4rem;border-radius:6px;margin:.35rem 0;"></code>
+          <label style="display:block;text-align:left;margin-top:.5rem;">6-digit code from the app</label>
+          <input type="text" id="twoFaCode" placeholder="123456" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
+          <button class="btn-primary" id="twoFaConfirm" style="margin-top:.5rem;">Verify &amp; Enable</button>
+        </div>`;
+
+      setup.querySelector('img').src = data.qrCodeDataUrl;
+      setup.querySelector('#twoFaSecret').textContent = data.secret || '';
+
+      const codeInput = setup.querySelector('#twoFaCode');
+      const confirmBtn = setup.querySelector('#twoFaConfirm');
+      setTimeout(() => { try { codeInput.focus(); } catch (e) {} }, 50);
+
+      const confirm = async () => {
+        const code = codeInput.value.trim();
+        if (!code) return acctShow('acctErr', 'Enter the 6-digit code from your app.', true);
+        confirmBtn.disabled = true;
+        acctShow('acctStat', 'Verifying code…');
+        try {
+          await apiFetch('/api/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) });
+          showToast('Two-factor authentication enabled');
+          renderSecurityTab(body);
+        } catch (e) {
+          acctShow('acctErr', e.message || 'Invalid code.', true);
+          confirmBtn.disabled = false;
+        }
+      };
+      confirmBtn.onclick = confirm;
+      codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirm(); });
+    } catch (e) {
+      setup.innerHTML = '';
+      acctShow('acctErr', e.message || 'Could not start 2FA setup.', true);
+      setup.style.display = 'none';
+    }
+  };
+}
+
+// ============================================================
+// EVENT WIRING
+// ============================================================
+if (attachBtn) {
+  attachBtn.onclick = () => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.multiple = true;
+    // 4 files, 2 MB in total. .zip is refused; plain text files are fine.
+    inp.accept = 'image/*,.pdf,.txt,.md,.csv,.json,.doc,.docx';
+    inp.onchange = () => {
+      const picked = Array.from(inp.files || []);
+      if (!picked.length) return;
+      const room = MAX_ATTACHMENTS - state.attachments.length;
+      if (room <= 0) { showToast(`Maximum ${MAX_ATTACHMENTS} files per message`, true); return; }
+
+      const accepted = [];
+      let running = state.attachments.reduce((n, f) => n + f.size, 0);
+      for (const f of picked.slice(0, room)) {
+        const isZip = f.type === 'application/zip'
+          || f.type === 'application/x-zip-compressed'
+          || /\.zip$/i.test(f.name);
+        if (isZip) { showToast('ZIP files are not supported. Please attach the files inside instead.', true); continue; }
+        if (running + f.size > MAX_TOTAL_BYTES) {
+          showToast('Total attachment size must stay under 2 MB', true);
+          break;
+        }
+        accepted.push(f);
+        running += f.size;
+      }
+      if (!accepted.length) return;
+      state.attachments.push(...accepted);
+      renderAttachments();
+      updateSendButton();
+    };
+    inp.click();
+  };
+}
+
+if (openSidebarBtn) {
+  openSidebarBtn.onclick = (e) => {
+    e.stopPropagation();
+    sidebar.classList.add('mobile-open');
+  };
+}
+if (sidebarToggle) {
+  sidebarToggle.onclick = (e) => {
+    e.stopPropagation();
+    sidebar.classList.remove('mobile-open');
+  };
+}
+
+if (sendBtn) sendBtn.onclick = () => { if (state.isGenerating) stopGeneration(); else sendMessage(); };
+
+if (newChatBtn) newChatBtn.onclick = () => { handleNewChat(); };
+
+if (messageInput) {
+  messageInput.addEventListener('input', () => { resizeComposer(); updateSendButton(); });
+  messageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      if (!state.isGenerating) sendMessage();
+    }
+  });
+}
+
+// Drag and drop files onto the composer.
+[composer, chatContainer].forEach(el => {
+  if (!el) return;
+  el.addEventListener('dragover', (e) => { e.preventDefault(); });
+  el.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (!files.length) return;
+    const room = MAX_ATTACHMENTS - state.attachments.length;
+    if (room <= 0) { showToast(`Maximum ${MAX_ATTACHMENTS} files per message`, true); return; }
+    let running = state.attachments.reduce((n, f) => n + f.size, 0);
+    const accepted = [];
+    for (const f of files.slice(0, room)) {
+      const isZip = f.type === 'application/zip' || f.type === 'application/x-zip-compressed' || /\.zip$/i.test(f.name);
+      if (isZip) { showToast('ZIP files are not supported.', true); continue; }
+      if (running + f.size > MAX_TOTAL_BYTES) { showToast('Total attachment size must stay under 2 MB', true); break; }
+      accepted.push(f); running += f.size;
+    }
+    if (!accepted.length) return;
+    state.attachments.push(...accepted);
+    renderAttachments(); updateSendButton();
+  });
 });
-messageInput.addEventListener('input', () => { resizeComposer(); updateSendButton(); });
-chips.forEach(c => c.onclick = () => { messageInput.value = c.dataset.prompt; updateSendButton(); sendMessage(); });
-document.getElementById('shareModalClose').onclick = () => shareModal.classList.add('hidden');
-shareModal.onclick = (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); };
 
+// Paste an image directly into the composer.
+if (messageInput) {
+  messageInput.addEventListener('paste', (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const imgs = items.filter(i => i.kind === 'file' && i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+    if (!imgs.length) return;
+    const room = MAX_ATTACHMENTS - state.attachments.length;
+    if (room <= 0) return;
+    let running = state.attachments.reduce((n, f) => n + f.size, 0);
+    const accepted = [];
+    for (const f of imgs.slice(0, room)) {
+      if (running + f.size > MAX_TOTAL_BYTES) { showToast('Total attachment size must stay under 2 MB', true); break; }
+      accepted.push(f); running += f.size;
+    }
+    if (accepted.length) { state.attachments.push(...accepted); renderAttachments(); updateSendButton(); }
+  });
+}
+
+if (chips) {
+  chips.forEach(chip => {
+    chip.onclick = () => {
+      const text = chip.dataset.prompt || chip.textContent.trim();
+      messageInput.value = text;
+      resizeComposer(); updateSendButton(); messageInput.focus();
+      if (window.innerWidth < 768) sidebar.classList.remove('mobile-open');
+    };
+  });
+}
+
+if (shareModal) {
+  shareModal.querySelectorAll('.modal-close').forEach(b => b.addEventListener('click', () => shareModal.classList.add('hidden')));
+  shareModal.addEventListener('click', (e) => { if (e.target === shareModal) shareModal.classList.add('hidden'); });
+}
+
+// Re-check the session when the tab comes back into focus.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') verifySessionValidity();
+  if (document.visibilityState === 'visible' && state.currentUser) verifySessionValidity();
 });
-window.addEventListener('focus', () => { verifySessionValidity(); });
-window.addEventListener('online', () => { verifySessionValidity(true); });
+window.addEventListener('focus', () => {
+  if (state.currentUser) verifySessionValidity();
+});
+window.addEventListener('online', () => {
+  if (state.currentUser) verifySessionValidity(true);
+});
+
+// Periodic session drift check.
 setInterval(() => {
-  if (document.visibilityState === 'visible') verifySessionValidity();
+  if (state.currentUser && document.visibilityState === 'visible') verifySessionValidity();
 }, 60000);
 
+// ============================================================
+// INIT
+// ============================================================
 (async function init() {
-  try {
-    await initSupabase();
-    updateSendButton();
-    resizeComposer();
-  } catch (e) { log(`Init error: ${e.message}`, 'error'); }
+  updateSendButton();
+  resizeComposer();
+  renderChatList();
+  renderMessages();
+  await initSupabase();
+  if (!IS_SHARE_VIEW) setTimeout(() => { try { messageInput.focus(); } catch (e) {} }, 300);
 })();
