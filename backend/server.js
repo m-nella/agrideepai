@@ -25,7 +25,19 @@ const log = (msg, type = 'info') => console.log(`[${new Date().toISOString()}] [
 const app = express();
 const PORT = process.env.PORT || 5000;
 app.set('trust proxy', 1);
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
+
+// ------------------------------------------------------------------
+// CORS
+// Browsers reject "Access-Control-Allow-Origin: *" together with
+// "credentials: true". Reflect the configured origin instead.
+// ------------------------------------------------------------------
+const ALLOWED_ORIGIN = (process.env.FRONTEND_URL || '').replace(/\/$/, '');
+app.use(cors({
+  origin: ALLOWED_ORIGIN
+    ? (origin, cb) => cb(null, !origin || origin === ALLOWED_ORIGIN)
+    : true,
+  credentials: true,
+}));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
@@ -37,6 +49,40 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 });
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'uploads';
+
+// ------------------------------------------------------------------
+// ANON PROBE CLIENT  (password verification only)
+// The service-role client above must NEVER be used to check a password:
+// signInWithPassword() attaches that user's session to the shared client,
+// so every later admin call would silently run under RLS instead of the
+// service role. Each password check therefore gets a throwaway client.
+// ------------------------------------------------------------------
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+function createProbeClient() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error('SUPABASE_URL / SUPABASE_ANON_KEY missing: cannot verify passwords');
+  }
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
+
+async function checkPassword(email, password) {
+  const probe = createProbeClient();
+  const { error } = await probe.auth.signInWithPassword({ email, password });
+  if (!error) { try { await probe.auth.signOut({ scope: 'local' }); } catch (_) {} }
+  return error ? { valid: false, message: error.message } : { valid: true };
+}
+
+async function signInForSession(email, password) {
+  const probe = createProbeClient();
+  const { data, error } = await probe.auth.signInWithPassword({ email, password });
+  if (error) return { error };
+  if (!data?.session) return { error: new Error('Supabase returned no session') };
+  return { data };
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'agrideepai-set-JWT_SECRET-in-env';
 const signPending = (payload, ttl = 900) => jwt.sign(payload, JWT_SECRET, { expiresIn: ttl });
@@ -711,42 +757,59 @@ const upload = multer({
 });
 
 // ==================================================================
-// AUTHENTICATION MIDDLEWARE (UPDATED WITH SESSION TIMEOUT)
+// AUTHENTICATION MIDDLEWARE (WITH SESSION TIMEOUT)
 // ==================================================================
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized', code: 'INVALID_TOKEN' });
+  }
   const token = authHeader.split(' ')[1];
-  
+
   const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) return res.status(401).json({ error: 'Invalid or expired token' });
-  
-  // Check Custom Session Timeout
+  if (error || !user) {
+    return res.status(401).json({ error: 'Invalid or expired token', code: 'INVALID_TOKEN' });
+  }
+
+  // Check Custom Session Timeout.
+  // NOTE: a missing audit row must never lock someone out of their own account.
   try {
     const clientId = getClientId(req);
     const ip = getRequestIp(req);
     const ua = getRequestUa(req);
-    
-    // Find session record
+
     let query = supabase.from('sessions').select('*').eq('user_id', user.id);
     if (clientId) {
-       query = query.eq('client_id', clientId);
+      query = query.eq('client_id', clientId);
     } else {
-       query = query.eq('ip', ip).eq('user_agent', ua);
+      query = query.eq('ip', ip).eq('user_agent', ua);
     }
-    
-    const { data: sessions } = await query.limit(1);
+
+    const { data: sessions, error: sessionErr } = await query.limit(1);
+    if (sessionErr) log(`[AUTH] session lookup failed: ${sessionErr.message}`, 'warn');
+
     if (sessions && sessions.length > 0) {
       const lastActive = new Date(sessions[0].last_active).getTime();
-      if (Date.now() - lastActive > SESSION_MAX_AGE_MS) {
-        // Session expired due to inactivity
+      if (Number.isFinite(lastActive) && Date.now() - lastActive > SESSION_MAX_AGE_MS) {
         await supabase.from('sessions').delete().eq('id', sessions[0].id);
-        return res.status(401).json({ error: 'Session expired due to inactivity. Please log in again.' });
+        return res.status(401).json({
+          error: 'Session expired due to inactivity. Please log in again.',
+          code: 'SESSION_EXPIRED',
+        });
       }
-      // Touch session to update last_active
-      await supabase.from('sessions').update({ last_active: new Date().toISOString() }).eq('id', sessions[0].id);
-    } else {
-       return res.status(401).json({ error: 'Session record missing. Please log in again.' });
+      await supabase.from('sessions')
+        .update({ last_active: new Date().toISOString() })
+        .eq('id', sessions[0].id);
+    } else if (!sessionErr) {
+      // No audit row yet (legacy account, or tracking failed earlier).
+      // Create it instead of rejecting the request.
+      const { error: insErr } = await supabase.from('sessions').insert({
+        user_id: user.id,
+        device: ua.substring(0, 120),
+        ip, user_agent: ua,
+        client_id: clientId || null,
+      });
+      if (insErr) log(`[AUTH] session bootstrap failed: ${insErr.message}`, 'warn');
     }
   } catch (e) {
     log(`Auth timeout check error: ${e.message}`, 'warn');
@@ -1121,8 +1184,57 @@ async function sendLoginNotification(email, ip, device, time) {
   } catch (err) { log(`Login notification error: ${err.message}`, 'error'); }
 }
 
-async function trackSession(userId, email, req) {
+// ==================================================================
+// GOOGLE SIGN-IN + SESSION REVOCATION HELPERS
+// ==================================================================
+const GOOGLE_OAUTH_ENABLED = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+
+// A Google-created account has no 'email' provider identity, so it has no
+// password to confirm. Used to let those users set an initial password.
+async function userHasPasswordIdentity(user) {
   try {
+    if (Array.isArray(user?.identities) && user.identities.length > 0) {
+      return user.identities.some(i => (i.provider || i.provider_id) === 'email');
+    }
+    return true; // unknown shape: assume a password exists, the safe default
+  } catch (e) {
+    return true;
+  }
+}
+
+// Ends every session except the one making this request, and prunes the
+// matching audit rows. Requires the caller's JWT.
+async function revokeOtherSessions(req) {
+  try {
+    const ua = getRequestUa(req);
+    const ip = getRequestIp(req);
+    const clientId = getClientId(req);
+
+    const { data: rows, error: readErr } = await supabase
+      .from('sessions').select('*').eq('user_id', req.user.id);
+    if (readErr) log(`[REVOKE] session read failed: ${readErr.message}`, 'warn');
+
+    const list = rows || [];
+    const mine = clientId
+      ? list.filter(s => s.client_id === clientId)
+      : list.filter(s => s.ip === ip && s.user_agent === ua);
+    const keepId = mine[0]?.id;
+    const idsToDelete = list.filter(s => s.id !== keepId).map(s => s.id);
+    if (idsToDelete.length > 0) {
+      await supabase.from('sessions').delete().in('id', idsToDelete);
+    }
+
+    // Revokes the refresh tokens of every other session in Supabase Auth.
+    const { error } = await supabase.auth.admin.signOut(req.token, 'others');
+    if (error) log(`[REVOKE] admin signOut(others) failed: ${error.message}`, 'warn');
+    return { revoked: idsToDelete.length };
+  } catch (e) {
+    log(`[REVOKE] ${e.message}`, 'error');
+    return { revoked: 0, error: e.message };
+  }
+}
+
+async function trackSession(userId, email, req) {  try {
     const ua = getRequestUa(req);
     const ip = getRequestIp(req);
     const clientId = getClientId(req);
@@ -1157,7 +1269,7 @@ async function trackSession(userId, email, req) {
 }
 
 // ==================================================================
-// AUTH ROUTES (CORRECTED FOR STRICT SEPARATION OF SIGNUP AND LOGIN)
+// AUTH ROUTES
 // ==================================================================
 app.post('/api/auth/signup', async (req, res) => {
   try {
@@ -1185,7 +1297,7 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
     if (!p || p.type !== 'signup') return res.status(400).json({ error: 'Pending session expired. Please sign up again.' });
     if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
     const { email, password, fullName } = p;
-    
+
     // USING ADMIN API TO BYPASS SUPABASE EMAILS COMPLETELY
     const { data, error } = await supabase.auth.admin.createUser({
       email: email,
@@ -1193,22 +1305,22 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
       email_confirm: true, // Pre-confirmed!
       user_metadata: { full_name: fullName }
     });
-    
+
     if (error) throw error;
     if (!data.user) throw new Error('User creation failed');
-    
+
     // Create profile record
     await supabase.from('profiles').insert({ id: data.user.id, full_name: fullName });
-    
+
     // DO NOT LOG IN. Just return success and tell frontend to redirect to login.
     log(`[CONFIRM-SIGNUP] Account created for ${email}, but user not logged in yet.`, 'info');
-    res.status(201).json({ 
-      message: 'Account created successfully. Please sign in.', 
-      requiresLogin: true 
+    res.status(201).json({
+      message: 'Account created successfully. Please sign in.',
+      requiresLogin: true
     });
-  } catch (err) { 
+  } catch (err) {
     log(`[CONFIRM-SIGNUP] Error: ${err.message}`, 'error');
-    res.status(400).json({ error: err.message }); 
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -1234,14 +1346,15 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-    
-    // We still use signInWithPassword to verify the password, but we do NOT send a session to frontend yet.
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+    // Password verified on a throwaway anon client, never on the shared
+    // service-role client (see createProbeClient above).
+    const { data, error } = await signInForSession(email, password);
     if (error) throw error;
-    
+
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', data.user.id).single();
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    
+
     // Store session tokens in JWT so we don't have to query DB again during verify
     const pendingToken = signPending({
       type: 'login', email, code,
@@ -1253,7 +1366,7 @@ app.post('/api/auth/login', async (req, res) => {
       userLastSignInAt: data.user.last_sign_in_at || null,
       two_factor_enabled: !!profile?.two_factor_enabled,
     });
-    
+
     await sendVerificationEmailWithRetry(email, code, 'login', 'Use the code below to complete your sign-in.');
     res.json({ requiresCode: true, email, pendingToken, message: 'Verification code sent to your email.' });
   } catch (err) {
@@ -1285,9 +1398,9 @@ app.post('/api/auth/verify-login', async (req, res) => {
     const p = verifyPending(pendingToken);
     if (!p || p.type !== 'login') return res.status(400).json({ error: 'Pending session expired. Please sign in again.' });
     if (p.code !== code) return res.status(400).json({ error: 'Invalid or expired code.' });
-    
+
     const user = { id: p.userId, email: p.userEmail || p.email, created_at: p.userCreatedAt, last_sign_in_at: p.userLastSignInAt };
-    
+
     if (p.two_factor_enabled) {
       const twoFactorToken = signPending({
         type: '2fa', email: p.email,
@@ -1295,7 +1408,7 @@ app.post('/api/auth/verify-login', async (req, res) => {
       });
       return res.json({ requires2fa: true, twoFactorToken, message: 'Email verified. Now enter your 2FA code.' });
     }
-    
+
     await trackSession(user.id, user.email, req);
     res.json({ user, session: { access_token: p.access_token, refresh_token: p.refresh_token }, message: 'Login successful' });
   } catch (err) { res.status(500).json({ error: 'Verification failed.' }); }
@@ -1315,6 +1428,9 @@ app.post('/api/auth/2fa/validate-login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to validate 2FA' }); }
 });
 
+// ==================================================================
+// PASSWORD RESET (forgot password)
+// ==================================================================
 app.post('/api/auth/forgot-password-request', async (req, res) => {
   try {
     const { email } = req.body;
@@ -1370,10 +1486,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
       return res.status(400).json({ error: 'Please verify your code first.' });
     if (!newPassword || newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword))
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
-    try {
-      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: g.email, password: newPassword });
-      if (!signInErr) return res.status(400).json({ error: 'New password must be different from your current password' });
-    } catch (checkErr) { log(`[FORGOT-PW-RESET] check error: ${checkErr.message}`, 'warn'); }
+
+    // Checked on a throwaway anon client: signInWithPassword on the shared
+    // service-role client would poison every later admin call.
+    const same = await checkPassword(g.email, newPassword);
+    if (same.valid) return res.status(400).json({ error: 'New password must be different from your current password' });
+
     const { error } = await supabase.auth.admin.updateUserById(g.userId, { password: newPassword });
     if (error) throw error;
     res.json({ message: 'Password reset successfully. You can now sign in.' });
@@ -1383,6 +1501,9 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 });
 
+// ==================================================================
+// AUTHENTICATED ACCOUNT ACTIONS
+// ==================================================================
 app.post('/api/auth/send-verification-code', authenticate, async (req, res) => {
   try {
     const { action, newEmail } = req.body;
@@ -1442,10 +1563,16 @@ app.post('/api/auth/verify-current-password', authenticate, async (req, res) => 
   try {
     const { password } = req.body;
     if (!password) return res.status(400).json({ error: 'Password required' });
-    const { error } = await supabase.auth.signInWithPassword({ email: req.user.email, password });
-    if (error) return res.status(401).json({ error: 'Current password is incorrect' });
+    const result = await checkPassword(req.user.email, password);
+    // 400, never 401: a wrong password is a failed attempt, not a dead session.
+    if (!result.valid) {
+      return res.status(400).json({ error: 'Current password is incorrect', code: 'WRONG_PASSWORD' });
+    }
     res.json({ valid: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    log(`[VERIFY-PW] ${err.message}`, 'error');
+    res.status(500).json({ error: 'Could not verify password. Please try again.' });
+  }
 });
 
 app.post('/api/auth/change-password', authenticate, async (req, res) => {
@@ -1453,15 +1580,39 @@ app.post('/api/auth/change-password', authenticate, async (req, res) => {
     const { currentPassword, newPassword, grantedToken } = req.body;
     const g = verifyPending(grantedToken);
     if (!g || g.type !== 'granted' || g.action !== 'change-password' || g.userId !== req.user.id)
-      return res.status(400).json({ error: 'Please verify your code first.' });
-    const { error: si } = await supabase.auth.signInWithPassword({ email: req.user.email, password: currentPassword });
-    if (si) return res.status(401).json({ error: 'Current password incorrect' });
+      return res.status(400).json({ error: 'Please verify your code first.', code: 'VERIFY_FIRST' });
+
+    if (!currentPassword || !newPassword)
+      return res.status(400).json({ error: 'Current and new password are required' });
     if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword))
       return res.status(400).json({ error: 'Password must be at least 8 characters with letters and numbers' });
-    if (newPassword === currentPassword) return res.status(400).json({ error: 'New password must be different from current password' });
-    await supabase.auth.updateUser({ password: newPassword });
-    res.json({ message: 'Password changed successfully' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    if (newPassword === currentPassword)
+      return res.status(400).json({ error: 'New password must be different from current password' });
+
+    // Accounts created through Google have no password identity yet, so there
+    // is nothing to confirm. For those, this call sets the first password.
+    const hasPassword = await userHasPasswordIdentity(req.user);
+    if (hasPassword) {
+      const check = await checkPassword(req.user.email, currentPassword);
+      if (!check.valid)
+        return res.status(400).json({ error: 'Current password is incorrect', code: 'WRONG_PASSWORD' });
+    }
+
+    // Service role has no signed-in user, so updateUser() is a no-op here.
+    // admin.updateUserById() is the call that actually changes the password.
+    const { error } = await supabase.auth.admin.updateUserById(req.user.id, { password: newPassword });
+    if (error) throw error;
+
+    // Changing a password must evict every other device. Their refresh tokens
+    // are revoked by Supabase; this device stays signed in.
+    await revokeOtherSessions(req);
+
+    log(`[CHANGE-PW] password updated for ${req.user.id}, other sessions revoked`, 'info');
+    res.json({ message: 'Password changed successfully. Other devices have been signed out.' });
+  } catch (err) {
+    log(`[CHANGE-PW] ${err.message}`, 'error');
+    res.status(500).json({ error: err.message || 'Failed to change password' });
+  }
 });
 
 app.post('/api/auth/change-email', authenticate, async (req, res) => {
@@ -1484,18 +1635,58 @@ app.post('/api/auth/change-email', authenticate, async (req, res) => {
   }
 });
 
-app.delete('/api/auth/delete-account', authenticate, async (req, res) => {
+// ==================================================================
+// DELETE ACCOUNT
+// Exposed as both DELETE and POST: proxies (nginx, Cloudflare) routinely
+// strip request bodies from DELETE, which is why the button did nothing.
+// ==================================================================
+async function handleDeleteAccount(req, res) {
   try {
-    const { grantedToken } = req.body;
+    const grantedToken = req.body?.grantedToken || req.query.grantedToken;
     const g = verifyPending(grantedToken);
     if (!g || g.type !== 'granted' || g.action !== 'delete-account' || g.userId !== req.user.id)
-      return res.status(400).json({ error: 'Please verify your code first.' });
-    await supabase.from('sessions').delete().eq('user_id', req.user.id);
-    await supabase.auth.admin.deleteUser(req.user.id);
-    res.json({ message: 'Account deleted successfully' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+      return res.status(400).json({ error: 'Please verify your code first.', code: 'VERIFY_FIRST' });
 
+    const userId = req.user.id;
+
+    // Dependent rows first — otherwise foreign keys block the user delete.
+    const { data: convs } = await supabase.from('conversations').select('id').eq('user_id', userId);
+    const convIds = (convs || []).map(c => c.id);
+    if (convIds.length) {
+      await supabase.from('shared_links').delete().in('conversation_id', convIds);
+      await supabase.from('messages').delete().in('conversation_id', convIds);
+    }
+    await supabase.from('conversations').delete().eq('user_id', userId);
+    await supabase.from('files').delete().eq('user_id', userId);
+    await supabase.from('sessions').delete().eq('user_id', userId);
+    await supabase.from('profiles').delete().eq('id', userId);
+
+    // Storage cleanup is best-effort; never block the account delete on it.
+    try {
+      const { data: objects } = await supabase.storage.from(storageBucket).list(userId, { limit: 1000 });
+      if (objects && objects.length) {
+        await supabase.storage.from(storageBucket).remove(objects.map(o => `${userId}/${o.name}`));
+      }
+    } catch (e) {
+      log(`[DELETE-ACCOUNT] storage cleanup skipped: ${e.message}`, 'warn');
+    }
+
+    const { error } = await supabase.auth.admin.deleteUser(userId);
+    if (error) throw error;
+
+    log(`[DELETE-ACCOUNT] removed ${userId}`, 'info');
+    res.json({ message: 'Account deleted successfully' });
+  } catch (err) {
+    log(`[DELETE-ACCOUNT] ${err.message}`, 'error');
+    res.status(500).json({ error: err.message || 'Failed to delete account' });
+  }
+}
+app.delete('/api/auth/delete-account', authenticate, handleDeleteAccount);
+app.post('/api/auth/delete-account', authenticate, handleDeleteAccount);
+
+// ==================================================================
+// 2FA
+// ==================================================================
 app.post('/api/auth/2fa/enable', authenticate, async (req, res) => {
   try {
     const { data: profile } = await supabase.from('profiles').select('two_factor_enabled').eq('id', req.user.id).single();
@@ -1519,13 +1710,29 @@ app.post('/api/auth/2fa/verify', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to verify 2FA' }); }
 });
 
+// Disabling 2FA now requires the account password. Previously any device
+// with an open tab could turn it off with a single unauthenticated POST.
 app.post('/api/auth/2fa/disable', authenticate, async (req, res) => {
   try {
-    await supabase.from('profiles').update({ two_factor_enabled: false, two_factor_secret: null }).eq('id', req.user.id);
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password required to disable 2FA' });
+    const check = await checkPassword(req.user.email, password);
+    if (!check.valid)
+      return res.status(400).json({ error: 'Password is incorrect', code: 'WRONG_PASSWORD' });
+
+    const { error } = await supabase.from('profiles')
+      .update({ two_factor_enabled: false, two_factor_secret: null }).eq('id', req.user.id);
+    if (error) throw error;
     res.json({ message: '2FA disabled successfully' });
-  } catch (err) { res.status(500).json({ error: 'Failed to disable 2FA' }); }
+  } catch (err) {
+    log(`[2FA-DISABLE] ${err.message}`, 'error');
+    res.status(500).json({ error: 'Failed to disable 2FA' });
+  }
 });
 
+// ==================================================================
+// SESSIONS
+// ==================================================================
 app.get('/api/auth/sessions', authenticate, async (req, res) => {
   try {
     const ua = getRequestUa(req);
@@ -1598,13 +1805,105 @@ app.delete('/api/auth/sessions/:id', authenticate, async (req, res) => {
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', req.user.id).single();
-    res.json({ user: req.user, profile });
+    const hasPassword = await userHasPasswordIdentity(req.user);
+    res.json({ user: req.user, profile, hasPassword });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ==================================================================
+// GOOGLE SIGN-IN
+// The browser runs the OAuth consent flow with Supabase's PKCE helper, which
+// posts the code back here. Exchanging it server-side keeps the user's
+// password out of the browser flow and lets 2FA be enforced before a session
+// is handed over.
+// ==================================================================
+app.post('/api/auth/google/exchange', async (req, res) => {
+  try {
+    if (!GOOGLE_OAUTH_ENABLED) {
+      return res.status(400).json({ error: 'Google sign-in is not configured on this server.' });
+    }
+    const { code, codeVerifier, twoFactorToken, twoFactorCode } = req.body || {};
+    if (!code || !codeVerifier) {
+      return res.status(400).json({ error: 'Google sign-in could not be completed. Please try again.' });
+    }
+
+    // Step 2 (only when the account has 2FA on): check the TOTP code that the
+    // client sent after the first round trip.
+    if (twoFactorToken) {
+      const p = verifyPending(twoFactorToken);
+      if (!p || p.type !== 'google-2fa') {
+        return res.status(400).json({ error: 'Your sign-in expired. Please try again.' });
+      }
+      const { data: profile } = await supabase
+        .from('profiles').select('two_factor_secret').eq('id', p.userId).single();
+      if (!profile?.two_factor_secret) return res.status(400).json({ error: '2FA not set up' });
+      const ok = speakeasy.totp.verify({
+        secret: profile.two_factor_secret, encoding: 'base32',
+        token: String(twoFactorCode || ''), window: 1,
+      });
+      if (!ok) return res.status(400).json({ error: 'Invalid 2FA code', code: 'WRONG_2FA' });
+      await trackSession(p.userId, p.email, req);
+      log(`[GOOGLE] 2FA passed for ${p.email}`, 'info');
+      return res.json({
+        user: p.user,
+        session: { access_token: p.access_token, refresh_token: p.refresh_token },
+        message: 'Login successful',
+      });
+    }
+
+    const probe = createProbeClient();
+    const { data, error } = await probe.auth.exchangeCodeForSession({ code, codeVerifier });
+    if (error) throw error;
+    if (!data?.session || !data?.user) throw new Error('Google returned no session');
+
+    const user = data.user;
+
+    // Make sure a profile row exists for OAuth-created accounts, otherwise the
+    // account pages would have nothing to read.
+    const { data: existingProfile } = await supabase
+      .from('profiles').select('id, two_factor_enabled').eq('id', user.id).maybeSingle();
+    if (!existingProfile) {
+      const fullName = user.user_metadata?.full_name || user.user_metadata?.name || '';
+      const { error: pErr } = await supabase.from('profiles').insert({ id: user.id, full_name: fullName });
+      if (pErr) log(`[GOOGLE] profile insert failed: ${pErr.message}`, 'warn');
+    }
+
+    if (existingProfile?.two_factor_enabled) {
+      // Do not hand over the session until the second factor is checked.
+      const token = signPending({
+        type: 'google-2fa',
+        userId: user.id,
+        email: user.email,
+        user: { id: user.id, email: user.email, created_at: user.created_at, last_sign_in_at: user.last_sign_in_at },
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      }, 600);
+      return res.json({ requires2fa: true, twoFactorToken: token, message: 'Enter your 2FA code.' });
+    }
+
+    await trackSession(user.id, user.email, req);
+    log(`[GOOGLE] sign-in succeeded for ${user.email}`, 'info');
+    return res.json({
+      user: {
+        id: user.id, email: user.email,
+        created_at: user.created_at, last_sign_in_at: user.last_sign_in_at,
+        user_metadata: user.user_metadata,
+      },
+      session: { access_token: data.session.access_token, refresh_token: data.session.refresh_token },
+      message: 'Login successful',
+    });
+  } catch (err) {
+    log(`[GOOGLE] exchange failed: ${err.message}`, 'error');
+    return res.status(400).json({
+      error: 'Google sign-in failed. Please try again, or use your email and password.',
+    });
+  }
 });
 
 app.get('/api/config', (req, res) => res.json({
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+  googleEnabled: GOOGLE_OAUTH_ENABLED,
 }));
 
 // ==================================================================
@@ -1719,7 +2018,7 @@ app.post('/api/chat/generate-image', async (req, res) => {
 });
 
 // ==================================================================
-// CHAT
+// CHAT HELPERS
 // ==================================================================
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT, excludeId = null) {
   const history = messages
@@ -1761,6 +2060,9 @@ app.post('/api/chat/title', async (req, res) => {
   }
 });
 
+// ==================================================================
+// GUEST CHAT
+// ==================================================================
 app.post('/api/chat/guest', async (req, res) => {
   try {
     const { messages, image } = req.body;
@@ -1811,6 +2113,9 @@ app.post('/api/chat/guest', async (req, res) => {
   }
 });
 
+// ==================================================================
+// CONVERSATIONS
+// ==================================================================
 app.get('/api/chat/conversations', authenticate, async (req, res) => {
   try {
     const { data, error } = await supabase.from('conversations').select('*').eq('user_id', req.user.id).order('updated_at', { ascending: false });
@@ -1852,6 +2157,9 @@ app.get('/api/chat/conversations/:id/messages', authenticate, async (req, res) =
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ==================================================================
+// SEND MESSAGE (authenticated)
+// ==================================================================
 app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('file', 5), async (req, res) => {
   try {
     const conversationId = req.params.id;
@@ -1979,6 +2287,9 @@ app.post('/api/chat/conversations/:id/messages', authenticate, upload.array('fil
   }
 });
 
+// ==================================================================
+// REGENERATE / EDIT / SYNC
+// ==================================================================
 app.post('/api/chat/conversations/:id/regenerate', authenticate, async (req, res) => {
   try {
     const conversationId = req.params.id;
@@ -2074,6 +2385,9 @@ app.post('/api/chat/messages/:id/sync-versions', authenticate, async (req, res) 
   }
 });
 
+// ==================================================================
+// SHARING
+// ==================================================================
 app.post('/api/chat/share/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
