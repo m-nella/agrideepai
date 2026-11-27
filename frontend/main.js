@@ -365,11 +365,23 @@ async function verifySessionValidity(force = false) {
       cache: 'no-store',
     });
     let res = await doFetch(session.access_token);
+    
     if (res.status === 401) {
       const { data } = await state.supabase.auth.refreshSession();
-      if (data.session?.access_token) res = await doFetch(data.session.access_token);
-      else { await forceSignOut('Session expired'); return false; }
+      if (data.session?.access_token) {
+        res = await doFetch(data.session.access_token);
+      } else { 
+        await forceSignOut('Session expired'); 
+        return false; 
+      }
     }
+    
+    // NEW: If the retry also failed with 401, it means the DB session was revoked or timed out due to inactivity.
+    if (res.status === 401) {
+      await forceSignOut('Session expired due to inactivity or remote logout');
+      return false;
+    }
+    
     if (!res.ok) return true;
     const data = await res.json().catch(() => ({ valid: true }));
     if (data && data.valid === false) {
@@ -418,15 +430,20 @@ function updateAuthUI() {
 async function apiFetch(endpoint, options = {}) {
   if (!state.supabase) throw new Error('Not initialized');
   let session = (await state.supabase.auth.getSession()).data.session;
-  if (!session) { try { const { data } = await state.supabase.auth.refreshSession(); session = data.session; } catch (e) {} }
+  if (!session) { 
+    try { const { data } = await state.supabase.auth.refreshSession(); session = data.session; } catch (e) {} 
+  }
   if (!session?.access_token) throw new Error('Not authenticated');
+  
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${session.access_token}`,
     'X-Client-Id': CLIENT_ID,
     ...options.headers,
   };
+  
   let res = await fetch(endpoint, { ...options, headers });
+  
   if (res.status === 401) {
     const { data } = await state.supabase.auth.refreshSession();
     if (data.session?.access_token) {
@@ -434,7 +451,17 @@ async function apiFetch(endpoint, options = {}) {
       res = await fetch(endpoint, { ...options, headers: retryHeaders });
     }
   }
-  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `Request failed (${res.status})`); }
+  
+  // NEW: If the retry also fails with 401, it means the session is dead. Force logout.
+  if (res.status === 401) {
+    await forceSignOut('Session expired. Please log in again.');
+    throw new Error('Session expired');
+  }
+
+  if (!res.ok) { 
+    const err = await res.json().catch(() => ({})); 
+    throw new Error(err.error || `Request failed (${res.status})`); 
+  }
   return res;
 }
 
@@ -641,8 +668,6 @@ function renderMessages() {
         ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
       };
 
-      // Persist BOTH the text and the cursor position so any re-render or
-      // tab switch can restore the exact editing state.
       const rememberState = () => {
         state.editingValue = ta.value;
         state.editingSelection = { start: ta.selectionStart, end: ta.selectionEnd };
@@ -654,8 +679,6 @@ function renderMessages() {
       ta.addEventListener('select', rememberState);
       ta.addEventListener('blur', rememberState);
 
-      // Restore cursor on regaining focus — but skip if focus came from an
-      // actual click (in that case the click's own position should win).
       let skipNextFocusRestore = false;
       ta.addEventListener('mousedown', () => {
         skipNextFocusRestore = true;
@@ -738,8 +761,6 @@ function renderMessages() {
       setTimeout(() => {
         ta.focus();
         autoGrow();
-        // Restore saved cursor if we're re-rendering an in-progress edit;
-        // otherwise (fresh edit) put the cursor at the end.
         if (state.editingSelection && typeof state.editingSelection.start === 'number') {
           try {
             ta.setSelectionRange(state.editingSelection.start, state.editingSelection.end);
@@ -1135,9 +1156,6 @@ async function consumeStream(response, chat, versionData = null, opts = {}) {
   }
 }
 
-// ============================================================
-// SHARE — snapshot with version history included
-// ============================================================
 async function shareConversation(messagesToShare = null, chatId = null) {
   const targetChatId = chatId || state.activeChatId;
   const chat = state.chats.find(c => c.id === targetChatId);
@@ -1625,6 +1643,7 @@ function renderAuthForm(mode) {
         statDiv.textContent = 'Verification code sent.';
         const resendBtn = document.getElementById('resendVerifyBtn');
         wireResend(resendBtn, '/api/auth/resend-verification', () => state.pendingAuth, t => state.pendingAuth = t);
+        
         document.getElementById('verifyBtn').onclick = async () => {
           const code = document.getElementById('verifyCode').value.trim();
           if (!code) { errDiv.textContent = 'Enter the code'; errDiv.style.display = 'block'; return; }
@@ -1636,11 +1655,22 @@ function renderAuthForm(mode) {
               body: JSON.stringify({ pendingToken: state.pendingAuth, code }),
             });
             const cd = await cr.json(); if (!cr.ok) throw new Error(cd.error);
-            await state.supabase.auth.setSession({ access_token: cd.session.access_token, refresh_token: cd.session.refresh_token });
-            state.currentUser = cd.user; state.pendingAuth = null;
-            state.lastSessionCheck = Date.now();
-            updateAuthUI(); closeAuthModal(); showToast('Account created!');
-            await loadCloudConversations();
+            
+            // --- NEW LOGIC: Account created successfully, but not logged in ---
+            state.pendingAuth = null;
+            showToast('Account created successfully! Please sign in.');
+            
+            // Switch back to the login form
+            renderAuthForm('login');
+            
+            // Auto-fill the email for convenience
+            const emailField = document.getElementById('authEmail');
+            if (emailField) emailField.value = email;
+            
+            const pwField = document.getElementById('authPassword');
+            if (pwField) pwField.focus();
+            // -------------------------------------------------------------------
+
           } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
         };
       } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; statDiv.style.display = 'none'; }
