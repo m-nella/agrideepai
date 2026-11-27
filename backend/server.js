@@ -95,7 +95,7 @@ async function isEmailTakenByOther(email, currentUserId) {
 }
 
 // ==================================================================
-// AI PROVIDERS (Unchanged)
+// AI PROVIDERS
 // ==================================================================
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
@@ -123,7 +123,7 @@ const markCooldown = (m, s = 120) => { openRouterCooldown[m] = Date.now() + s * 
 const isCoolingDown = (m) => openRouterCooldown[m] && Date.now() < openRouterCooldown[m];
 
 // ==================================================================
-// IMAGE GENERATION PROVIDERS (Unchanged)
+// IMAGE GENERATION PROVIDERS
 // ==================================================================
 const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY;
 const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -135,7 +135,7 @@ const IMAGE_GEN_PROVIDERS = [
 ];
 
 // ==================================================================
-// IMAGE REQUEST DETECTION + TOPIC GUARD (Unchanged)
+// IMAGE REQUEST DETECTION + TOPIC GUARD
 // ==================================================================
 function isImageRequest(message) {
   const t = (message || '').toLowerCase().trim();
@@ -261,7 +261,7 @@ async function ocrImage(buffer, filename, mimeType) {
 }
 
 // ==================================================================
-// DIAGNOSTIC ENDPOINTS (Unchanged)
+// DIAGNOSTIC ENDPOINTS
 // ==================================================================
 app.get('/api/debug/groq-models', async (req, res) => {
   if (!groq) return res.json({ error: 'GROQ_API_KEY not set' });
@@ -390,7 +390,7 @@ app.get('/api/debug/detection', (req, res) => {
 });
 
 // ==================================================================
-// AI STREAMING (Unchanged)
+// AI STREAMING
 // ==================================================================
 async function getAIStream(chatMessages, imageData = null, isVisionRetry = false) {
   const errors = [];
@@ -630,7 +630,7 @@ async function tavilySearch(query) {
 const LOGO_URL = (process.env.FRONTEND_URL || '') + '/logo.png';
 
 // ==================================================================
-// SYSTEM PROMPT (Unchanged)
+// SYSTEM PROMPT
 // ==================================================================
 const SYSTEM_PROMPT = `You are **AgriDeepAI**, an expert AI assistant specialised in agriculture, livestock, and directly related sciences.
 
@@ -765,7 +765,7 @@ const getRequestIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.tri
 const getRequestUa = (req) => req.headers['user-agent'] || 'Unknown';
 
 // ==================================================================
-// GREETING DETECTION (Unchanged)
+// GREETING DETECTION
 // ==================================================================
 function isGreetingOnly(text) {
   const t = (text || '')
@@ -838,7 +838,7 @@ function buildGreetingReply(userText) {
 }
 
 // ==================================================================
-// CREATOR DETECTION + REPLY (Unchanged)
+// CREATOR DETECTION + REPLY
 // ==================================================================
 function isCreatorQuestion(text) {
   const t = (text || '').toLowerCase().trim();
@@ -1038,7 +1038,7 @@ Title:`;
 }
 
 // ==================================================================
-// EMAIL (Unchanged)
+// EMAIL
 // ==================================================================
 async function sendEmail(to, subject, htmlContent) {
   const sendSmtpEmail = new brevo.SendSmtpEmail();
@@ -1157,7 +1157,7 @@ async function trackSession(userId, email, req) {
 }
 
 // ==================================================================
-// AUTH ROUTES (FIXED TO BYPASS SUPABASE EMAILS)
+// AUTH ROUTES (CORRECTED FOR STRICT SEPARATION OF SIGNUP AND LOGIN)
 // ==================================================================
 app.post('/api/auth/signup', async (req, res) => {
   try {
@@ -1200,12 +1200,12 @@ app.post('/api/auth/confirm-signup', async (req, res) => {
     // Create profile record
     await supabase.from('profiles').insert({ id: data.user.id, full_name: fullName });
     
-    // Sign in the user programmatically to get session tokens
-    const { data: sd, error: se } = await supabase.auth.signInWithPassword({ email, password });
-    if (se) throw se;
-    
-    await trackSession(sd.user.id, sd.user.email, req);
-    res.status(201).json({ user: sd.user, session: sd.session });
+    // DO NOT LOG IN. Just return success and tell frontend to redirect to login.
+    log(`[CONFIRM-SIGNUP] Account created for ${email}, but user not logged in yet.`, 'info');
+    res.status(201).json({ 
+      message: 'Account created successfully. Please sign in.', 
+      requiresLogin: true 
+    });
   } catch (err) { 
     log(`[CONFIRM-SIGNUP] Error: ${err.message}`, 'error');
     res.status(400).json({ error: err.message }); 
@@ -1608,7 +1608,7 @@ app.get('/api/config', (req, res) => res.json({
 }));
 
 // ==================================================================
-// IMAGE GENERATION ENGINE (Unchanged)
+// IMAGE GENERATION ENGINE
 // ==================================================================
 async function uploadGeneratedImage(buffer, mimeType = 'image/jpeg') {
   const ext = mimeType.includes('png') ? 'png' : 'jpg';
@@ -1719,7 +1719,7 @@ app.post('/api/chat/generate-image', async (req, res) => {
 });
 
 // ==================================================================
-// CHAT (Unchanged)
+// CHAT
 // ==================================================================
 function buildChatMessages(messages, systemPrompt = SYSTEM_PROMPT, excludeId = null) {
   const history = messages
